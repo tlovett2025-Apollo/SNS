@@ -25,7 +25,13 @@ TEXTURE_OPTIONS = ["", "creamy", "fluffy", "tender", "hearty", "crisp", "soft", 
 PANTRY_STYLE_OPTIONS = ["", "Pantry Friendly", "Fresh", "Frozen", "Freeze Dried", "Refrigerated"]
 
 st.title("Stock & Stir")
-st.caption("v5 Beta 2D - Repair Build 2 (Component CRUD Stabilization)")
+st.caption("v5 Beta 2D - Repair Build 2 (Component CRUD Stabilization) · Python Babies v9")
+
+APP_BUILD = "python_babies_v9"
+if st.session_state.get("app_build") != APP_BUILD:
+    st.session_state.app_build = APP_BUILD
+    st.session_state.candidates = []
+    st.session_state.generated_recipe = None
 
 with st.sidebar:
     st.header("Setup")
@@ -99,6 +105,15 @@ def confirm_delete(table, id_col, id_value, label, key):
         except Exception as e:
             st.error(f"Could not delete. It may be used by another table. Details: {e}")
 
+def clean_step_number(step):
+    text = "" if step is None else str(step).strip()
+    while True:
+        parts = text.split(". ", 1)
+        if len(parts) == 2 and parts[0].isdigit():
+            text = parts[1].strip()
+        else:
+            return text
+
 with tabs[0]:
     st.header("Build Recipe")
     st.write("Choose what you have and today's constraints. SNS returns top recipe options first; you choose one to generate.")
@@ -106,11 +121,21 @@ with tabs[0]:
     vegetables = fetch_df("""SELECT v.vegetable_id, i.name FROM vegetables v JOIN ingredients i ON v.ingredient_id=i.ingredient_id WHERE i.active=1 ORDER BY i.name""")
     foundations = fetch_df("SELECT foundation_id, name FROM foundations ORDER BY name")
     cuisines = fetch_df("SELECT cuisine_id, name FROM cuisines ORDER BY name")
-    c1,c2,c3,c4 = st.columns(4)
-    protein_name = c1.selectbox("Protein", [""] + proteins["name"].tolist() if not proteins.empty else [""])
-    vegetable_name = c2.selectbox("Vegetable", [""] + vegetables["name"].tolist() if not vegetables.empty else [""])
-    foundation_name = c3.selectbox("Foundation", [""] + foundations["name"].tolist() if not foundations.empty else [""])
-    cuisine_name = c4.selectbox("Cuisine", [""] + cuisines["name"].tolist() if not cuisines.empty else ["", "American", "Italian", "Mexican"])
+    c1,c3,c4 = st.columns(3)
+    protein_name = c1.selectbox("Protein", [""] + proteins["name"].tolist() if not proteins.empty else [""], key="build_protein_v8")
+    foundation_name = c3.selectbox("Foundation", [""] + foundations["name"].tolist() if not foundations.empty else [""], key="build_foundation_v8")
+    cuisine_name = c4.selectbox("Cuisine", [""] + cuisines["name"].tolist() if not cuisines.empty else ["", "American", "Italian", "Mexican"], key="build_cuisine_v8")
+
+    vegetable_options = vegetables["name"].tolist() if not vegetables.empty else []
+    vegetable_names = st.multiselect(
+        "Vegetables",
+        vegetable_options,
+        default=[],
+        key="build_vegetables_multi_v8",
+        placeholder="Choose one or more vegetables, like Asparagus and Mushrooms",
+        help="You can select multiple vegetables. The red pills are selected items, not an error.",
+    )
+    vegetable_name = " & ".join(vegetable_names)
     c5,c6,c7,c8 = st.columns(4)
     energy_level = c5.selectbox("Energy", LEVEL_OPTIONS, index=2)
     budget_level = c6.selectbox("Budget", BUDGET_OPTIONS, index=2)
@@ -118,20 +143,28 @@ with tabs[0]:
     servings = c8.number_input("Servings", min_value=1, max_value=24, value=4, step=1)
     if "candidates" not in st.session_state: st.session_state.candidates = []
     if st.button("Find Recipe Options", type="primary"):
-        st.session_state.candidates = generate_candidates(protein_name, vegetable_name, foundation_name, cuisine_name, energy_level, budget_level, int(time_minutes), int(servings), 10)
+        st.session_state.generated_recipe = None
+        st.session_state.candidates = generate_candidates(protein_name, vegetable_name, foundation_name, cuisine_name, energy_level, budget_level, int(time_minutes), int(servings), 10, vegetable_names=vegetable_names)
     if st.session_state.candidates:
         st.subheader("Top Recipe Options")
-        option_labels = [f"{i+1}. {c['title']} — {c['energy']} energy · {c['budget']} · {c['minutes']} min · score {c['score']}" for i,c in enumerate(st.session_state.candidates)]
+        option_labels = [f"{i+1}. {c['title']} — {c['energy']} energy · {c['budget']} · {c['minutes']} min total · {c.get('active_minutes', 0)} active · {c.get('passive_minutes', 0)} passive · attention {c.get('attention_score', 0)}/10 · score {c['score']}" for i,c in enumerate(st.session_state.candidates)]
         chosen = st.radio("Choose one to generate", option_labels)
         candidate = st.session_state.candidates[option_labels.index(chosen)]
         st.caption(f"Why: {candidate['why']} | Sauce/seasoning direction: {candidate['sauce']}")
         if st.button("Generate Selected Recipe"):
             st.session_state.generated_recipe = build_recipe_from_candidate(candidate)
-    if "generated_recipe" in st.session_state:
+    if st.session_state.get("generated_recipe") is not None:
         result = st.session_state.generated_recipe
         st.divider(); st.subheader(result["name"]); st.caption(result["summary"])
+        if result.get("plan_summary"):
+            ps = result["plan_summary"]
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Total", f"{ps.get('total_minutes', 0)} min")
+            m2.metric("Active", f"{ps.get('active_minutes', 0)} min")
+            m3.metric("Passive", f"{ps.get('passive_minutes', 0)} min")
+            m4.metric("Down-day fit", ps.get("energy_fit", ""))
         st.markdown("### Recipe")
-        for i, step in enumerate(result["instructions"], 1): st.write(f"{i}. {step}")
+        for i, step in enumerate(result["instructions"], 1): st.markdown(f"**{i}.** {clean_step_number(step)}")
         st.markdown("### Grocery List / Component List")
         for item in result["grocery_list"]: st.write(f"- {item}")
 
