@@ -9,7 +9,7 @@ ask an ingredient what it knows about cooking itself.
 First living baby: Swiss chard.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 def _clean(value):
@@ -19,11 +19,25 @@ def _clean(value):
 def _key(value):
     return _clean(value).lower().replace("-", " ")
 
+@dataclass
+class IngredientForm:
+    name: str
+    prep_minutes: int = 0
+    cook_minutes: int = 0
+    active_minutes: int = 0
+    passive_minutes: int = 0
+    attention_score: int = 0
+    holdability: str = ""
+    timing_note: str = ""
+    handling_note: str = ""
+
 
 @dataclass
 class IngredientProfile:
     name: str
     role: str = "ingredient"
+    default_form: str = ""
+    forms: dict = field(default_factory=dict)
     prep_minutes: int = 5
     cook_minutes: int = 8
     active_minutes: int = 0
@@ -45,7 +59,13 @@ class IngredientProfile:
     @property
     def total_passive_minutes(self):
         return self.passive_minutes + self.rest_minutes
+        
+    def available_forms(self):
+        return list(self.forms.keys())
 
+    def get_form(self, form_name=""):
+        form_name = _clean(form_name) or self.default_form
+        return self.forms.get(form_name)
     def prep_instruction(self):
         if self.handling_note:
             return f"Prep {self.name}: {self.handling_note}"
@@ -107,6 +127,43 @@ CHICKEN_BREAST = IngredientProfile(
     handling_note="pat dry, season before cooking, and avoid overcooking.",
     timing_note="Chicken breast needs active attention while cooking and benefits from a short rest before slicing.",
     attention_score=6,
+
+    default_form="Fresh Raw",
+    forms={
+        "Fresh Raw": IngredientForm(
+            name="Fresh Raw",
+            prep_minutes=3,
+            cook_minutes=12,
+            active_minutes=10,
+            passive_minutes=5,
+            attention_score=6,
+            holdability="fair",
+            handling_note="pat dry, season before cooking, and avoid overcooking.",
+            timing_note="Fresh raw chicken breast cooks quickly but needs attention."
+        ),
+        "Frozen Raw": IngredientForm(
+            name="Frozen Raw",
+            prep_minutes=2,
+            cook_minutes=20,
+            active_minutes=8,
+            passive_minutes=15,
+            attention_score=5,
+            holdability="fair",
+            handling_note="cook from frozen only with a covered or moist method, or thaw first when possible.",
+            timing_note="Frozen raw chicken breast needs extra passive time."
+        ),
+        "Cooked": IngredientForm(
+            name="Cooked",
+            prep_minutes=2,
+            cook_minutes=5,
+            active_minutes=5,
+            passive_minutes=0,
+            attention_score=3,
+            holdability="good",
+            handling_note="slice, shred, or dice before reheating.",
+            timing_note="Cooked chicken breast is mostly reheating and assembly."
+        ),
+    },
 )
 
 def get_ingredient_profile(name, role="ingredient"):

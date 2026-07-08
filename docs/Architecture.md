@@ -1,3 +1,58 @@
+## Team Roles
+
+### CEO — Lynsey
+
+Owns executive leadership, business operations, customer experience, content, marketing, social media, and customer support.
+
+### Senior Project Engineer — Tracy
+
+Owns product vision, Cooking Knowledge Base (CKB) architecture, product requirements, quality assurance, testing, user experience, website engineering, and final technical acceptance.
+
+### Chief Knowledge Engineer — Chad G.P.T. the Magnificent
+
+Supports software architecture, Knowledge Object (KO) design, planning algorithms, engineering documentation, code review, and implementation guidance.
+
+## North Star
+Stock & Stir is not a recipe application. It is a cooking knowledge and decision engine whose primary purpose is to help people confidently turn the ingredients they already own into a meal.
+
+## Development Philosophy
+
+SNS is built incrementally.
+
+Small changes.
+
+Immediate testing.
+
+Frequent Git commits.
+
+Documentation explains *why*, not *what*.
+
+The goal is maintainable software that every member of the team understands—not the rapid accumulation of features.
+
+## SNS Engineering Philosophy
+
+The planner coordinates.
+
+Knowledge Objects know.
+
+The database stores.
+
+The UI presents.
+
+Every fact has one authoritative home.
+
+No layer should perform another layer's job.
+
+## Decision Making
+
+When multiple designs are possible, choose the one that:
+
+- Simplifies future maintenance.
+- Keeps knowledge in the appropriate KO.
+- Avoids duplication.
+- Preserves backward compatibility when practical.
+- Improves the user's ability to get dinner on the table.
+
 07062026
 ==================================================
 SNS Platform Architecture
