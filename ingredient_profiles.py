@@ -26,6 +26,9 @@ class IngredientProfile:
     role: str = "ingredient"
     prep_minutes: int = 5
     cook_minutes: int = 8
+    active_minutes: int = 0
+    passive_minutes: int = 0
+    attention_score: int = 5
     rest_minutes: int = 0
     add_stage: str = "middle"  # early, middle, late
     holdability: str = "fair"  # poor, fair, good, excellent
@@ -37,7 +40,11 @@ class IngredientProfile:
 
     @property
     def total_active_minutes(self):
-        return self.prep_minutes + self.cook_minutes + self.rest_minutes
+        return self.prep_minutes + (self.active_minutes or self.cook_minutes)
+
+    @property
+    def total_passive_minutes(self):
+        return self.passive_minutes + self.rest_minutes
 
     def prep_instruction(self):
         if self.handling_note:
@@ -84,6 +91,23 @@ SWISS_CHARD = IngredientProfile(
     timing_note="Swiss chard wilts quickly and does not hold well, so cook it near the end.",
 )
 
+CHICKEN_BREAST = IngredientProfile(
+    name="Chicken breast",
+    role="protein",
+    prep_minutes=3,
+    cook_minutes=12,
+    active_minutes=10,
+    passive_minutes=5,
+    rest_minutes=5,
+    add_stage="middle",
+    holdability="fair",
+    preferred_method="cook",
+    parallel_ok=False,
+    start_first=False,
+    handling_note="pat dry, season before cooking, and avoid overcooking.",
+    timing_note="Chicken breast needs active attention while cooking and benefits from a short rest before slicing.",
+    attention_score=6,
+)
 
 def get_ingredient_profile(name, role="ingredient"):
     """
@@ -99,5 +123,8 @@ def get_ingredient_profile(name, role="ingredient"):
 
     if k == "swiss chard":
         return SWISS_CHARD
+    
+    if k == "chicken breast":
+        return CHICKEN_BREAST
 
     return IngredientProfile(name=cleaned_name, role=role)

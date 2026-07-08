@@ -1,4 +1,5 @@
 from cooking_planner import generate_human_instructions
+from ingredient_profiles import get_ingredient_profile
 
 def _clean(value):
     return "" if value is None else str(value).strip()
@@ -108,9 +109,29 @@ def generate_candidates(
             score += 18
         if not foundation and s["strategy"] in ["quick_bowl", "casserole"]:
             score -= 8
+
         c = dict(s)
-        c.update({"score": score, "sauce": sauce, "protein": protein, "vegetable": vegetable, "foundation": foundation, "cuisine": cuisine, "servings": servings})
+        protein_profile = get_ingredient_profile(protein, "protein") if protein else None
+
+        active_minutes = protein_profile.total_active_minutes if protein_profile else 0
+        passive_minutes = protein_profile.total_passive_minutes if protein_profile else 0
+        attention_score = protein_profile.attention_score if protein_profile else 0
+
+        c.update({
+            "score": score,
+            "sauce": sauce,
+            "protein": protein,
+            "vegetable": vegetable,
+            "foundation": foundation,
+            "cuisine": cuisine,
+            "servings": servings,
+            "active_minutes": active_minutes,
+            "passive_minutes": passive_minutes,
+            "attention_score": attention_score,
+        })
+
         candidates.append(c)
+
     candidates.sort(key=lambda x: x["score"], reverse=True)
     return candidates[:max_results]
 
