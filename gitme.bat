@@ -1,16 +1,29 @@
 @echo off
-title SNS Git Helper
+title GitMe - SNS
 
 echo.
 echo ============================
-echo      STOCK & STIR GIT
+echo      STOCK ^& STIR GIT
 echo ============================
 echo.
 
 git status
 
 echo.
-set /p MSG=Commit message: 
+echo This will stage ALL changed files.
+echo Press Ctrl+C now if you do not want that.
+echo.
+pause
+
+echo.
+set /p MSG=Enter COMMIT MESSAGE, not a git command: 
+
+if "%MSG%"=="" (
+    echo.
+    echo Commit message cannot be blank.
+    pause
+    exit /b
+)
 
 echo.
 git add .
@@ -19,7 +32,7 @@ git commit -m "%MSG%"
 
 if errorlevel 1 (
     echo.
-    echo Commit failed.
+    echo Commit failed. Nothing was pushed.
     pause
     exit /b
 )
@@ -27,9 +40,16 @@ if errorlevel 1 (
 echo.
 git push
 
+if errorlevel 1 (
+    echo.
+    echo Push failed.
+    pause
+    exit /b
+)
+
 echo.
 echo ============================
-echo Finished!
+echo You are officially gitted.
 echo ============================
 echo.
 

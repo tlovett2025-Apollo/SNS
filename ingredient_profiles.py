@@ -51,6 +51,9 @@ class IngredientProfile:
     start_first: bool = False
     timing_note: str = ""
     handling_note: str = ""
+    work_score: int = 5
+    cleanup_score: int = 5
+    mental_load_score: int = 5
 
     @property
     def total_active_minutes(self):
@@ -66,6 +69,12 @@ class IngredientProfile:
     def get_form(self, form_name=""):
         form_name = _clean(form_name) or self.default_form
         return self.forms.get(form_name)
+    
+    def effort_score(self):
+        return round(
+            (self.attention_score + self.work_score + self.cleanup_score + self.mental_load_score) / 4
+        )
+    
     def prep_instruction(self):
         if self.handling_note:
             return f"Prep {self.name}: {self.handling_note}"
@@ -109,6 +118,9 @@ SWISS_CHARD = IngredientProfile(
     start_first=False,
     handling_note="wash well, trim tough stems, and chop leaves separately from stems if needed.",
     timing_note="Swiss chard wilts quickly and does not hold well, so cook it near the end.",
+    work_score=4,
+    cleanup_score=3,
+    mental_load_score=3,
 )
 
 CHICKEN_BREAST = IngredientProfile(
@@ -127,6 +139,9 @@ CHICKEN_BREAST = IngredientProfile(
     handling_note="pat dry, season before cooking, and avoid overcooking.",
     timing_note="Chicken breast needs active attention while cooking and benefits from a short rest before slicing.",
     attention_score=6,
+    work_score=6,
+    cleanup_score=5,
+    mental_load_score=5,
 
     default_form="Fresh Raw",
     forms={

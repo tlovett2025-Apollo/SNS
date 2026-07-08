@@ -116,6 +116,7 @@ def generate_candidates(
         active_minutes = protein_profile.total_active_minutes if protein_profile else 0
         passive_minutes = protein_profile.total_passive_minutes if protein_profile else 0
         attention_score = protein_profile.attention_score if protein_profile else 0
+        effort_score = protein_profile.effort_score() if protein_profile else 0
 
         c.update({
             "score": score,
@@ -128,6 +129,7 @@ def generate_candidates(
             "active_minutes": active_minutes,
             "passive_minutes": passive_minutes,
             "attention_score": attention_score,
+            "effort_score": effort_score,
         })
 
         candidates.append(c)

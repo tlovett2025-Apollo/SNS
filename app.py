@@ -122,7 +122,7 @@ with tabs[0]:
         st.session_state.candidates = generate_candidates(protein_name, vegetable_name, foundation_name, cuisine_name, energy_level, budget_level, int(time_minutes), int(servings), 10, vegetable_names=vegetable_names)
     if st.session_state.candidates:
         st.subheader("Top Recipe Options")
-        option_labels = [f"{i+1}. {c['title']} — {c['energy']} energy · {c['budget']} · {c['minutes']} min total · {c.get('active_minutes', 0)} active · {c.get('passive_minutes', 0)} passive · attention {c.get('attention_score', 0)}/10 · score {c['score']}" for i,c in enumerate(st.session_state.candidates)]
+        option_labels = [f"{i+1}. {c['title']} — {c['energy']} energy · {c['budget']} · {c['minutes']} min total · {c.get('active_minutes', 0)} active · {c.get('passive_minutes', 0)} passive · attention {c.get('attention_score', 0)}/10 · effort {c.get('effort_score', 0)}/10 · score {c['score']}" for i,c in enumerate(st.session_state.candidates)]
         chosen = st.radio("Choose one to generate", option_labels)
         candidate = st.session_state.candidates[option_labels.index(chosen)]
         st.caption(f"Why: {candidate['why']} | Sauce/seasoning direction: {candidate['sauce']}")
