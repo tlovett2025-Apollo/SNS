@@ -132,7 +132,12 @@ with tabs[0]:
         result = st.session_state.generated_recipe
         st.divider(); st.subheader(result["name"]); st.caption(result["summary"])
         st.markdown("### Recipe")
-        for i, step in enumerate(result["instructions"], 1): st.markdown(f"**{i}.** {step}")
+        for i, step in enumerate(result["instructions"], 1):
+            clean_step = str(step).strip()
+            parts = clean_step.split(". ", 1)
+            if len(parts) == 2 and parts[0].isdigit():
+                clean_step = parts[1].strip()
+            st.markdown(f"**{i}.** {clean_step}")
         st.markdown("### Grocery List / Component List")
         for item in result["grocery_list"]: st.write(f"- {item}")
 
