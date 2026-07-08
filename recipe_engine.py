@@ -1,5 +1,4 @@
-from cooking_planner import build_plan_summary, generate_human_instructions
-
+from cooking_planner import generate_human_instructions
 
 def _clean(value):
     return "" if value is None else str(value).strip()
@@ -7,17 +6,6 @@ def _clean(value):
 
 def _key(value):
     return _clean(value).lower().replace("-", " ")
-
-
-def _as_list(value):
-    if value is None:
-        return []
-    if isinstance(value, (list, tuple, set)):
-        return [_clean(v) for v in value if _clean(v)]
-    text = _clean(value)
-    if not text:
-        return []
-    return [part.strip() for part in text.replace(" & ", ",").split(",") if part.strip()]
 
 
 def _unique(items):
@@ -35,9 +23,18 @@ def _join(items):
         return ""
     if len(items) == 1:
         return items[0]
-    if len(items) == 2:
-        return " & ".join(items)
-    return ", ".join(items[:-1]) + f" & {items[-1]}"
+    return " & ".join(items)
+
+
+def _score_strategy(strategy, energy, budget, time_limit):
+    score = 100
+    energy_order = {"Very Low": 0, "Low": 1, "Medium": 2, "High": 3, "": 2}
+    budget_order = {"Pantry Only": 0, "Budget": 1, "Moderate": 2, "High": 3, "": 2}
+    score -= max(0, strategy["energy_rank"] - energy_order.get(energy, 2)) * 12
+    score -= max(0, strategy["budget_rank"] - budget_order.get(budget, 2)) * 10
+    if time_limit and strategy["minutes"] > time_limit:
+        score -= (strategy["minutes"] - time_limit) * 2
+    return max(0, score)
 
 
 def _sauce_for_cuisine(cuisine):
@@ -63,39 +60,6 @@ def _sauce_for_cuisine(cuisine):
     return "simple sauce"
 
 
-def _energy_rank(value):
-    return {"Very Low": 0, "Low": 1, "Medium": 2, "High": 3, "": 2}.get(value, 2)
-
-
-def _budget_rank(value):
-    return {"Pantry Only": 0, "Budget": 1, "Moderate": 2, "High": 3, "": 2}.get(value, 2)
-
-
-def _score_candidate(candidate, requested_energy, requested_budget, requested_time):
-    plan = build_plan_summary(candidate)
-    score = 100
-
-    # Score against real plan behavior, not just the strategy label.
-    if requested_time and plan["total_minutes"] > requested_time:
-        score -= (plan["total_minutes"] - requested_time) * 2
-
-    if requested_energy == "Very Low":
-        score -= max(0, plan["active_minutes"] - 12) * 3
-        score -= max(0, plan["attention_score"] - 4) * 6
-    elif requested_energy == "Low":
-        score -= max(0, plan["active_minutes"] - 22) * 2
-        score -= max(0, plan["attention_score"] - 6) * 4
-
-    # Keep the old strategy preference as a mild signal only.
-    score -= max(0, candidate["energy_rank"] - _energy_rank(requested_energy)) * 8
-    score -= max(0, candidate["budget_rank"] - _budget_rank(requested_budget)) * 8
-
-    if candidate.get("strategy") == "kid_adventure" and candidate.get("cuisine") == "Kid Friendly":
-        score += 15
-
-    return max(0, round(score)), plan
-
-
 def generate_candidates(
     protein_name="",
     vegetable_name="",
@@ -109,8 +73,12 @@ def generate_candidates(
     vegetable_names=None,
 ):
     protein = _clean(protein_name)
-    vegetables = _as_list(vegetable_names if vegetable_names is not None else vegetable_name)
-    vegetable = _join(vegetables)
+
+    if vegetable_names:
+        vegetable = _join(vegetable_names)
+    else:
+        vegetable = _clean(vegetable_name)
+    
     foundation = _clean(foundation_name)
     cuisine = _clean(cuisine_name) or "Comfort Food"
     try:
@@ -122,72 +90,45 @@ def generate_candidates(
     except Exception:
         servings = 4
 
-    base = _join([protein] + vegetables) or protein or vegetable or "Pantry"
+    base = _join([protein, vegetable]) or protein or vegetable or "Pantry"
     sauce = _sauce_for_cuisine(cuisine)
     strategies = [
-        {"strategy": "quick_bowl", "label": "Quick Bowl", "title": f"{cuisine} {base} Bowl" if foundation else f"{cuisine} {base} Dinner Bowl", "energy": "Very Low", "energy_rank": 0, "budget": "Budget", "budget_rank": 1, "why": "fastest low-energy assembly when components are already easy or prepared"},
-        {"strategy": "skillet", "label": "Skillet", "title": f"{cuisine} {base} Skillet", "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "one pan, flexible texture"},
-        {"strategy": "soup", "label": "Soup", "title": f"{cuisine} {base} Soup", "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "soft, stretchable, and forgiving"},
-        {"strategy": "handheld", "label": "Handheld", "title": f"{cuisine} {base} Wrap or Sandwich", "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "good when standing/eating energy is limited"},
-        {"strategy": "plate", "label": "Plate", "title": f"{cuisine} {base} Plate", "energy": "Low", "energy_rank": 1, "budget": "Moderate", "budget_rank": 2, "why": "simple meat/veg/foundation serving"},
-        {"strategy": "casserole", "label": "Casserole", "title": f"{cuisine} {base} {foundation} Casserole" if foundation else f"{cuisine} {base} Casserole", "energy": "Medium", "energy_rank": 2, "budget": "Budget", "budget_rank": 1, "why": "family-style and good for leftovers"},
-        {"strategy": "kid_adventure", "label": "Kid Adventure", "title": f"{base} Adventure Plate", "energy": "Very Low", "energy_rank": 0, "budget": "Budget", "budget_rank": 1, "why": "playful plating and familiar components"},
+        {"strategy": "quick_bowl", "label": "Quick Bowl", "title": f"{cuisine} {base} Bowl" if foundation else f"{cuisine} {base} Dinner Bowl", "minutes": 15, "energy": "Very Low", "energy_rank": 0, "budget": "Budget", "budget_rank": 1, "why": "fastest low-energy assembly"},
+        {"strategy": "skillet", "label": "Skillet", "title": f"{cuisine} {base} Skillet", "minutes": 25, "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "one pan, flexible texture"},
+        {"strategy": "casserole", "label": "Casserole", "title": f"{cuisine} {base} {foundation} Casserole" if foundation else f"{cuisine} {base} Casserole", "minutes": 40, "energy": "Medium", "energy_rank": 2, "budget": "Budget", "budget_rank": 1, "why": "family-style and good for leftovers"},
+        {"strategy": "soup", "label": "Soup", "title": f"{cuisine} {base} Soup", "minutes": 30, "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "soft, stretchable, and forgiving"},
+        {"strategy": "plate", "label": "Plate", "title": f"{cuisine} {base} Plate", "minutes": 20, "energy": "Low", "energy_rank": 1, "budget": "Moderate", "budget_rank": 2, "why": "simple meat/veg/foundation serving"},
+        {"strategy": "handheld", "label": "Handheld", "title": f"{cuisine} {base} Wrap or Sandwich", "minutes": 18, "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "good when standing/eating energy is limited"},
+        {"strategy": "kid_adventure", "label": "Kid Adventure", "title": f"{base} Adventure Plate", "minutes": 15, "energy": "Very Low", "energy_rank": 0, "budget": "Budget", "budget_rank": 1, "why": "playful plating and familiar components"},
     ]
-
     candidates = []
     for s in strategies:
+        score = _score_strategy(s, energy_level, budget_level, time_limit)
+        if cuisine == "Kid Friendly" and s["strategy"] == "kid_adventure":
+            score += 18
+        if not foundation and s["strategy"] in ["quick_bowl", "casserole"]:
+            score -= 8
         c = dict(s)
-        c.update({
-            "sauce": sauce,
-            "protein": protein,
-            "vegetable": vegetable,
-            "vegetables": vegetables,
-            "foundation": foundation,
-            "cuisine": cuisine,
-            "servings": servings,
-        })
-        if not foundation and c["strategy"] in {"quick_bowl", "casserole"}:
-            c["score_penalty_note"] = "missing foundation"
-        score, plan = _score_candidate(c, energy_level, budget_level, time_limit)
-        if not foundation and c["strategy"] in {"quick_bowl", "casserole"}:
-            score = max(0, score - 8)
-        c["score"] = score
-        c["minutes"] = plan["total_minutes"]
-        c["active_minutes"] = plan["active_minutes"]
-        c["passive_minutes"] = plan["passive_minutes"]
-        c["attention_score"] = plan["attention_score"]
-        c["energy_fit"] = plan["energy_fit"]
+        c.update({"score": score, "sauce": sauce, "protein": protein, "vegetable": vegetable, "foundation": foundation, "cuisine": cuisine, "servings": servings})
         candidates.append(c)
-
-    candidates.sort(key=lambda x: (x["score"], -x["active_minutes"], -x["passive_minutes"]), reverse=True)
+    candidates.sort(key=lambda x: x["score"], reverse=True)
     return candidates[:max_results]
 
 
 def build_recipe_from_candidate(candidate):
     protein = candidate.get("protein", "")
-    vegetables = _as_list(candidate.get("vegetables") if candidate.get("vegetables") is not None else candidate.get("vegetable", ""))
+    vegetable = candidate.get("vegetable", "")
     foundation = candidate.get("foundation", "")
     instructions = generate_human_instructions(candidate)
-    plan_summary = build_plan_summary(candidate)
-
-    summary = (
-        f"{candidate.get('label')} · {candidate.get('energy')} energy · {candidate.get('budget')} · "
-        f"{plan_summary['total_minutes']} min total · {plan_summary['active_minutes']} min active · "
-        f"{plan_summary['passive_minutes']} min passive · attention {plan_summary['attention_score']}/10 · "
-        f"down-day fit {plan_summary['energy_fit']} · serves {candidate.get('servings', 4)}"
-    )
 
     return {
         "name": candidate.get("title", "Generated Meal"),
-        "instructions": [line for line in instructions.split("\n") if line.strip()],
-        "grocery_list": _unique([protein] + vegetables + [foundation]),
+        "instructions": instructions.split("\n"),
+        "grocery_list": _unique([protein, vegetable, foundation]),
         "servings": candidate.get("servings", 4),
-        "summary": summary,
-        "plan_summary": plan_summary,
+        "summary": f"{candidate.get('label')} · {candidate.get('energy')} energy · {candidate.get('budget')} · {candidate.get('minutes')} min · serves {candidate.get('servings', 4)}"
     }
 
 
 def build_simple_meal(protein_name, vegetable_name, foundation_name, sauce_name="", flavor_name="", meal_template=""):
-    return build_recipe_from_candidate(
-        generate_candidates(protein_name, vegetable_name, foundation_name, flavor_name or "Comfort Food", "Low", "Budget", 30, 4, 1)[0]
-    )
+    return build_recipe_from_candidate(generate_candidates(protein_name, vegetable_name, foundation_name, flavor_name or "Comfort Food", "Low", "Budget", 30, 4, 1)[0])
