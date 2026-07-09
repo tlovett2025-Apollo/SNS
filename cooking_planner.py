@@ -11,7 +11,6 @@ from typing import List, Optional
 from ingredient_profiles import get_ingredient_profile
 
 
-
 @dataclass
 class CookingStep:
     order: int
@@ -95,6 +94,36 @@ def _vegetable_guidance_steps(vegetable: str, strategy: str) -> List[CookingStep
 
     return steps
 
+def _protein_guidance_step(protein: str, strategy: str) -> Optional[CookingStep]:
+    protein = _clean(protein)
+    if not protein:
+        return None
+
+    profile = get_ingredient_profile(protein, "protein")
+
+    if profile:
+        instruction = profile.cook_instruction(strategy)
+
+        note = profile.finish_note()
+        if note:
+            instruction = f"{instruction} {note}"
+
+        return CookingStep(
+            order=30,
+            phase="protein",
+            instruction=instruction,
+            minutes=profile.total_active_minutes,
+            parallel_ok=profile.parallel_ok,
+        )
+
+    return CookingStep(
+        order=30,
+        phase="protein",
+        instruction=f"Cook {protein} until safe and ready.",
+        minutes=12,
+        parallel_ok=False,
+    )
+
 def _vegetable_stage_instruction(vegetable: str, strategy: str) -> str:
     profile = get_ingredient_profile(vegetable, "vegetable")
 
@@ -171,17 +200,11 @@ def build_cooking_plan(candidate: dict) -> List[CookingStep]:
         ))
 
     elif strategy == "skillet":
-        if protein:
-            steps.append(CookingStep(
-                order=30,
-                phase="protein",
-                instruction=f"Cook {protein} in a skillet until safe and browned where appropriate.",
-                minutes=12,
-                parallel_ok=False,
-            ))
+        protein_step = _protein_guidance_step(protein, strategy)
+        if protein_step:
+            steps.append(protein_step)
         if vegetable:
-            if vegetable:
-                steps.extend(_vegetable_guidance_steps(vegetable, strategy))
+            steps.extend(_vegetable_guidance_steps(vegetable, strategy))
         if foundation:
             steps.append(CookingStep(
                 order=50,
