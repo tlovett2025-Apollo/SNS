@@ -111,11 +111,47 @@ def generate_candidates(
             score -= 8
 
         c = dict(s)
-        protein_profile = get_ingredient_profile(protein, "protein") if protein else None
 
-        active_minutes = protein_profile.total_active_minutes if protein_profile else 0
-        passive_minutes = protein_profile.total_passive_minutes if protein_profile else 0
-        attention_score = protein_profile.attention_score if protein_profile else 0
+
+        protein_profile = get_ingredient_profile(protein, "protein") if protein else None
+        vegetable_profile = get_ingredient_profile(vegetable, "vegetable") if vegetable else None
+        foundation_profile = get_ingredient_profile(foundation, "foundation") if foundation else None
+
+
+
+        active_minutes = 0
+
+        if protein_profile:
+            active_minutes += protein_profile.total_active_minutes
+
+        if vegetable_profile:
+            active_minutes += vegetable_profile.total_active_minutes
+
+        if foundation_profile:
+            active_minutes += foundation_profile.total_active_minutes
+
+        passive_minutes = 0
+
+        if protein_profile:
+            passive_minutes = max(passive_minutes, protein_profile.total_passive_minutes)
+
+        if vegetable_profile:
+            passive_minutes = max(passive_minutes, vegetable_profile.total_passive_minutes)
+
+        if foundation_profile:
+            passive_minutes = max(passive_minutes, foundation_profile.total_passive_minutes)
+
+        attention_score = 0
+
+        if protein_profile:
+            attention_score = max(attention_score, protein_profile.attention_score)
+
+        if vegetable_profile:
+            attention_score = max(attention_score, vegetable_profile.attention_score)
+
+        if foundation_profile:
+            attention_score = max(attention_score, foundation_profile.attention_score)
+
         effort_score = protein_profile.effort_score() if protein_profile else 0
 
         c.update({
@@ -128,6 +164,7 @@ def generate_candidates(
             "servings": servings,
             "active_minutes": active_minutes,
             "passive_minutes": passive_minutes,
+            "minutes": active_minutes + passive_minutes,
             "attention_score": attention_score,
             "effort_score": effort_score,
         })

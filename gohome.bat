@@ -1,1 +1,1 @@
-cd ..\..\..
+.\tools\gohome.bat

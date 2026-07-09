@@ -279,6 +279,17 @@ def generate_human_instructions(candidate: dict) -> str:
     steps = build_cooking_plan(candidate)
     lines = []
 
+    total_minutes = candidate.get("minutes")
+    active_minutes = candidate.get("active_minutes")
+    passive_minutes = candidate.get("passive_minutes")
+
+    if total_minutes is not None:
+        lines.append(
+            f"Estimated meal time: {total_minutes} minutes "
+            f"({active_minutes or 0} active, {passive_minutes or 0} passive). "
+            "Some steps may overlap, so step times are guidance rather than a strict sequence."
+        )
+
     for index, step in enumerate(steps, start=1):
         time_note = f" ({step.minutes} min)" if step.minutes else ""
         parallel_note = " This can happen while another component cooks." if step.parallel_ok else ""
