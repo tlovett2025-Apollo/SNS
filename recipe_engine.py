@@ -114,17 +114,19 @@ def generate_candidates(
 
 
         protein_profile = get_ingredient_profile(protein, "protein") if protein else None
-        vegetable_profile = get_ingredient_profile(vegetable, "vegetable") if vegetable else None
+        vegetable_profiles = [
+            get_ingredient_profile(v, "vegetable")
+            for v in vegetable.split(" & ")
+            if _clean(v)
+        ]
         foundation_profile = get_ingredient_profile(foundation, "foundation") if foundation else None
-
-
 
         active_minutes = 0
 
         if protein_profile:
             active_minutes += protein_profile.total_active_minutes
 
-        if vegetable_profile:
+        for vegetable_profile in vegetable_profiles:
             active_minutes += vegetable_profile.total_active_minutes
 
         if foundation_profile:
@@ -135,18 +137,18 @@ def generate_candidates(
         if protein_profile:
             passive_minutes = max(passive_minutes, protein_profile.total_passive_minutes)
 
-        if vegetable_profile:
+        for vegetable_profile in vegetable_profiles:
             passive_minutes = max(passive_minutes, vegetable_profile.total_passive_minutes)
 
         if foundation_profile:
             passive_minutes = max(passive_minutes, foundation_profile.total_passive_minutes)
-
+            
         attention_score = 0
 
         if protein_profile:
             attention_score = max(attention_score, protein_profile.attention_score)
 
-        if vegetable_profile:
+        for vegetable_profile in vegetable_profiles:
             attention_score = max(attention_score, vegetable_profile.attention_score)
 
         if foundation_profile:

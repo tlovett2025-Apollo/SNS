@@ -7,7 +7,7 @@ then deepen the cooking intelligence as more CKB fields become available.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Dict
 from ingredient_profiles import get_ingredient_profile
 
 
@@ -19,6 +19,10 @@ class CookingStep:
     minutes: Optional[int] = None
     parallel_ok: bool = False
 
+@dataclass
+class TimelineBlock:
+    stage: int
+    steps: List[CookingStep]
 
 def _clean(value):
     return "" if value is None else str(value).strip()
@@ -151,6 +155,34 @@ def _vegetable_stage_instruction(vegetable: str, strategy: str) -> str:
         "start sturdy vegetables first, add quick-cooking or wilting vegetables near the end, "
         "and keep tender vegetables close to serving time."
     )
+
+def build_timeline_blocks(steps: List[CookingStep]) -> List[TimelineBlock]:
+    """
+    Group cooking steps into timeline blocks.
+
+    Heat 1 teaches the planner that compatible steps can overlap.
+    This does not assign clock times yet.
+    """
+
+    blocks: List[TimelineBlock] = []
+
+    for step in sorted(steps, key=lambda s: s.order):
+        placed = False
+
+        if step.parallel_ok:
+            for block in blocks:
+                if all(existing.parallel_ok for existing in block.steps):
+                    block.steps.append(step)
+                    placed = True
+                    break
+
+        if not placed:
+            blocks.append(TimelineBlock(
+                stage=len(blocks) + 1,
+                steps=[step],
+            ))
+
+    return blocks
 
 def build_cooking_plan(candidate: dict) -> List[CookingStep]:
     """
@@ -356,10 +388,11 @@ def build_cooking_plan(candidate: dict) -> List[CookingStep]:
 
 def generate_human_instructions(candidate: dict) -> str:
     """
-    Convert the cooking plan into readable recipe instructions.
+    Convert the cooking plan into readable timeline instructions.
     """
 
     steps = build_cooking_plan(candidate)
+    blocks = build_timeline_blocks(steps)
     lines = []
 
     total_minutes = candidate.get("minutes")
@@ -373,9 +406,15 @@ def generate_human_instructions(candidate: dict) -> str:
             "Some steps may overlap, so step times are guidance rather than a strict sequence."
         )
 
-    for index, step in enumerate(steps, start=1):
-        time_note = f" ({step.minutes} min)" if step.minutes else ""
-        parallel_note = " This can happen while another component cooks." if step.parallel_ok else ""
-        lines.append(f"{index}. {step.instruction}{time_note}{parallel_note}")
+    for block in blocks:
+        if len(block.steps) == 1:
+            step = block.steps[0]
+            time_note = f" ({step.minutes} min)" if step.minutes else ""
+            lines.append(f"Stage {block.stage}: {step.instruction}{time_note}")
+        else:
+            lines.append(f"Stage {block.stage}: Work on these components in parallel:")
+            for step in block.steps:
+                time_note = f" ({step.minutes} min)" if step.minutes else ""
+                lines.append(f"  - {step.instruction}{time_note}")
 
     return "\n".join(lines)
