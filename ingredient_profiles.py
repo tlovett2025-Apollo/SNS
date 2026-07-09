@@ -191,7 +191,7 @@ def get_ingredient_profile(name, role="ingredient"):
     k = _key(cleaned_name)
 
     if not cleaned_name:
-        return None
+        return IngredientProfile(name=cleaned_name, role=role)
 
     if k == "swiss chard":
         return SWISS_CHARD
