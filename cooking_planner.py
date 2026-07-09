@@ -8,6 +8,8 @@ then deepen the cooking intelligence as more CKB fields become available.
 
 from dataclasses import dataclass
 from typing import List, Optional
+from ingredient_profiles import get_ingredient_profile
+
 
 
 @dataclass
@@ -57,6 +59,53 @@ def _foundation_step(foundation: str, strategy: str) -> Optional[CookingStep]:
         parallel_ok=True,
     )
 
+def _split_joined_items(value: str) -> list:
+    value = _clean(value)
+    if not value:
+        return []
+
+    return [
+        item.strip()
+        for item in value.split(" & ")
+        if item.strip()
+    ]
+
+def _vegetable_guidance_steps(vegetable: str, strategy: str) -> List[CookingStep]:
+    vegetables = _split_joined_items(vegetable)
+    steps = []
+
+    for index, veg in enumerate(vegetables):
+        profile = get_ingredient_profile(veg, "vegetable")
+
+        if profile:
+            instruction = profile.cook_instruction(strategy)
+            note = profile.finish_note()
+            if note:
+                instruction = f"{instruction} {note}"
+        else:
+            instruction = f"Cook {veg} until it reaches the texture you like."
+
+        steps.append(CookingStep(
+            order=40 + index,
+            phase="vegetable",
+            instruction=instruction,
+            minutes=profile.total_active_minutes if profile else 8,
+            parallel_ok=profile.parallel_ok if profile else True,
+        ))
+
+    return steps
+
+def _vegetable_stage_instruction(vegetable: str, strategy: str) -> str:
+    profile = get_ingredient_profile(vegetable, "vegetable")
+
+    if profile and profile.timing_note:
+        return profile.cook_instruction(strategy) + " " + profile.timing_note
+
+    return (
+        f"Add {vegetable} based on how well it holds: "
+        "start sturdy vegetables first, add quick-cooking or wilting vegetables near the end, "
+        "and keep tender vegetables close to serving time."
+    )
 
 def build_cooking_plan(candidate: dict) -> List[CookingStep]:
     """
@@ -131,13 +180,8 @@ def build_cooking_plan(candidate: dict) -> List[CookingStep]:
                 parallel_ok=False,
             ))
         if vegetable:
-            steps.append(CookingStep(
-                order=40,
-                phase="vegetable",
-                instruction=f"Add {vegetable} and cook until it reaches the texture you like.",
-                minutes=8,
-                parallel_ok=False,
-            ))
+            if vegetable:
+                steps.extend(_vegetable_guidance_steps(vegetable, strategy))
         if foundation:
             steps.append(CookingStep(
                 order=50,
