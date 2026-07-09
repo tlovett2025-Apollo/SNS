@@ -73,23 +73,39 @@ def _vegetable_guidance_steps(vegetable: str, strategy: str) -> List[CookingStep
     vegetables = _split_joined_items(vegetable)
     steps = []
 
-    for index, veg in enumerate(vegetables):
-        profile = get_ingredient_profile(veg, "vegetable")
+    staged = []
 
-        if profile:
+    for veg in vegetables:
+        profile = get_ingredient_profile(veg, "vegetable")
+        staged.append((veg, profile))
+
+    stage_order = {
+        "early": 0,
+        "middle": 1,
+        "late": 2,
+    }
+
+    staged.sort(
+        key=lambda item: stage_order.get(
+            getattr(item[1], "add_stage", "middle"),
+            1,
+        )
+    )
+
+    for index, (veg, profile) in enumerate(staged):
+       if profile:
             instruction = profile.cook_instruction(strategy)
             note = profile.finish_note()
             if note:
                 instruction = f"{instruction} {note}"
-        else:
-            instruction = f"Cook {veg} until it reaches the texture you like."
-
-        steps.append(CookingStep(
-            order=40 + index,
-            phase="vegetable",
-            instruction=instruction,
-            minutes=profile.total_active_minutes if profile else 8,
-            parallel_ok=profile.parallel_ok if profile else True,
+            else:
+                instruction = f"Cook {veg} until it reaches the texture you like."
+            steps.append(CookingStep(
+                order=40 + index,
+                phase="vegetable",
+                instruction=instruction,
+                minutes=profile.total_active_minutes if profile else 8,
+                parallel_ok=profile.parallel_ok if profile else True,
         ))
 
     return steps
