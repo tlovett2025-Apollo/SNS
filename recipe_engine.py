@@ -1,5 +1,5 @@
-from cooking_planner import generate_human_instructions
 from ingredient_profiles import get_ingredient_profile
+from cooking_planner import generate_human_instructions, summarize_cooking_activities
 
 def _clean(value):
     return "" if value is None else str(value).strip()
@@ -182,15 +182,35 @@ def build_recipe_from_candidate(candidate):
     vegetable = candidate.get("vegetable", "")
     foundation = candidate.get("foundation", "")
     instructions = generate_human_instructions(candidate)
+    activity_debug = summarize_cooking_activities(candidate)
 
     return {
         "name": candidate.get("title", "Generated Meal"),
         "instructions": instructions.split("\n"),
+        "activity_debug": activity_debug,
         "grocery_list": _unique([protein, vegetable, foundation]),
         "servings": candidate.get("servings", 4),
         "summary": f"{candidate.get('label')} · {candidate.get('energy')} energy · {candidate.get('budget')} · {candidate.get('minutes')} min · serves {candidate.get('servings', 4)}"
     }
 
-
-def build_simple_meal(protein_name, vegetable_name, foundation_name, sauce_name="", flavor_name="", meal_template=""):
-    return build_recipe_from_candidate(generate_candidates(protein_name, vegetable_name, foundation_name, flavor_name or "Comfort Food", "Low", "Budget", 30, 4, 1)[0])
+def build_simple_meal(
+    protein_name,
+    vegetable_name,
+    foundation_name,
+    sauce_name="",
+    flavor_name="",
+    meal_template="",
+):
+    return build_recipe_from_candidate(
+        generate_candidates(
+            protein_name,
+            vegetable_name,
+            foundation_name,
+            flavor_name or "Comfort Food",
+            "Low",
+            "Budget",
+            30,
+            4,
+            1,
+        )[0]
+    )

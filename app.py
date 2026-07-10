@@ -138,7 +138,13 @@ with tabs[0]:
             if len(parts) == 2 and parts[0].isdigit():
                 clean_step = parts[1].strip()
             st.markdown(f"**{i}.** {clean_step}")
-        st.markdown("### Grocery List / Component List")
+
+        if result.get("activity_debug"):
+            with st.expander("Developer Activity Debug", expanded=True):
+                for activity in result["activity_debug"]:
+                    st.code(activity, language=None)
+
+        st.markdown("### Grocery List / Component List")        
         for item in result["grocery_list"]: st.write(f"- {item}")
 
 with tabs[1]:

@@ -24,9 +24,18 @@ class TimelineBlock:
     stage: int
     steps: List[CookingStep]
 
+@dataclass
+class CookingActivity:
+    component: str
+    activity_type: str
+    instruction: str
+    minutes: Optional[int] = None
+    human_busy: bool = True
+    equipment: str = ""
+    depends_on: List[str] = None
+
 def _clean(value):
     return "" if value is None else str(value).strip()
-
 
 def _join(items):
     cleaned = []
@@ -39,7 +48,6 @@ def _join(items):
     if len(cleaned) == 1:
         return cleaned[0]
     return " & ".join(cleaned)
-
 
 def _foundation_step(foundation: str, strategy: str) -> Optional[CookingStep]:
     if not foundation:
@@ -183,6 +191,77 @@ def build_timeline_blocks(steps: List[CookingStep]) -> List[TimelineBlock]:
             ))
 
     return blocks
+
+def activities_from_step(step: CookingStep) -> List[CookingActivity]:
+    """
+    Convert a cooking step into planner activities.
+
+    Heat 2 teaches SNS that steps are not all the same kind of time.
+    Some require human work. Some are passive. Some are finishing actions.
+    """
+
+    activity_type = "cook"
+
+    if step.phase == "prep":
+        activity_type = "prep"
+    elif step.phase in {"finish", "combine", "assemble", "plate"}:
+        activity_type = "finish"
+    elif step.phase in {"bake", "simmer"}:
+        activity_type = step.phase
+    elif step.phase == "foundation":
+        activity_type = "foundation"
+    elif step.phase == "protein":
+        activity_type = "cook"
+    elif step.phase == "vegetable":
+        activity_type = "cook"
+
+    human_busy = activity_type in {"prep", "finish", "combine", "assemble", "plate", "cook"}
+
+    if activity_type in {"bake", "simmer"}:
+        human_busy = False
+
+    return [
+        CookingActivity(
+            component=step.phase,
+            activity_type=activity_type,
+            instruction=step.instruction,
+            minutes=step.minutes,
+            human_busy=human_busy,
+            equipment="",
+            depends_on=[],
+        )
+    ]
+
+def build_cooking_activities(candidate: dict) -> List[CookingActivity]:
+    """
+    Build planner activities from the current cooking steps.
+
+    This is a bridge layer: future KOs will produce activities directly.
+    For now, the planner converts existing CookingSteps into activities.
+    """
+
+    activities = []
+
+    for step in build_cooking_plan(candidate):
+        activities.extend(activities_from_step(step))
+
+    return activities
+
+def summarize_cooking_activities(candidate: dict) -> List[str]:
+    """
+    Return developer-readable activity summaries for timeline debugging.
+    """
+
+    summaries = []
+
+    for activity in build_cooking_activities(candidate):
+        busy_note = "busy" if activity.human_busy else "passive"
+        time_note = f"{activity.minutes} min" if activity.minutes else "no time"
+        summaries.append(
+            f"{activity.activity_type}: {activity.component} · {time_note} · {busy_note}"
+        )
+
+    return summaries
 
 def build_cooking_plan(candidate: dict) -> List[CookingStep]:
     """
