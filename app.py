@@ -112,6 +112,12 @@ with tabs[0]:
     vegetable_name = " & ".join(vegetable_names)
     foundation_name = c3.selectbox("Foundation", [""] + foundations["name"].tolist() if not foundations.empty else [""])
     cuisine_name = c4.selectbox("Cuisine", [""] + cuisines["name"].tolist() if not cuisines.empty else ["", "American", "Italian", "Mexican"])
+    state_col, _, _, _ = st.columns(4)
+    protein_state = state_col.selectbox(
+        "Protein State",
+        ["Fresh Raw", "Frozen Raw", "Cooked"],
+        help="State is the ingredient's current condition. Prep form and cooking technique are separate concepts.",
+    )
     c5,c6,c7,c8 = st.columns(4)
     energy_level = c5.selectbox("Energy", LEVEL_OPTIONS, index=2)
     budget_level = c6.selectbox("Budget", BUDGET_OPTIONS, index=2)
@@ -119,7 +125,7 @@ with tabs[0]:
     servings = c8.number_input("Servings", min_value=1, max_value=24, value=4, step=1)
     if "candidates" not in st.session_state: st.session_state.candidates = []
     if st.button("Find Recipe Options", type="primary"):
-        st.session_state.candidates = generate_candidates(protein_name, vegetable_name, foundation_name, cuisine_name, energy_level, budget_level, int(time_minutes), int(servings), 10, vegetable_names=vegetable_names)
+        st.session_state.candidates = generate_candidates(protein_name, vegetable_name, foundation_name, cuisine_name, energy_level, budget_level, int(time_minutes), int(servings), 10, vegetable_names=vegetable_names, protein_state=protein_state)
     if st.session_state.candidates:
         st.subheader("Top Recipe Options")
         option_labels = [f"{i+1}. {c['title']} — {c['energy']} energy · {c['budget']} · {c['minutes']} min total · {c.get('active_minutes', 0)} active · {c.get('passive_minutes', 0)} passive · attention {c.get('attention_score', 0)}/10 · effort {c.get('effort_score', 0)}/10 · score {c['score']}" for i,c in enumerate(st.session_state.candidates)]
@@ -143,6 +149,12 @@ with tabs[0]:
             with st.expander("Developer Activity Debug", expanded=True):
                 for activity in result["activity_debug"]:
                     st.code(activity, language=None)
+
+        if result.get("lane_debug"):
+            with st.expander("Developer Kitchen Lanes", expanded=True):
+                st.caption("Prototype schedule: 2 burner lanes, 1 human-attention lane, plus oven and counter.")
+                for lane_item in result["lane_debug"]:
+                    st.code(lane_item, language=None)
 
         st.markdown("### Grocery List / Component List")        
         for item in result["grocery_list"]: st.write(f"- {item}")

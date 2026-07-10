@@ -1,15 +1,13 @@
 """
-Ingredient Profiles for Stock & Stir / SNS.
+Ingredient Knowledge Objects for Stock & Stir / SNS.
 
-This is the first "python baby" layer.
-
-The database still stores ingredients as data, but this file lets the planner
-ask an ingredient what it knows about cooking itself.
-
-First living baby: Swiss chard.
+Knowledge Objects own ingredient-specific cooking knowledge and publish kitchen
+activities. The planner consumes and orchestrates those activities; it does not
+infer how an ingredient should be cooked.
 """
 
 from dataclasses import dataclass, field
+from typing import List, Optional
 
 
 def _clean(value):
@@ -19,8 +17,26 @@ def _clean(value):
 def _key(value):
     return _clean(value).lower().replace("-", " ")
 
+
 @dataclass
-class IngredientForm:
+class KitchenActivity:
+    """A unit of kitchen work published by a Knowledge Object."""
+
+    component: str
+    activity_type: str
+    instruction: str
+    minutes: Optional[int] = None
+    human_busy: bool = True
+    equipment: str = ""
+    depends_on: List[str] = field(default_factory=list)
+    stage: str = "middle"  # early, middle, late, finish
+    parallel_ok: bool = True
+    source: str = "ko"
+    activity_id: str = ""
+
+
+@dataclass
+class IngredientState:
     name: str
     prep_minutes: int = 0
     cook_minutes: int = 0
@@ -36,16 +52,16 @@ class IngredientForm:
 class IngredientProfile:
     name: str
     role: str = "ingredient"
-    default_form: str = ""
-    forms: dict = field(default_factory=dict)
+    default_state: str = ""
+    states: dict = field(default_factory=dict)
     prep_minutes: int = 5
     cook_minutes: int = 8
     active_minutes: int = 0
     passive_minutes: int = 0
     attention_score: int = 5
     rest_minutes: int = 0
-    add_stage: str = "middle"  # early, middle, late
-    holdability: str = "fair"  # poor, fair, good, excellent
+    add_stage: str = "middle"
+    holdability: str = "fair"
     preferred_method: str = "cook"
     desired_outcome: str = ""
     failure_mode: str = ""
@@ -66,19 +82,19 @@ class IngredientProfile:
     @property
     def total_passive_minutes(self):
         return self.passive_minutes + self.rest_minutes
-        
-    def available_forms(self):
-        return list(self.forms.keys())
 
-    def get_form(self, form_name=""):
-        form_name = _clean(form_name) or self.default_form
-        return self.forms.get(form_name)
-    
+    def available_states(self):
+        return list(self.states.keys())
+
+    def get_state(self, state_name=""):
+        state_name = _clean(state_name) or self.default_state
+        return self.states.get(state_name)
+
     def effort_score(self):
         return round(
             (self.attention_score + self.work_score + self.cleanup_score + self.mental_load_score) / 4
         )
-    
+
     def prep_instruction(self):
         if self.handling_note:
             return f"Prep {self.name}: {self.handling_note}"
@@ -86,16 +102,12 @@ class IngredientProfile:
 
     def cook_instruction(self, strategy=""):
         strategy = _key(strategy)
-
         if self.add_stage == "late":
             return f"Add {self.name} near the end and {self.preferred_method} just until ready."
-
         if self.add_stage == "early":
             return f"Start {self.name} early and {self.preferred_method} until tender."
-
         if "skillet" in strategy:
             return f"Add {self.name} to the skillet and {self.preferred_method} until ready."
-
         return f"Cook {self.name} using {self.preferred_method} until ready."
 
     def finish_note(self):
@@ -107,14 +119,86 @@ class IngredientProfile:
             return f"{self.name} can be made early and held warm."
         return ""
 
+    def publish_activities(self, strategy="", state_name="") -> List[KitchenActivity]:
+        """Publish ingredient-owned activities for the planner to orchestrate."""
 
-# First living Python baby.
+        if not self.name:
+            return []
+
+        state = self.get_state(state_name)
+        prep_minutes = state.prep_minutes if state else self.prep_minutes
+        cook_minutes = state.cook_minutes if state else self.cook_minutes
+        handling_note = state.handling_note if state and state.handling_note else self.handling_note
+        stage = "early" if self.start_first else self.add_stage
+        activities: List[KitchenActivity] = []
+
+        if prep_minutes > 0:
+            instruction = (
+                f"Prep {self.name}: {handling_note}"
+                if handling_note
+                else f"Prep {self.name}."
+            )
+            activities.append(KitchenActivity(
+                component=self.name,
+                activity_type="prep",
+                instruction=instruction,
+                minutes=prep_minutes,
+                human_busy=True,
+                stage=stage,
+                parallel_ok=True,
+                equipment="counter",
+                activity_id=f"prep:{self.name}",
+            ))
+
+        activities.append(KitchenActivity(
+            component=self.name,
+            activity_type=self.preferred_method or "cook",
+            instruction=self.cook_instruction(strategy),
+            minutes=cook_minutes or None,
+            human_busy=(self.active_minutes or cook_minutes) > 0,
+            stage=stage,
+            parallel_ok=self.parallel_ok,
+            depends_on=[f"prep:{self.name}"] if prep_minutes > 0 else [],
+            equipment="burner",
+            activity_id=f"{self.preferred_method or 'cook'}:{self.name}",
+        ))
+
+        if self.passive_minutes > 0:
+            activities.append(KitchenActivity(
+                component=self.name,
+                activity_type="wait",
+                instruction=f"Let {self.name} continue cooking without constant attention.",
+                minutes=self.passive_minutes,
+                human_busy=False,
+                stage=stage,
+                parallel_ok=True,
+                equipment="burner",
+                activity_id=f"wait:{self.name}",
+                depends_on=[f"{self.preferred_method or 'cook'}:{self.name}"],
+            ))
+
+        if self.rest_minutes > 0:
+            activities.append(KitchenActivity(
+                component=self.name,
+                activity_type="rest",
+                instruction=f"Rest {self.name} before finishing or serving.",
+                minutes=self.rest_minutes,
+                human_busy=False,
+                stage="finish",
+                parallel_ok=True,
+                depends_on=[f"wait:{self.name}"] if self.passive_minutes > 0 else [f"{self.preferred_method}:{self.name}"],
+                equipment="counter",
+                activity_id=f"rest:{self.name}",
+            ))
+
+        return activities
+
+
 SWISS_CHARD = IngredientProfile(
     name="Swiss chard",
     role="vegetable",
     prep_minutes=5,
     cook_minutes=4,
-    rest_minutes=0,
     add_stage="late",
     holdability="poor",
     preferred_method="saute",
@@ -123,12 +207,33 @@ SWISS_CHARD = IngredientProfile(
     recovery_hint="If it gets watery, drain excess liquid and season again before serving.",
     teaching_note="Swiss chard cooks fast because the leaves collapse quickly under heat.",
     parallel_ok=False,
-    start_first=False,
     handling_note="wash well, trim tough stems, and chop leaves separately from stems if needed.",
     timing_note="Swiss chard wilts quickly and does not hold well, so cook it near the end.",
     work_score=4,
     cleanup_score=3,
     mental_load_score=3,
+)
+
+
+BLACK_OLIVES = IngredientProfile(
+    name="Black olives",
+    role="vegetable",
+    prep_minutes=1,
+    cook_minutes=0,
+    active_minutes=1,
+    add_stage="late",
+    holdability="excellent",
+    preferred_method="fold in",
+    desired_outcome="warm olives distributed through the finished dish without being overcooked.",
+    failure_mode="Olives can become harsh or rubbery when cooked too long.",
+    recovery_hint="Add a fresh spoonful at serving if the olive flavor has faded.",
+    teaching_note="Canned olives are already ready to eat and usually need only draining and folding in.",
+    parallel_ok=True,
+    handling_note="drain well; slice only if the meal shape needs smaller pieces.",
+    timing_note="Fold black olives in near the end so they warm without becoming tough.",
+    work_score=1,
+    cleanup_score=1,
+    mental_load_score=1,
 )
 
 CHICKEN_BREAST = IngredientProfile(
@@ -147,68 +252,180 @@ CHICKEN_BREAST = IngredientProfile(
     recovery_hint="If it seems dry, slice it thinly and serve with sauce or gravy.",
     teaching_note="Resting helps the juices settle before slicing.",
     parallel_ok=False,
-    start_first=False,
     handling_note="pat dry, season before cooking, and avoid overcooking.",
     timing_note="Chicken breast needs active attention while cooking and benefits from a short rest before slicing.",
     attention_score=6,
     work_score=6,
     cleanup_score=5,
     mental_load_score=5,
-
-    default_form="Fresh Raw",
-    forms={
-        "Fresh Raw": IngredientForm(
-            name="Fresh Raw",
-            prep_minutes=3,
-            cook_minutes=12,
-            active_minutes=10,
-            passive_minutes=5,
-            attention_score=6,
-            holdability="fair",
+    default_state="Fresh Raw",
+    states={
+        "Fresh Raw": IngredientState(
+            name="Fresh Raw", prep_minutes=3, cook_minutes=12, active_minutes=10,
+            passive_minutes=5, attention_score=6, holdability="fair",
             handling_note="pat dry, season before cooking, and avoid overcooking.",
-            timing_note="Fresh raw chicken breast cooks quickly but needs attention."
+            timing_note="Fresh raw chicken breast cooks quickly but needs attention.",
         ),
-        "Frozen Raw": IngredientForm(
-            name="Frozen Raw",
-            prep_minutes=2,
-            cook_minutes=20,
-            active_minutes=8,
-            passive_minutes=15,
-            attention_score=5,
-            holdability="fair",
+        "Frozen Raw": IngredientState(
+            name="Frozen Raw", prep_minutes=2, cook_minutes=20, active_minutes=8,
+            passive_minutes=15, attention_score=5, holdability="fair",
             handling_note="cook from frozen only with a covered or moist method, or thaw first when possible.",
-            timing_note="Frozen raw chicken breast needs extra passive time."
+            timing_note="Frozen raw chicken breast needs extra passive time.",
         ),
-        "Cooked": IngredientForm(
-            name="Cooked",
-            prep_minutes=2,
-            cook_minutes=5,
-            active_minutes=5,
-            passive_minutes=0,
-            attention_score=3,
-            holdability="good",
+        "Cooked": IngredientState(
+            name="Cooked", prep_minutes=2, cook_minutes=5, active_minutes=5,
+            passive_minutes=0, attention_score=3, holdability="good",
             handling_note="slice, shred, or dice before reheating.",
-            timing_note="Cooked chicken breast is mostly reheating and assembly."
+            timing_note="Cooked chicken breast is mostly reheating and assembly.",
         ),
     },
 )
 
+
+def _chicken_activities(self, strategy="", state_name=""):
+    """Publish a state-specific chicken activity graph."""
+
+    state_name = _clean(state_name) or self.default_state
+
+    if state_name == "Cooked":
+        return [
+            KitchenActivity(
+                component=self.name, activity_type="prep",
+                instruction="Slice, shred, or dice the cooked chicken breast as needed.",
+                minutes=2, human_busy=True, stage="middle", parallel_ok=True,
+                equipment="counter", activity_id="prep:Chicken breast",
+            ),
+            KitchenActivity(
+                component=self.name, activity_type="reheat",
+                instruction="Reheat the cooked chicken breast gently until hot; avoid drying it out.",
+                minutes=5, human_busy=True, stage="late", parallel_ok=True,
+                depends_on=["prep:Chicken breast"], equipment="burner",
+                activity_id="reheat:Chicken breast",
+            ),
+        ]
+
+    if state_name == "Frozen Raw":
+        return [
+            KitchenActivity(
+                component=self.name, activity_type="prep",
+                instruction="Remove packaging and season the frozen chicken breast. Use a covered or moist method unless thawed first.",
+                minutes=2, human_busy=True, stage="early", parallel_ok=True,
+                equipment="counter", activity_id="prep:Chicken breast",
+            ),
+            KitchenActivity(
+                component=self.name, activity_type="cook",
+                instruction="Begin cooking the frozen chicken breast with a covered or moist method.",
+                minutes=8, human_busy=True, stage="early", parallel_ok=False,
+                depends_on=["prep:Chicken breast"], equipment="burner",
+                activity_id="cook:Chicken breast",
+            ),
+            KitchenActivity(
+                component=self.name, activity_type="wait",
+                instruction="Let the frozen chicken continue cooking through without constant attention.",
+                minutes=15, human_busy=False, stage="middle", parallel_ok=True,
+                depends_on=["cook:Chicken breast"], equipment="burner",
+                activity_id="wait:Chicken breast",
+            ),
+            KitchenActivity(
+                component=self.name, activity_type="verify",
+                instruction="Verify that the thickest part of the chicken breast is safely cooked through.",
+                minutes=2, human_busy=True, stage="finish", parallel_ok=False,
+                depends_on=["wait:Chicken breast"], equipment="counter",
+                activity_id="verify:Chicken breast",
+            ),
+            KitchenActivity(
+                component=self.name, activity_type="rest",
+                instruction="Rest the chicken breast before slicing.",
+                minutes=5, human_busy=False, stage="finish", parallel_ok=True,
+                depends_on=["verify:Chicken breast"], equipment="counter",
+                activity_id="rest:Chicken breast",
+            ),
+            KitchenActivity(
+                component=self.name, activity_type="slice",
+                instruction="Slice the chicken breast after resting, if the meal shape needs sliced chicken.",
+                minutes=2, human_busy=True, stage="finish", parallel_ok=False,
+                depends_on=["rest:Chicken breast"], equipment="counter",
+                activity_id="slice:Chicken breast",
+            ),
+        ]
+
+    activities = IngredientProfile.publish_activities(self, strategy, "Fresh Raw")
+    activities.append(KitchenActivity(
+        component=self.name,
+        activity_type="slice",
+        instruction="Slice chicken breast after resting, if the meal shape needs sliced chicken.",
+        minutes=2,
+        human_busy=True,
+        stage="finish",
+        parallel_ok=False,
+        depends_on=["rest:Chicken breast"],
+        equipment="counter",
+        activity_id="slice:Chicken breast",
+    ))
+    return activities
+
+def _chard_activities(self, strategy="", state_name=""):
+    activities = IngredientProfile.publish_activities(self, strategy, state_name)
+    activities.append(KitchenActivity(
+        component=self.name,
+        activity_type="serve",
+        instruction="Serve Swiss chard promptly; it does not hold well after cooking.",
+        minutes=None,
+        human_busy=True,
+        stage="finish",
+        parallel_ok=False,
+        depends_on=["saute:Swiss chard"],
+        equipment="counter",
+        activity_id="serve:Swiss chard",
+    ))
+    return activities
+
+
+
+def _olive_activities(self, strategy="", state_name=""):
+    return [
+        KitchenActivity(
+            component=self.name,
+            activity_type="drain",
+            instruction="Drain black olives well.",
+            minutes=1,
+            human_busy=True,
+            stage="late",
+            parallel_ok=True,
+            equipment="counter",
+            activity_id="drain:Black olives",
+        ),
+        KitchenActivity(
+            component=self.name,
+            activity_type="fold in",
+            instruction="Fold black olives into the dish near the end, just long enough to warm them.",
+            minutes=1,
+            human_busy=True,
+            stage="late",
+            parallel_ok=True,
+            depends_on=["drain:Black olives"],
+            equipment="counter",
+            activity_id="fold in:Black olives",
+        ),
+    ]
+
+# Prototype per-KO overrides. These will eventually be supplied by CKB activity data.
+CHICKEN_BREAST.publish_activities = _chicken_activities.__get__(CHICKEN_BREAST, IngredientProfile)
+SWISS_CHARD.publish_activities = _chard_activities.__get__(SWISS_CHARD, IngredientProfile)
+BLACK_OLIVES.publish_activities = _olive_activities.__get__(BLACK_OLIVES, IngredientProfile)
+
+
 def get_ingredient_profile(name, role="ingredient"):
-    """
-    Return a smart ingredient profile when we have one.
-    Otherwise return a safe generic profile so the planner keeps working.
-    """
+    """Return a smart profile or a safe generic fallback profile."""
 
     cleaned_name = _clean(name)
     k = _key(cleaned_name)
-
     if not cleaned_name:
         return IngredientProfile(name=cleaned_name, role=role)
-
     if k == "swiss chard":
         return SWISS_CHARD
-    
     if k == "chicken breast":
         return CHICKEN_BREAST
-
+    if k == "black olives":
+        return BLACK_OLIVES
     return IngredientProfile(name=cleaned_name, role=role)

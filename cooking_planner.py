@@ -6,9 +6,9 @@ It is intentionally practical and conservative: first make the engine work,
 then deepen the cooking intelligence as more CKB fields become available.
 """
 
-from dataclasses import dataclass
-from typing import List, Optional, Dict
-from ingredient_profiles import get_ingredient_profile
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+from ingredient_profiles import KitchenActivity, get_ingredient_profile
 
 
 @dataclass
@@ -23,16 +23,6 @@ class CookingStep:
 class TimelineBlock:
     stage: int
     steps: List[CookingStep]
-
-@dataclass
-class CookingActivity:
-    component: str
-    activity_type: str
-    instruction: str
-    minutes: Optional[int] = None
-    human_busy: bool = True
-    equipment: str = ""
-    depends_on: List[str] = None
 
 def _clean(value):
     return "" if value is None else str(value).strip()
@@ -122,7 +112,7 @@ def _vegetable_guidance_steps(vegetable: str, strategy: str) -> List[CookingStep
 
     return steps
 
-def _protein_guidance_step(protein: str, strategy: str) -> Optional[CookingStep]:
+def _protein_guidance_step(protein: str, strategy: str, state_name: str = "Fresh Raw") -> Optional[CookingStep]:
     protein = _clean(protein)
     if not protein:
         return None
@@ -130,7 +120,16 @@ def _protein_guidance_step(protein: str, strategy: str) -> Optional[CookingStep]
     profile = get_ingredient_profile(protein, "protein")
 
     if profile:
-        instruction = profile.cook_instruction(strategy)
+        state_name = _clean(state_name) or "Fresh Raw"
+        if state_name == "Frozen Raw":
+            instruction = (
+                f"Cook {protein} from frozen using a covered or moist method. "
+                "Allow extra time and verify that the thickest part is safely cooked through."
+            )
+        elif state_name == "Cooked":
+            instruction = f"Slice, shred, or dice {protein}, then reheat it gently until hot."
+        else:
+            instruction = profile.cook_instruction(strategy)
 
         note = profile.finish_note()
         if note:
@@ -192,75 +191,245 @@ def build_timeline_blocks(steps: List[CookingStep]) -> List[TimelineBlock]:
 
     return blocks
 
-def activities_from_step(step: CookingStep) -> List[CookingActivity]:
-    """
-    Convert a cooking step into planner activities.
+def _planner_activity(activity_type, instruction, minutes=None, human_busy=True, stage="middle", depends_on=None, equipment="counter"):
+    """Create a meal-level orchestration activity owned by the planner."""
 
-    Heat 2 teaches SNS that steps are not all the same kind of time.
-    Some require human work. Some are passive. Some are finishing actions.
-    """
+    return KitchenActivity(
+        component="meal",
+        activity_type=activity_type,
+        instruction=instruction,
+        minutes=minutes,
+        human_busy=human_busy,
+        stage=stage,
+        parallel_ok=False,
+        depends_on=list(depends_on or []),
+        source="planner",
+        equipment=equipment,
+        activity_id=f"{activity_type}:meal",
+    )
 
-    activity_type = "cook"
 
-    if step.phase == "prep":
-        activity_type = "prep"
-    elif step.phase in {"finish", "combine", "assemble", "plate"}:
-        activity_type = "finish"
-    elif step.phase in {"bake", "simmer"}:
-        activity_type = step.phase
-    elif step.phase == "foundation":
-        activity_type = "foundation"
-    elif step.phase == "protein":
-        activity_type = "cook"
-    elif step.phase == "vegetable":
-        activity_type = "cook"
+def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
+    """Collect KO-published activities and add only meal-level orchestration."""
 
-    human_busy = activity_type in {"prep", "finish", "combine", "assemble", "plate", "cook"}
+    protein = _clean(candidate.get("protein"))
+    vegetables = _split_joined_items(candidate.get("vegetable"))
+    foundation = _clean(candidate.get("foundation"))
+    strategy = _clean(candidate.get("strategy")) or "plate"
+    protein_state = _clean(candidate.get("protein_state")) or "Fresh Raw"
+    sauce = _clean(candidate.get("sauce")) or "simple sauce"
+    components = [item for item in [protein, *vegetables, foundation] if item]
 
-    if activity_type in {"bake", "simmer"}:
-        human_busy = False
-
-    return [
-        CookingActivity(
-            component=step.phase,
-            activity_type=activity_type,
-            instruction=step.instruction,
-            minutes=step.minutes,
-            human_busy=human_busy,
-            equipment="",
-            depends_on=[],
+    activities: List[KitchenActivity] = [
+        _planner_activity(
+            "gather",
+            f"Gather the ingredients and equipment for {_join(components)}.",
+            minutes=2,
+            human_busy=True,
+            stage="early",
+            equipment="counter",
         )
     ]
 
-def build_cooking_activities(candidate: dict) -> List[CookingActivity]:
+    if foundation:
+        activities.extend(
+            get_ingredient_profile(foundation, "foundation").publish_activities(strategy)
+        )
+    if protein:
+        activities.extend(
+            get_ingredient_profile(protein, "protein").publish_activities(strategy, protein_state)
+        )
+    for vegetable in vegetables:
+        activities.extend(
+            get_ingredient_profile(vegetable, "vegetable").publish_activities(strategy)
+        )
+
+    component_finishes = [
+        f"{activity.activity_type}:{activity.component}"
+        for activity in activities
+        if activity.source == "ko" and activity.stage in {"middle", "late", "finish"}
+    ]
+
+    if strategy == "casserole":
+        activities.append(_planner_activity(
+            "combine",
+            f"Combine {_join(components)} with {sauce}.",
+            minutes=5,
+            stage="finish",
+            depends_on=component_finishes,
+            equipment="counter",
+        ))
+        activities.append(_planner_activity(
+            "bake",
+            "Bake or heat until hot, cohesive, and ready to serve.",
+            minutes=15,
+            human_busy=False,
+            stage="finish",
+            depends_on=["combine:meal"],
+            equipment="oven",
+        ))
+    elif strategy == "handheld":
+        activities.append(_planner_activity(
+            "assemble",
+            f"Add {sauce}, then wrap, stack, or fold the prepared components.",
+            minutes=5,
+            stage="finish",
+            depends_on=component_finishes,
+            equipment="counter",
+        ))
+    elif strategy == "kid_adventure":
+        activities.append(_planner_activity(
+            "plate",
+            f"Arrange the prepared components and serve {sauce} as a dip, moat, or drizzle.",
+            minutes=3,
+            stage="finish",
+            depends_on=component_finishes,
+            equipment="counter",
+        ))
+    elif strategy == "soup":
+        activities.append(_planner_activity(
+            "simmer",
+            f"Bring the prepared components together with liquid and season toward {sauce}.",
+            minutes=10,
+            human_busy=False,
+            stage="finish",
+            depends_on=component_finishes,
+            equipment="burner",
+        ))
+    else:
+        activities.append(_planner_activity(
+            "finish",
+            f"Bring the prepared components together and season toward {sauce}.",
+            minutes=5,
+            stage="finish",
+            depends_on=component_finishes,
+            equipment="burner",
+        ))
+
+    stage_order = {"early": 0, "middle": 1, "late": 2, "finish": 3}
+    return sorted(
+        activities,
+        key=lambda activity: (stage_order.get(activity.stage, 1), activity.source != "ko"),
+    )
+
+
+
+@dataclass
+class ScheduledActivity:
+    activity: KitchenActivity
+    lane: str
+    start_minute: int
+    end_minute: int
+
+
+def _activity_id(activity: KitchenActivity) -> str:
+    return activity.activity_id or f"{activity.activity_type}:{activity.component}"
+
+
+def build_activity_graph(candidate: dict) -> Dict[str, KitchenActivity]:
+    """Return the dependency graph keyed by stable activity identifiers."""
+    graph: Dict[str, KitchenActivity] = {}
+    for activity in build_cooking_activities(candidate):
+        activity.activity_id = _activity_id(activity)
+        if activity.activity_id in graph:
+            raise ValueError(f"Duplicate activity id: {activity.activity_id}")
+        graph[activity.activity_id] = activity
+
+    missing = {
+        dependency
+        for activity in graph.values()
+        for dependency in activity.depends_on
+        if dependency not in graph
+    }
+    if missing:
+        raise ValueError(f"Unknown activity dependencies: {sorted(missing)}")
+    return graph
+
+
+def build_kitchen_lane_schedule(
+    candidate: dict,
+    burner_count: int = 2,
+    human_attention_lanes: int = 1,
+) -> List[ScheduledActivity]:
+    """Create a conservative developer schedule constrained by equipment and attention.
+
+    Each equipment unit is a lane. Human-busy work also reserves a human lane.
+    This is the first feasibility scheduler, not the final optimizer.
     """
-    Build planner activities from the current cooking steps.
+    graph = build_activity_graph(candidate)
+    burner_count = max(1, int(burner_count or 1))
+    human_attention_lanes = max(1, int(human_attention_lanes or 1))
 
-    This is a bridge layer: future KOs will produce activities directly.
-    For now, the planner converts existing CookingSteps into activities.
-    """
+    lane_free = {f"Burner {i}": 0 for i in range(1, burner_count + 1)}
+    lane_free.update({"Oven": 0, "Counter": 0})
+    human_free = [0] * human_attention_lanes
+    completed: Dict[str, ScheduledActivity] = {}
+    unscheduled = dict(graph)
+    scheduled: List[ScheduledActivity] = []
 
-    activities = []
+    while unscheduled:
+        ready = [
+            activity for activity in unscheduled.values()
+            if all(dep in completed for dep in activity.depends_on)
+        ]
+        if not ready:
+            raise ValueError("Activity graph contains a cycle or unresolved dependency.")
 
-    for step in build_cooking_plan(candidate):
-        activities.extend(activities_from_step(step))
+        ready.sort(key=lambda a: ({"early": 0, "middle": 1, "late": 2, "finish": 3}.get(a.stage, 1), _activity_id(a)))
+        activity = ready[0]
+        dependency_end = max((completed[d].end_minute for d in activity.depends_on), default=0)
 
-    return activities
+        equipment = (activity.equipment or "counter").lower()
+        if equipment == "burner":
+            lane = min((name for name in lane_free if name.startswith("Burner ")), key=lambda name: lane_free[name])
+        elif equipment == "oven":
+            lane = "Oven"
+        else:
+            lane = "Counter"
+
+        start = max(dependency_end, lane_free[lane])
+        human_index = None
+        if activity.human_busy:
+            human_index = min(range(len(human_free)), key=lambda i: human_free[i])
+            start = max(start, human_free[human_index])
+
+        duration = max(0, int(activity.minutes or 0))
+        end = start + duration
+        item = ScheduledActivity(activity=activity, lane=lane, start_minute=start, end_minute=end)
+        scheduled.append(item)
+        completed[_activity_id(activity)] = item
+        lane_free[lane] = end
+        if human_index is not None:
+            human_free[human_index] = end
+        del unscheduled[_activity_id(activity)]
+
+    return sorted(scheduled, key=lambda item: (item.start_minute, item.lane, item.end_minute))
+
+
+def summarize_kitchen_lanes(candidate: dict, burner_count: int = 2, human_attention_lanes: int = 1) -> List[str]:
+    """Return a compact developer view of resource-lane assignment."""
+    schedule = build_kitchen_lane_schedule(candidate, burner_count, human_attention_lanes)
+    lines = []
+    for item in schedule:
+        activity = item.activity
+        attention = " + human" if activity.human_busy else ""
+        lines.append(
+            f"{item.start_minute:>3}-{item.end_minute:<3} · {item.lane}{attention} · "
+            f"{activity.activity_type}: {activity.component}"
+        )
+    return lines
 
 def summarize_cooking_activities(candidate: dict) -> List[str]:
-    """
-    Return developer-readable activity summaries for timeline debugging.
-    """
+    """Return developer-readable evidence of activity ownership and semantics."""
 
     summaries = []
-
     for activity in build_cooking_activities(candidate):
         busy_note = "busy" if activity.human_busy else "passive"
         time_note = f"{activity.minutes} min" if activity.minutes else "no time"
         summaries.append(
-            f"{activity.activity_type}: {activity.component} · {time_note} · {busy_note}"
+            f"{activity.activity_type}: {activity.component} · {time_note} · "
+            f"{busy_note} · {activity.stage} · {activity.source}"
         )
-
     return summaries
 
 def build_cooking_plan(candidate: dict) -> List[CookingStep]:
@@ -278,6 +447,7 @@ def build_cooking_plan(candidate: dict) -> List[CookingStep]:
     sauce = _clean(candidate.get("sauce")) or "simple sauce"
     cuisine = _clean(candidate.get("cuisine")) or "Comfort Food"
     strategy = _clean(candidate.get("strategy")) or "plate"
+    protein_state = _clean(candidate.get("protein_state")) or "Fresh Raw"
 
     components = _join([protein, vegetable, foundation])
     steps: List[CookingStep] = []
@@ -327,7 +497,7 @@ def build_cooking_plan(candidate: dict) -> List[CookingStep]:
         ))
 
     elif strategy == "skillet":
-        protein_step = _protein_guidance_step(protein, strategy)
+        protein_step = _protein_guidance_step(protein, strategy, protein_state)
         if protein_step:
             steps.append(protein_step)
         if vegetable:

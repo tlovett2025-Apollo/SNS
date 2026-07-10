@@ -1,5 +1,5 @@
 from ingredient_profiles import get_ingredient_profile
-from cooking_planner import generate_human_instructions, summarize_cooking_activities
+from cooking_planner import generate_human_instructions, summarize_cooking_activities, summarize_kitchen_lanes
 
 def _clean(value):
     return "" if value is None else str(value).strip()
@@ -72,8 +72,10 @@ def generate_candidates(
     servings=4,
     max_results=10,
     vegetable_names=None,
+    protein_state="Fresh Raw",
 ):
     protein = _clean(protein_name)
+    protein_state = _clean(protein_state) or "Fresh Raw"
 
     if vegetable_names:
         vegetable = _join(vegetable_names)
@@ -124,7 +126,11 @@ def generate_candidates(
         active_minutes = 0
 
         if protein_profile:
-            active_minutes += protein_profile.total_active_minutes
+            selected_state = protein_profile.get_state(protein_state)
+            if selected_state:
+                active_minutes += selected_state.prep_minutes + selected_state.active_minutes
+            else:
+                active_minutes += protein_profile.total_active_minutes
 
         for vegetable_profile in vegetable_profiles:
             active_minutes += vegetable_profile.total_active_minutes
@@ -135,7 +141,11 @@ def generate_candidates(
         passive_minutes = 0
 
         if protein_profile:
-            passive_minutes = max(passive_minutes, protein_profile.total_passive_minutes)
+            selected_state = protein_profile.get_state(protein_state)
+            if selected_state:
+                passive_minutes = max(passive_minutes, selected_state.passive_minutes + protein_profile.rest_minutes)
+            else:
+                passive_minutes = max(passive_minutes, protein_profile.total_passive_minutes)
 
         for vegetable_profile in vegetable_profiles:
             passive_minutes = max(passive_minutes, vegetable_profile.total_passive_minutes)
@@ -146,7 +156,11 @@ def generate_candidates(
         attention_score = 0
 
         if protein_profile:
-            attention_score = max(attention_score, protein_profile.attention_score)
+            selected_state = protein_profile.get_state(protein_state)
+            attention_score = max(
+                attention_score,
+                selected_state.attention_score if selected_state else protein_profile.attention_score,
+            )
 
         for vegetable_profile in vegetable_profiles:
             attention_score = max(attention_score, vegetable_profile.attention_score)
@@ -160,6 +174,7 @@ def generate_candidates(
             "score": score,
             "sauce": sauce,
             "protein": protein,
+            "protein_state": protein_state,
             "vegetable": vegetable,
             "foundation": foundation,
             "cuisine": cuisine,
@@ -183,11 +198,13 @@ def build_recipe_from_candidate(candidate):
     foundation = candidate.get("foundation", "")
     instructions = generate_human_instructions(candidate)
     activity_debug = summarize_cooking_activities(candidate)
+    lane_debug = summarize_kitchen_lanes(candidate)
 
     return {
         "name": candidate.get("title", "Generated Meal"),
         "instructions": instructions.split("\n"),
         "activity_debug": activity_debug,
+        "lane_debug": lane_debug,
         "grocery_list": _unique([protein, vegetable, foundation]),
         "servings": candidate.get("servings", 4),
         "summary": f"{candidate.get('label')} · {candidate.get('energy')} energy · {candidate.get('budget')} · {candidate.get('minutes')} min · serves {candidate.get('servings', 4)}"
