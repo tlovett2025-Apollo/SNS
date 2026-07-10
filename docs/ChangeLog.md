@@ -1,20 +1,23 @@
 \# Stock \& Stir Change Log
 
-\## ADDED 2026-06-30 - Build V000.2-4
-\ V000.2&3 added updates to teh meal type attribute. Upon further design, the 
-\ Mealtype catagory was removed.  A new build that is more user focused is included 
-\ in v000.4.  
-\ Version 4 transforms Stock & Stir from a recipe prototype into a trainable 
-\ culinary knowledge engine.
-\
-\Not prettier.
-\
-\Not fancier.
-\
-\Smarter.
-\
-\It becomes easier to teach, easier to maintain, and more capable of making decisions for the \user instead of asking the user to make decisions for it.
-\
+# Stock & Stir (SNS)
+
+## v5 Beta 2D - Repair Build 2
+
+### Milestone
+- Admin CRUD subsystem stabilized.
+- Repair Build 2 passed all regression tests.
+- Smoke test passed.
+- Project placed under Git version control.
+- Repository structure established.
+- Ready to begin Ingredient Wave 1.
+
+### Known Enhancements
+- Multi-ingredient recipe support.
+- Hide ingredient IDs in admin screens.
+- Sauce editor lookup dropdowns.
+- Expand vegetable metadata.
+
 \## ADDED 2026-06-29 — Build v000.1
 
 \## Milestone
@@ -48,12 +51,18 @@ The product is a dinner decision engine, not a recipe database.
 \- Grocery list is placeholder only.
 \- No edit/delete screens yet.
 
-## 2026-07-06
 
-### Major Architecture Milestone
+## 2026-07-02 — Architectural Decision (Pending Beta 2C Approval)
 
-- Renamed the primary database to the Cooking Knowledge Base (CKB).
-- Established the CKB as a first-class platform component rather than an implementation detail.
-- Created the first version of CKB Studio (formerly DBPop) to safely import and validate knowledge into the CKB.
-- Added long-term metadata fields to the ingredients schema to support validation, QA, and future expansion.
-- Successfully imported the first production ingredient wave into the CKB using CKB Studio.
+### Decision
+Prep Minutes and Cook Minutes no longer belong to Ingredient State.
+
+### Reason
+Preparation and cooking time depend on the cooking Technique, not the state of the ingredient.
+A single ingredient state (for example, Raw Chicken Breast) may be grilled, pan fried,
+air fried, baked, or sous vide, each with different timings.
+
+### Impact
+- Ingredient State references a Default Technique.
+- Technique will own Prep Minutes and Cook Minutes.
+- Recipe generation derives timing from Technique.
