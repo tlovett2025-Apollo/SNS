@@ -1,0 +1,13 @@
+Horizon D Heat 1 validation
+
+Executed:
+python -m py_compile culinary_opportunities.py recipe_engine.py app.py test_culinary_opportunities.py
+pytest -q test_culinary_opportunities.py test_ko_activities.py
+python smoke_test.py
+
+Results:
+- Python compilation passed.
+- 16 pytest tests passed.
+- Smoke test passed: schema, seed, alias table, candidates, recipe generation.
+
+No claim is made about Streamlit visual rendering beyond successful Python compilation.
