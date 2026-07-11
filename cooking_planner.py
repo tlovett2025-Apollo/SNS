@@ -375,23 +375,47 @@ def build_kitchen_lane_schedule(
         if not ready:
             raise ValueError("Activity graph contains a cycle or unresolved dependency.")
 
-        ready.sort(key=lambda a: ({"early": 0, "middle": 1, "late": 2, "finish": 3}.get(a.stage, 1), _activity_id(a)))
-        activity = ready[0]
-        dependency_end = max((completed[d].end_minute for d in activity.depends_on), default=0)
+        def placement_for(activity):
+            dependency_end = max(
+                (completed[d].end_minute for d in activity.depends_on),
+                default=0,
+            )
 
-        equipment = (activity.equipment or "counter").lower()
-        if equipment == "burner":
-            lane = min((name for name in lane_free if name.startswith("Burner ")), key=lambda name: lane_free[name])
-        elif equipment == "oven":
-            lane = "Oven"
-        else:
-            lane = "Counter"
+            equipment = (activity.equipment or "counter").lower()
+            if equipment == "burner":
+                lane = min(
+                    (name for name in lane_free if name.startswith("Burner ")),
+                    key=lambda name: lane_free[name],
+                )
+            elif equipment == "oven":
+                lane = "Oven"
+            else:
+                lane = "Counter"
 
-        start = max(dependency_end, lane_free[lane])
-        human_index = None
-        if activity.human_busy:
-            human_index = min(range(len(human_free)), key=lambda i: human_free[i])
-            start = max(start, human_free[human_index])
+            start = max(dependency_end, lane_free[lane])
+            human_index = None
+            if activity.human_busy:
+                human_index = min(
+                    range(len(human_free)),
+                    key=lambda i: human_free[i],
+                )
+                start = max(start, human_free[human_index])
+
+            return start, lane, human_index
+
+        stage_order = {"early": 0, "middle": 1, "late": 2, "finish": 3}
+        placements = [
+            (*placement_for(activity), activity)
+            for activity in ready
+        ]
+        start, lane, human_index, activity = min(
+            placements,
+            key=lambda item: (
+                item[0],
+                stage_order.get(item[3].stage, 1),
+                _activity_id(item[3]),
+            ),
+        )
 
         duration = max(0, int(activity.minutes or 0))
         end = start + duration

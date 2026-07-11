@@ -100,3 +100,54 @@ def test_state_changes_lane_schedule_duration():
     frozen_end = max(item.end_minute for item in frozen)
     cooked_end = max(item.end_minute for item in cooked)
     assert frozen_end > fresh_end > cooked_end
+
+
+def parallel_regression_candidate():
+    return generate_candidates(
+        "Chicken breast",
+        "Swiss chard & Mushrooms & Asparagus",
+        "Rice",
+        "Chinese",
+        "Low",
+        "Budget",
+        45,
+        4,
+        1,
+        vegetable_names=["Swiss chard", "Mushrooms", "Asparagus"],
+        protein_state="Fresh Raw",
+    )[0]
+
+
+def test_scheduler_starts_passive_chicken_wait_when_active_cook_ends():
+    from cooking_planner import build_kitchen_lane_schedule
+
+    schedule = build_kitchen_lane_schedule(parallel_regression_candidate())
+    by_id = {item.activity.activity_id: item for item in schedule}
+
+    assert by_id["wait:Chicken breast"].start_minute == by_id["cook:Chicken breast"].end_minute
+
+
+def test_rice_passive_cooking_overlaps_other_human_work():
+    from cooking_planner import build_kitchen_lane_schedule
+
+    schedule = build_kitchen_lane_schedule(parallel_regression_candidate())
+    rice = next(item for item in schedule if item.activity.activity_id == "simmer:Rice")
+
+    assert any(
+        item.activity.human_busy
+        and item.start_minute < rice.end_minute
+        and item.end_minute > rice.start_minute
+        and item.activity.component != "Rice"
+        for item in schedule
+    )
+
+
+def test_candidate_total_uses_lane_schedule_makespan():
+    from cooking_planner import build_kitchen_lane_schedule
+
+    candidate = parallel_regression_candidate()
+    schedule = build_kitchen_lane_schedule(candidate)
+    makespan = max(item.end_minute for item in schedule)
+
+    assert candidate["minutes"] == makespan
+    assert candidate["minutes"] < candidate["active_minutes"] + candidate["passive_minutes"]

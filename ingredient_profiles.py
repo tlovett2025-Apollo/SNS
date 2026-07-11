@@ -282,6 +282,108 @@ CHICKEN_BREAST = IngredientProfile(
 )
 
 
+RICE = IngredientProfile(
+    name="Rice",
+    role="foundation",
+    prep_minutes=2,
+    cook_minutes=20,
+    active_minutes=2,
+    passive_minutes=18,
+    rest_minutes=5,
+    add_stage="early",
+    holdability="good",
+    preferred_method="simmer",
+    desired_outcome="tender grains that are fully cooked without becoming mushy.",
+    failure_mode="Rice can scorch, remain hard, or become gummy when liquid and heat are poorly controlled.",
+    recovery_hint="If rice is still firm, add a small amount of hot liquid, cover, and continue gently.",
+    teaching_note="Rice should start early because most of its cook time is passive and can overlap with other work.",
+    parallel_ok=True,
+    start_first=True,
+    handling_note="measure rice and liquid before heating.",
+    timing_note="Start rice early, then let it cook mostly unattended while the other components are prepared.",
+    attention_score=2,
+    work_score=2,
+    cleanup_score=2,
+    mental_load_score=2,
+)
+
+MUSHROOMS = IngredientProfile(
+    name="Mushrooms",
+    role="vegetable",
+    prep_minutes=4,
+    cook_minutes=8,
+    active_minutes=8,
+    add_stage="middle",
+    holdability="good",
+    preferred_method="saute",
+    desired_outcome="deeply browned mushrooms with concentrated savory flavor.",
+    failure_mode="Crowded mushrooms steam and become pale instead of browning.",
+    recovery_hint="Increase the heat and let excess moisture evaporate before seasoning again.",
+    teaching_note="Mushrooms benefit from browning before liquid is added.",
+    parallel_ok=False,
+    handling_note="wipe or rinse briefly, dry well, and slice evenly.",
+    timing_note="Brown mushrooms before adding liquid so they contribute fond and concentrated flavor.",
+    attention_score=6,
+    work_score=4,
+    cleanup_score=3,
+    mental_load_score=4,
+)
+
+ASPARAGUS = IngredientProfile(
+    name="Asparagus",
+    role="vegetable",
+    prep_minutes=3,
+    cook_minutes=6,
+    active_minutes=6,
+    add_stage="middle",
+    holdability="fair",
+    preferred_method="saute",
+    desired_outcome="bright green, tender-crisp asparagus.",
+    failure_mode="Asparagus becomes limp and dull when overcooked.",
+    recovery_hint="Serve promptly and add a bright finishing seasoning if it has softened too far.",
+    teaching_note="Evenly sized pieces help asparagus cook at the same rate.",
+    parallel_ok=False,
+    handling_note="trim woody ends and cut into even pieces if needed.",
+    timing_note="Cook asparagus after sturdy components but before quick-wilting greens.",
+    attention_score=5,
+    work_score=3,
+    cleanup_score=3,
+    mental_load_score=3,
+)
+
+
+def _rice_activities(self, strategy="", state_name=""):
+    return [
+        KitchenActivity(
+            component=self.name, activity_type="prep",
+            instruction="Measure the rice and cooking liquid.",
+            minutes=2, human_busy=True, stage="early", parallel_ok=True,
+            equipment="counter", activity_id="prep:Rice",
+        ),
+        KitchenActivity(
+            component=self.name, activity_type="start",
+            instruction="Bring the rice and liquid to a simmer, then cover and reduce the heat.",
+            minutes=2, human_busy=True, stage="early", parallel_ok=False,
+            depends_on=["prep:Rice"], equipment="burner",
+            activity_id="start:Rice",
+        ),
+        KitchenActivity(
+            component=self.name, activity_type="simmer",
+            instruction="Let the rice simmer covered without constant attention.",
+            minutes=18, human_busy=False, stage="early", parallel_ok=True,
+            depends_on=["start:Rice"], equipment="burner",
+            activity_id="simmer:Rice",
+        ),
+        KitchenActivity(
+            component=self.name, activity_type="rest",
+            instruction="Remove the rice from heat and let it rest covered before fluffing.",
+            minutes=5, human_busy=False, stage="finish", parallel_ok=True,
+            depends_on=["simmer:Rice"], equipment="counter",
+            activity_id="rest:Rice",
+        ),
+    ]
+
+
 def _chicken_activities(self, strategy="", state_name=""):
     """Publish a state-specific chicken activity graph."""
 
@@ -413,6 +515,7 @@ def _olive_activities(self, strategy="", state_name=""):
 CHICKEN_BREAST.publish_activities = _chicken_activities.__get__(CHICKEN_BREAST, IngredientProfile)
 SWISS_CHARD.publish_activities = _chard_activities.__get__(SWISS_CHARD, IngredientProfile)
 BLACK_OLIVES.publish_activities = _olive_activities.__get__(BLACK_OLIVES, IngredientProfile)
+RICE.publish_activities = _rice_activities.__get__(RICE, IngredientProfile)
 
 
 def get_ingredient_profile(name, role="ingredient"):
@@ -428,4 +531,10 @@ def get_ingredient_profile(name, role="ingredient"):
         return CHICKEN_BREAST
     if k == "black olives":
         return BLACK_OLIVES
+    if k == "rice":
+        return RICE
+    if k == "mushrooms":
+        return MUSHROOMS
+    if k == "asparagus":
+        return ASPARAGUS
     return IngredientProfile(name=cleaned_name, role=role)

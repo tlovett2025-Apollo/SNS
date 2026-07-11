@@ -1,5 +1,10 @@
 from ingredient_profiles import get_ingredient_profile
-from cooking_planner import generate_human_instructions, summarize_cooking_activities, summarize_kitchen_lanes
+from cooking_planner import (
+    build_kitchen_lane_schedule,
+    generate_human_instructions,
+    summarize_cooking_activities,
+    summarize_kitchen_lanes,
+)
 from culinary_opportunities import discover_opportunities, serialize_opportunities
 
 def _clean(value):
@@ -187,6 +192,8 @@ def generate_candidates(
             "effort_score": effort_score,
         })
 
+        schedule = build_kitchen_lane_schedule(c)
+        c["minutes"] = max((item.end_minute for item in schedule), default=0)
         c["opportunities"] = serialize_opportunities(discover_opportunities(c))
         candidates.append(c)
 
