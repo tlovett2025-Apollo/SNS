@@ -249,7 +249,7 @@ CHICKEN_BREAST = IngredientProfile(
     prep_minutes=3,
     cook_minutes=12,
     active_minutes=10,
-    passive_minutes=5,
+    passive_minutes=0,
     rest_minutes=5,
     add_stage="middle",
     holdability="fair",
@@ -270,7 +270,7 @@ CHICKEN_BREAST = IngredientProfile(
     states={
         "Fresh Raw": IngredientState(
             name="Fresh Raw", prep_minutes=3, cook_minutes=12, active_minutes=10,
-            passive_minutes=5, attention_score=6, holdability="fair",
+            passive_minutes=0, attention_score=6, holdability="fair",
             handling_note="remove loose membrane and as much visible fat as desired. Do not rinse raw chicken. Pat dry, make the thickness even if needed, and season both sides.",
             timing_note="Fresh raw chicken breast cooks quickly but needs attention.",
         ),
@@ -468,8 +468,7 @@ def _chicken_activities(self, strategy="", state_name=""):
     for activity in activities:
         if activity.activity_type == "cook":
             activity.attention_load = 0.25
-        elif activity.activity_type == "wait":
-            activity.instruction = "Continue cooking until the thickest part of the chicken breast reaches 165°F. Remove it from the pan and let it rest before slicing."
+            activity.instruction += " Cook until the thickest part reaches 165°F, then remove it from the pan and let it rest before slicing."
     activities.append(KitchenActivity(
         component=self.name,
         activity_type="slice",

@@ -119,7 +119,7 @@ with tabs[0]:
         help="State is the ingredient's current condition. Prep form and cooking technique are separate concepts.",
     )
     c5,c6,c7,c8 = st.columns(4)
-    energy_level = c5.selectbox("Energy", LEVEL_OPTIONS, index=2)
+    energy_level = c5.selectbox("Your Energy Today", LEVEL_OPTIONS, index=2)
     budget_level = c6.selectbox("Budget", BUDGET_OPTIONS, index=2)
     time_minutes = c7.number_input("Max Time Minutes", min_value=5, max_value=240, value=30, step=5)
     servings = c8.number_input("Servings", min_value=1, max_value=24, value=4, step=1)
@@ -144,7 +144,7 @@ with tabs[0]:
         )
         st.markdown(f"**Title: {meal_title}**")
         option_labels = [
-            f"{i+1}. {c['label']} — Energy: {c['energy']} · Budget: {c['budget']} · "
+            f"{i+1}. {c['label']} — Meal Energy: {c['energy']} · Budget: {c['budget']} · "
             f"Total: {c['minutes']} min · Active: {c.get('active_minutes', 0)} min · "
             f"Passive: {c.get('passive_minutes', 0)} min · Attention Required: {c.get('attention_score', 0)}/10 · "
             f"Effort Needed: {c.get('effort_score', 0)}/10 · SCORE: {c['score']}"

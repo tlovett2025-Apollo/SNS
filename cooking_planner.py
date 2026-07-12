@@ -331,19 +331,17 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             equipment="burner",
         ))
         activities.append(_planner_activity(
-            "plate sides",
-            f"Plate {foundation or 'the foundation'} and {_join(vegetables)} with the finished sauce while the protein rests.",
+            "finish and serve",
+            (
+                f"Plate {foundation or 'the foundation'} and {_join(vegetables)} with the finished sauce. "
+                f"Slice {protein or 'the protein'} after its full rest, add it to the plates, and serve immediately."
+            ),
             minutes=2,
             stage="finish",
-            depends_on=terminal_ids([*vegetables, foundation]) + ["finish sauce:meal"],
-            equipment="counter",
-        ))
-        activities.append(_planner_activity(
-            "serve chicken",
-            f"Add {protein or 'the protein'} to the plated meal and serve immediately.",
-            minutes=1,
-            stage="finish",
-            depends_on=terminal_ids([protein]) + ["plate sides:meal"],
+            depends_on=(
+                terminal_ids([*vegetables, foundation, protein])
+                + ["finish sauce:meal"]
+            ),
             equipment="counter",
         ))
 
@@ -361,7 +359,7 @@ def consolidate_kitchen_activities(
     """Translate ingredient activities into work a cook actually performs.
 
     Long-lead components receive a small launch-prep phase so they can begin
-    before general mise en place. Remaining ingredient prep plus sauce/spice
+    before general ingredient prep. Remaining ingredient prep plus sauce/spice
     measuring becomes one calm meal-level prep phase while passive work runs.
     """
 
@@ -423,13 +421,18 @@ def consolidate_kitchen_activities(
                 calculated_minutes += 1  # one shared slicing/dicing/modification allowance
             if _clean(candidate.get("protein")):
                 calculated_minutes += 1
+        heading = (
+            "Prepare the long-lead components:"
+            if activity_type == "launch prep"
+            else "Ingredient Prep:"
+        )
+        formatted_instructions = "\n\n".join(
+            f"- {instruction}." for instruction in instructions
+        )
         return KitchenActivity(
             component="meal",
             activity_type=activity_type,
-            instruction=(
-                "Prepare the long-lead components: " if activity_type == "launch prep"
-                else "Complete mise en place: "
-            ) + "; ".join(instructions) + ".",
+            instruction=f"{heading}\n\n{formatted_instructions}",
             minutes=calculated_minutes + extra_minutes,
             human_busy=True,
             equipment="counter",
@@ -479,6 +482,41 @@ def consolidate_kitchen_activities(
         consolidated.append(activity)
 
     return consolidated
+
+
+def consolidate_final_service(activities: List[KitchenActivity]) -> List[KitchenActivity]:
+    """Fold a separately published protein slice into the meal's service pass.
+
+    The ingredient KO still publishes slicing as required knowledge. At meal level,
+    however, slicing, plating, saucing, and carrying the plates are one continuous
+    service activity. The service pass inherits the slice activity's dependencies,
+    so a required protein rest is never shortened or bypassed.
+    """
+    service = next(
+        (activity for activity in activities if _activity_id(activity) == "finish and serve:meal"),
+        None,
+    )
+    if service is None:
+        return activities
+
+    slice_activities = [
+        activity for activity in activities
+        if activity.source == "ko" and activity.activity_type == "slice"
+    ]
+    if not slice_activities:
+        return activities
+
+    slice_by_id = {_activity_id(activity): activity for activity in slice_activities}
+    rewritten = []
+    for dependency in service.depends_on:
+        if dependency in slice_by_id:
+            for inherited in slice_by_id[dependency].depends_on:
+                if inherited not in rewritten:
+                    rewritten.append(inherited)
+        elif dependency not in rewritten:
+            rewritten.append(dependency)
+    service.depends_on = rewritten
+    return [activity for activity in activities if activity not in slice_activities]
 
 
 
@@ -536,6 +574,7 @@ def build_activity_graph(candidate: dict) -> Dict[str, KitchenActivity]:
     activities = build_cooking_activities(candidate)
     activities = assign_available_equipment(activities, candidate)
     activities = consolidate_kitchen_activities(activities, candidate)
+    activities = consolidate_final_service(activities)
     for activity in activities:
         activity.activity_id = _activity_id(activity)
         if activity.activity_id in graph:
@@ -697,6 +736,23 @@ def assess_time_feasibility(candidate: dict, available_minutes: int) -> dict:
         "time_feasible": shortfall == 0,
         "time_shortfall_minutes": shortfall,
     }
+
+
+def calculate_effort_score(candidate: dict, schedule=None) -> int:
+    """Calculate meal-level effort from the work in the finished schedule."""
+    schedule = schedule if schedule is not None else build_kitchen_lane_schedule(candidate)
+    hands_on_minutes = sum(item.attention_minutes for item in schedule)
+    hands_on_tasks = sum(1 for item in schedule if item.attention_minutes > 0)
+    equipment_lanes = {
+        item.lane for item in schedule
+        if item.attention_minutes > 0 and item.lane != "Counter"
+    }
+    raw_score = (
+        hands_on_minutes / 4.0
+        + hands_on_tasks / 6.0
+        + max(0, len(equipment_lanes) - 1) * 0.5
+    )
+    return max(1, min(10, round(raw_score)))
 
 def summarize_cooking_activities(candidate: dict) -> List[str]:
     """Return developer-readable evidence of activity ownership and semantics."""
@@ -914,8 +970,8 @@ def build_cooking_plan(candidate: dict) -> List[CookingStep]:
     return sorted(steps, key=lambda step: step.order)
 
 
-def generate_human_instructions(candidate: dict) -> str:
-    """Render the actual scheduled activity graph as the user-facing recipe."""
+def generate_human_instruction_steps(candidate: dict) -> List[str]:
+    """Render the actual scheduled activity graph as logical recipe steps."""
 
     schedule = build_kitchen_lane_schedule(candidate)
     lines = []
@@ -941,4 +997,9 @@ def generate_human_instructions(candidate: dict) -> str:
             attention = f" About {item.attention_minutes} minutes of attention are needed during this window."
         lines.append(f"{time_window}: {activity.instruction}{attention}")
 
-    return "\n".join(lines)
+    return lines
+
+
+def generate_human_instructions(candidate: dict) -> str:
+    """Return recipe steps as plain text for exports and diagnostics."""
+    return "\n".join(generate_human_instruction_steps(candidate))

@@ -2,6 +2,8 @@ from ingredient_profiles import get_ingredient_profile
 from cooking_planner import (
     assess_time_feasibility,
     build_kitchen_lane_schedule,
+    calculate_effort_score,
+    generate_human_instruction_steps,
     generate_human_instructions,
     summarize_cooking_activities,
     summarize_kitchen_lanes,
@@ -198,8 +200,6 @@ def generate_candidates(
         if foundation_profile:
             attention_score = max(attention_score, foundation_profile.attention_score)
 
-        effort_score = protein_profile.effort_score() if protein_profile else 0
-
         c.update({
             "score": score,
             "sauce": sauce,
@@ -213,7 +213,10 @@ def generate_candidates(
             "passive_minutes": passive_minutes,
             "minutes": active_minutes + passive_minutes,
             "attention_score": attention_score,
-            "effort_score": effort_score,
+            "effort_score": 0,
+            "user_energy": energy_level,
+            "user_budget": budget_level,
+            "max_time_minutes": time_limit,
             "inventory_have": available,
             "inventory_need": needed,
             "available_equipment": list(available_equipment or []),
@@ -223,6 +226,7 @@ def generate_candidates(
         c["minutes"] = max((item.end_minute for item in schedule), default=0)
         c["active_minutes"] = sum(item.attention_minutes for item in schedule)
         c["passive_minutes"] = max(0, c["minutes"] - c["active_minutes"])
+        c["effort_score"] = calculate_effort_score(c, schedule)
         c["inventory_requirements"] = [
             {
                 "name": item.name,
@@ -246,13 +250,13 @@ def build_recipe_from_candidate(candidate):
     protein = candidate.get("protein", "")
     vegetable = candidate.get("vegetable", "")
     foundation = candidate.get("foundation", "")
-    instructions = generate_human_instructions(candidate)
+    instructions = generate_human_instruction_steps(candidate)
     activity_debug = summarize_cooking_activities(candidate)
     lane_debug = summarize_kitchen_lanes(candidate)
 
     return {
         "name": candidate.get("title", "Generated Meal"),
-        "instructions": instructions.split("\n"),
+        "instructions": instructions,
         "activity_debug": activity_debug,
         "lane_debug": lane_debug,
         "opportunities": list(candidate.get("opportunities") or []),

@@ -37,11 +37,12 @@ def test_activity_graph_dependencies_resolve():
     assert "prep:meal" in graph
     assert "prep:Chicken breast" not in graph
     assert graph["prep:meal"].source == "consolidator"
-    assert graph["slice:Chicken breast"].depends_on == ["rest:Chicken breast"]
+    assert "slice:Chicken breast" not in graph
+    assert "rest:Chicken breast" in graph["finish and serve:meal"].depends_on
     assert all(dep in graph for activity in graph.values() for dep in activity.depends_on)
 
 
-def test_activity_consolidation_builds_one_real_mise_en_place_phase():
+def test_activity_consolidation_builds_one_real_ingredient_prep_phase():
     from cooking_planner import build_activity_graph
 
     graph = build_activity_graph(parallel_regression_candidate())
@@ -53,6 +54,9 @@ def test_activity_consolidation_builds_one_real_mise_en_place_phase():
     assert prep.component == "meal"
     assert prep.activity_type == "prep"
     instruction = prep.instruction.lower()
+    assert instruction.startswith("ingredient prep:")
+    assert "mise en place" not in instruction
+    assert instruction.count("\n\n- ") >= 4
     assert "chicken breast" in instruction
     assert "swiss chard" in instruction
     assert "mushrooms" in instruction
@@ -112,7 +116,7 @@ def test_protein_state_flows_into_candidate():
 def test_fresh_raw_chicken_publishes_cook_rest_and_slice():
     activities = build_cooking_activities(state_candidate("Fresh Raw"))
     kinds = [a.activity_type for a in activities if a.component == "Chicken breast"]
-    assert kinds == ["prep", "cook", "wait", "rest", "slice"]
+    assert kinds == ["prep", "cook", "rest", "slice"]
 
 
 def test_frozen_raw_chicken_publishes_verify_and_longer_path():
@@ -159,13 +163,14 @@ def parallel_regression_candidate():
     )[0]
 
 
-def test_scheduler_starts_passive_chicken_wait_when_active_cook_ends():
+def test_fresh_chicken_cook_window_is_not_followed_by_duplicate_passive_cooking():
     from cooking_planner import build_kitchen_lane_schedule
 
     schedule = build_kitchen_lane_schedule(parallel_regression_candidate())
     by_id = {item.activity.activity_id: item for item in schedule}
 
-    assert by_id["wait:Chicken breast"].start_minute == by_id["cook:Chicken breast"].end_minute
+    assert "wait:Chicken breast" not in by_id
+    assert by_id["rest:Chicken breast"].start_minute == by_id["cook:Chicken breast"].end_minute
 
 
 def test_rice_passive_cooking_overlaps_other_human_work():
@@ -241,6 +246,36 @@ def test_energy_scales_human_attention_and_schedule():
     assert max(item.end_minute for item in exhausted) >= max(item.end_minute for item in normal)
 
 
+def test_user_energy_input_flows_into_candidate_schedule():
+    normal = generate_candidates(
+        "Chicken breast", "Mushrooms", "Rice", "Chinese",
+        "Medium", "Budget", 60, 4, 1,
+    )[0]
+    low = generate_candidates(
+        "Chicken breast", "Mushrooms", "Rice", "Chinese",
+        "Very Low", "Budget", 60, 4, 1,
+    )[0]
+
+    assert normal["user_energy"] == "Medium"
+    assert low["user_energy"] == "Very Low"
+    assert low["active_minutes"] > normal["active_minutes"]
+
+
+def test_effort_comes_from_whole_meal_schedule():
+    full = generate_candidates(
+        "Chicken breast", "Mushrooms & Swiss chard & Asparagus", "Rice", "Chinese",
+        "Medium", "Budget", 60, 4, 1,
+        vegetable_names=["Mushrooms", "Swiss chard", "Asparagus"],
+    )[0]
+    reduced = generate_candidates(
+        "Chicken breast", "Mushrooms", "Rice", "Chinese",
+        "Medium", "Budget", 60, 4, 1,
+        vegetable_names=["Mushrooms"],
+    )[0]
+
+    assert full["effort_score"] > reduced["effort_score"]
+
+
 def test_chicken_uses_fractional_not_exclusive_attention():
     from cooking_planner import build_kitchen_lane_schedule
 
@@ -304,11 +339,12 @@ def test_sauce_seasoning_and_service_are_explicit_activities():
     graph = build_activity_graph(parallel_regression_candidate())
     assert "finish sauce:meal" in graph
     assert "adjust seasoning" in graph["finish sauce:meal"].instruction
-    assert "plate sides:meal" in graph
-    assert "serve chicken:meal" in graph
+    assert "finish and serve:meal" in graph
+    assert "plate sides:meal" not in graph
+    assert "serve chicken:meal" not in graph
 
 
-def test_sides_can_be_plated_while_chicken_rests():
+def test_final_service_is_consolidated_after_chicken_rests():
     from cooking_planner import build_kitchen_lane_schedule
 
     candidate = parallel_regression_candidate()
@@ -317,8 +353,11 @@ def test_sides_can_be_plated_while_chicken_rests():
     schedule = build_kitchen_lane_schedule(candidate)
     by_id = {item.activity.activity_id: item for item in schedule}
 
-    assert by_id["plate sides:meal"].start_minute < by_id["rest:Chicken breast"].end_minute
-    assert by_id["serve chicken:meal"].start_minute >= by_id["slice:Chicken breast"].end_minute
+    service = by_id["finish and serve:meal"]
+    assert service.start_minute >= by_id["rest:Chicken breast"].end_minute
+    assert "slice:Chicken breast" not in by_id
+    assert service.end_minute - service.start_minute == 2
+    assert service.end_minute in {33, 34}
 
 
 def test_printed_recipe_uses_detailed_ko_instructions():
