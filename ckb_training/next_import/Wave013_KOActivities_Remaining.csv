@@ -1,0 +1,517 @@
+ingredient_name,role,state_name,sequence,activity_type,instruction,minutes,human_busy,attention_load,equipment_name,stage,parallel_ok,depends_on_sequence,verified
+Ground beef,protein,Fresh Raw,1,prep,"Prep Ground beef: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Ground beef,protein,Fresh Raw,2,cook,Cook Ground beef in a skillet until the thickest part reaches 160°F.,12,1,0.5,burner,middle,0,1,1
+Ground beef,protein,Fresh Raw,3,rest,Rest Ground beef before slicing or serving.,5,0,0,counter,finish,1,2,1
+Ground beef,protein,Frozen Raw,1,prep,Prep Ground beef: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Ground beef,protein,Frozen Raw,2,cook,Begin cooking Ground beef in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Ground beef,protein,Frozen Raw,3,wait,Continue cooking Ground beef without constant attention.,12,0,0,burner,middle,1,2,1
+Ground beef,protein,Frozen Raw,4,verify,Verify Ground beef until the thickest part reaches 160°F.,2,1,1,counter,finish,0,3,1
+Ground beef,protein,Frozen Raw,5,rest,Rest Ground beef before slicing or serving.,5,0,0,counter,finish,1,4,1
+Ground beef,protein,Cooked,1,prep,"Prep Ground beef: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Ground beef,protein,Cooked,2,reheat,Reheat Ground beef gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Beef stew meat,protein,Fresh Raw,1,prep,"Prep Beef stew meat: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Beef stew meat,protein,Fresh Raw,2,cook,Cook Beef stew meat in a covered pot until the thickest part reaches 205°F.,20,1,0.5,burner,middle,0,1,1
+Beef stew meat,protein,Fresh Raw,3,rest,Rest Beef stew meat before slicing or serving.,5,0,0,counter,finish,1,2,1
+Beef stew meat,protein,Frozen Raw,1,prep,Prep Beef stew meat: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Beef stew meat,protein,Frozen Raw,2,cook,Begin cooking Beef stew meat in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Beef stew meat,protein,Frozen Raw,3,wait,Continue cooking Beef stew meat without constant attention.,20,0,0,burner,middle,1,2,1
+Beef stew meat,protein,Frozen Raw,4,verify,Verify Beef stew meat until the thickest part reaches 205°F.,2,1,1,counter,finish,0,3,1
+Beef stew meat,protein,Frozen Raw,5,rest,Rest Beef stew meat before slicing or serving.,5,0,0,counter,finish,1,4,1
+Beef stew meat,protein,Cooked,1,prep,"Prep Beef stew meat: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Beef stew meat,protein,Cooked,2,reheat,Reheat Beef stew meat gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Chuck roast,protein,Fresh Raw,1,prep,"Prep Chuck roast: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Chuck roast,protein,Fresh Raw,2,cook,Cook Chuck roast in a covered pot until the thickest part reaches 205°F.,20,1,0.5,burner,middle,0,1,1
+Chuck roast,protein,Fresh Raw,3,rest,Rest Chuck roast before slicing or serving.,5,0,0,counter,finish,1,2,1
+Chuck roast,protein,Frozen Raw,1,prep,Prep Chuck roast: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Chuck roast,protein,Frozen Raw,2,cook,Begin cooking Chuck roast in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Chuck roast,protein,Frozen Raw,3,wait,Continue cooking Chuck roast without constant attention.,20,0,0,burner,middle,1,2,1
+Chuck roast,protein,Frozen Raw,4,verify,Verify Chuck roast until the thickest part reaches 205°F.,2,1,1,counter,finish,0,3,1
+Chuck roast,protein,Frozen Raw,5,rest,Rest Chuck roast before slicing or serving.,5,0,0,counter,finish,1,4,1
+Chuck roast,protein,Cooked,1,prep,"Prep Chuck roast: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Chuck roast,protein,Cooked,2,reheat,Reheat Chuck roast gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Sirloin steak,protein,Fresh Raw,1,prep,"Prep Sirloin steak: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Sirloin steak,protein,Fresh Raw,2,cook,Cook Sirloin steak in a skillet until the thickest part reaches 145°F.,12,1,0.5,burner,middle,0,1,1
+Sirloin steak,protein,Fresh Raw,3,rest,Rest Sirloin steak before slicing or serving.,5,0,0,counter,finish,1,2,1
+Sirloin steak,protein,Frozen Raw,1,prep,Prep Sirloin steak: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Sirloin steak,protein,Frozen Raw,2,cook,Begin cooking Sirloin steak in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Sirloin steak,protein,Frozen Raw,3,wait,Continue cooking Sirloin steak without constant attention.,12,0,0,burner,middle,1,2,1
+Sirloin steak,protein,Frozen Raw,4,verify,Verify Sirloin steak until the thickest part reaches 145°F.,2,1,1,counter,finish,0,3,1
+Sirloin steak,protein,Frozen Raw,5,rest,Rest Sirloin steak before slicing or serving.,5,0,0,counter,finish,1,4,1
+Sirloin steak,protein,Cooked,1,prep,"Prep Sirloin steak: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Sirloin steak,protein,Cooked,2,reheat,Reheat Sirloin steak gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Ribeye steak,protein,Fresh Raw,1,prep,"Prep Ribeye steak: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Ribeye steak,protein,Fresh Raw,2,cook,Cook Ribeye steak in a skillet until the thickest part reaches 145°F.,12,1,0.5,burner,middle,0,1,1
+Ribeye steak,protein,Fresh Raw,3,rest,Rest Ribeye steak before slicing or serving.,5,0,0,counter,finish,1,2,1
+Ribeye steak,protein,Frozen Raw,1,prep,Prep Ribeye steak: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Ribeye steak,protein,Frozen Raw,2,cook,Begin cooking Ribeye steak in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Ribeye steak,protein,Frozen Raw,3,wait,Continue cooking Ribeye steak without constant attention.,12,0,0,burner,middle,1,2,1
+Ribeye steak,protein,Frozen Raw,4,verify,Verify Ribeye steak until the thickest part reaches 145°F.,2,1,1,counter,finish,0,3,1
+Ribeye steak,protein,Frozen Raw,5,rest,Rest Ribeye steak before slicing or serving.,5,0,0,counter,finish,1,4,1
+Ribeye steak,protein,Cooked,1,prep,"Prep Ribeye steak: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Ribeye steak,protein,Cooked,2,reheat,Reheat Ribeye steak gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Flank steak,protein,Fresh Raw,1,prep,"Prep Flank steak: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Flank steak,protein,Fresh Raw,2,cook,Cook Flank steak in a skillet until the thickest part reaches 145°F.,12,1,0.5,burner,middle,0,1,1
+Flank steak,protein,Fresh Raw,3,rest,Rest Flank steak before slicing or serving.,5,0,0,counter,finish,1,2,1
+Flank steak,protein,Frozen Raw,1,prep,Prep Flank steak: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Flank steak,protein,Frozen Raw,2,cook,Begin cooking Flank steak in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Flank steak,protein,Frozen Raw,3,wait,Continue cooking Flank steak without constant attention.,12,0,0,burner,middle,1,2,1
+Flank steak,protein,Frozen Raw,4,verify,Verify Flank steak until the thickest part reaches 145°F.,2,1,1,counter,finish,0,3,1
+Flank steak,protein,Frozen Raw,5,rest,Rest Flank steak before slicing or serving.,5,0,0,counter,finish,1,4,1
+Flank steak,protein,Cooked,1,prep,"Prep Flank steak: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Flank steak,protein,Cooked,2,reheat,Reheat Flank steak gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Beef brisket,protein,Fresh Raw,1,prep,"Prep Beef brisket: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Beef brisket,protein,Fresh Raw,2,cook,Cook Beef brisket in a covered pot until the thickest part reaches 205°F.,20,1,0.5,burner,middle,0,1,1
+Beef brisket,protein,Fresh Raw,3,rest,Rest Beef brisket before slicing or serving.,5,0,0,counter,finish,1,2,1
+Beef brisket,protein,Frozen Raw,1,prep,Prep Beef brisket: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Beef brisket,protein,Frozen Raw,2,cook,Begin cooking Beef brisket in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Beef brisket,protein,Frozen Raw,3,wait,Continue cooking Beef brisket without constant attention.,20,0,0,burner,middle,1,2,1
+Beef brisket,protein,Frozen Raw,4,verify,Verify Beef brisket until the thickest part reaches 205°F.,2,1,1,counter,finish,0,3,1
+Beef brisket,protein,Frozen Raw,5,rest,Rest Beef brisket before slicing or serving.,5,0,0,counter,finish,1,4,1
+Beef brisket,protein,Cooked,1,prep,"Prep Beef brisket: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Beef brisket,protein,Cooked,2,reheat,Reheat Beef brisket gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Corned beef,protein,Fresh Raw,1,prep,"Prep Corned beef: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Corned beef,protein,Fresh Raw,2,cook,Cook Corned beef in a covered pot until the thickest part reaches 165°F.,20,1,0.5,burner,middle,0,1,1
+Corned beef,protein,Fresh Raw,3,rest,Rest Corned beef before slicing or serving.,5,0,0,counter,finish,1,2,1
+Corned beef,protein,Frozen Raw,1,prep,Prep Corned beef: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Corned beef,protein,Frozen Raw,2,cook,Begin cooking Corned beef in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Corned beef,protein,Frozen Raw,3,wait,Continue cooking Corned beef without constant attention.,20,0,0,burner,middle,1,2,1
+Corned beef,protein,Frozen Raw,4,verify,Verify Corned beef until the thickest part reaches 165°F.,2,1,1,counter,finish,0,3,1
+Corned beef,protein,Frozen Raw,5,rest,Rest Corned beef before slicing or serving.,5,0,0,counter,finish,1,4,1
+Corned beef,protein,Cooked,1,prep,"Prep Corned beef: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Corned beef,protein,Cooked,2,reheat,Reheat Corned beef gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Chicken thighs,protein,Fresh Raw,1,prep,"Prep Chicken thighs: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Chicken thighs,protein,Fresh Raw,2,cook,Cook Chicken thighs in a skillet until the thickest part reaches 165°F.,12,1,0.5,burner,middle,0,1,1
+Chicken thighs,protein,Fresh Raw,3,rest,Rest Chicken thighs before slicing or serving.,5,0,0,counter,finish,1,2,1
+Chicken thighs,protein,Frozen Raw,1,prep,Prep Chicken thighs: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Chicken thighs,protein,Frozen Raw,2,cook,Begin cooking Chicken thighs in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Chicken thighs,protein,Frozen Raw,3,wait,Continue cooking Chicken thighs without constant attention.,12,0,0,burner,middle,1,2,1
+Chicken thighs,protein,Frozen Raw,4,verify,Verify Chicken thighs until the thickest part reaches 165°F.,2,1,1,counter,finish,0,3,1
+Chicken thighs,protein,Frozen Raw,5,rest,Rest Chicken thighs before slicing or serving.,5,0,0,counter,finish,1,4,1
+Chicken thighs,protein,Cooked,1,prep,"Prep Chicken thighs: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Chicken thighs,protein,Cooked,2,reheat,Reheat Chicken thighs gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Chicken drumsticks,protein,Fresh Raw,1,prep,"Prep Chicken drumsticks: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Chicken drumsticks,protein,Fresh Raw,2,cook,Cook Chicken drumsticks in a roasting pan until the thickest part reaches 165°F.,20,1,0.5,oven,middle,0,1,1
+Chicken drumsticks,protein,Fresh Raw,3,rest,Rest Chicken drumsticks before slicing or serving.,5,0,0,counter,finish,1,2,1
+Chicken drumsticks,protein,Frozen Raw,1,prep,Prep Chicken drumsticks: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Chicken drumsticks,protein,Frozen Raw,2,cook,Begin cooking Chicken drumsticks in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Chicken drumsticks,protein,Frozen Raw,3,wait,Continue cooking Chicken drumsticks without constant attention.,20,0,0,burner,middle,1,2,1
+Chicken drumsticks,protein,Frozen Raw,4,verify,Verify Chicken drumsticks until the thickest part reaches 165°F.,2,1,1,counter,finish,0,3,1
+Chicken drumsticks,protein,Frozen Raw,5,rest,Rest Chicken drumsticks before slicing or serving.,5,0,0,counter,finish,1,4,1
+Chicken drumsticks,protein,Cooked,1,prep,"Prep Chicken drumsticks: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Chicken drumsticks,protein,Cooked,2,reheat,Reheat Chicken drumsticks gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Chicken wings,protein,Fresh Raw,1,prep,"Prep Chicken wings: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Chicken wings,protein,Fresh Raw,2,cook,Cook Chicken wings in a roasting pan until the thickest part reaches 165°F.,20,1,0.5,oven,middle,0,1,1
+Chicken wings,protein,Fresh Raw,3,rest,Rest Chicken wings before slicing or serving.,5,0,0,counter,finish,1,2,1
+Chicken wings,protein,Frozen Raw,1,prep,Prep Chicken wings: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Chicken wings,protein,Frozen Raw,2,cook,Begin cooking Chicken wings in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Chicken wings,protein,Frozen Raw,3,wait,Continue cooking Chicken wings without constant attention.,20,0,0,burner,middle,1,2,1
+Chicken wings,protein,Frozen Raw,4,verify,Verify Chicken wings until the thickest part reaches 165°F.,2,1,1,counter,finish,0,3,1
+Chicken wings,protein,Frozen Raw,5,rest,Rest Chicken wings before slicing or serving.,5,0,0,counter,finish,1,4,1
+Chicken wings,protein,Cooked,1,prep,"Prep Chicken wings: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Chicken wings,protein,Cooked,2,reheat,Reheat Chicken wings gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Whole chicken,protein,Fresh Raw,1,prep,"Prep Whole chicken: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Whole chicken,protein,Fresh Raw,2,cook,Cook Whole chicken in a roasting pan until the thickest part reaches 165°F.,20,1,0.5,oven,middle,0,1,1
+Whole chicken,protein,Fresh Raw,3,rest,Rest Whole chicken before slicing or serving.,5,0,0,counter,finish,1,2,1
+Whole chicken,protein,Frozen Raw,1,prep,Prep Whole chicken: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Whole chicken,protein,Frozen Raw,2,cook,Begin cooking Whole chicken in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Whole chicken,protein,Frozen Raw,3,wait,Continue cooking Whole chicken without constant attention.,20,0,0,burner,middle,1,2,1
+Whole chicken,protein,Frozen Raw,4,verify,Verify Whole chicken until the thickest part reaches 165°F.,2,1,1,counter,finish,0,3,1
+Whole chicken,protein,Frozen Raw,5,rest,Rest Whole chicken before slicing or serving.,5,0,0,counter,finish,1,4,1
+Whole chicken,protein,Cooked,1,prep,"Prep Whole chicken: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Whole chicken,protein,Cooked,2,reheat,Reheat Whole chicken gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Ground chicken,protein,Fresh Raw,1,prep,"Prep Ground chicken: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Ground chicken,protein,Fresh Raw,2,cook,Cook Ground chicken in a skillet until the thickest part reaches 165°F.,12,1,0.5,burner,middle,0,1,1
+Ground chicken,protein,Fresh Raw,3,rest,Rest Ground chicken before slicing or serving.,5,0,0,counter,finish,1,2,1
+Ground chicken,protein,Frozen Raw,1,prep,Prep Ground chicken: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Ground chicken,protein,Frozen Raw,2,cook,Begin cooking Ground chicken in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Ground chicken,protein,Frozen Raw,3,wait,Continue cooking Ground chicken without constant attention.,12,0,0,burner,middle,1,2,1
+Ground chicken,protein,Frozen Raw,4,verify,Verify Ground chicken until the thickest part reaches 165°F.,2,1,1,counter,finish,0,3,1
+Ground chicken,protein,Frozen Raw,5,rest,Rest Ground chicken before slicing or serving.,5,0,0,counter,finish,1,4,1
+Ground chicken,protein,Cooked,1,prep,"Prep Ground chicken: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Ground chicken,protein,Cooked,2,reheat,Reheat Ground chicken gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Rotisserie chicken,protein,,1,prep,"Prep Rotisserie chicken: drain, shred, slice, or portion it as needed.",2,1,1,counter,late,1,,1
+Rotisserie chicken,protein,,2,warm,Warm Rotisserie chicken gently in a skillet or saucepan only until hot.,8,1,0.4,burner,late,1,1,1
+Canned chicken,protein,,1,prep,"Prep Canned chicken: drain, shred, slice, or portion it as needed.",2,1,1,counter,late,1,,1
+Canned chicken,protein,,2,warm,Warm Canned chicken gently in a skillet or saucepan only until hot.,8,1,0.4,burner,late,1,1,1
+Ground turkey,protein,Fresh Raw,1,prep,"Prep Ground turkey: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Ground turkey,protein,Fresh Raw,2,cook,Cook Ground turkey in a skillet until the thickest part reaches 165°F.,12,1,0.5,burner,middle,0,1,1
+Ground turkey,protein,Fresh Raw,3,rest,Rest Ground turkey before slicing or serving.,5,0,0,counter,finish,1,2,1
+Ground turkey,protein,Frozen Raw,1,prep,Prep Ground turkey: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Ground turkey,protein,Frozen Raw,2,cook,Begin cooking Ground turkey in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Ground turkey,protein,Frozen Raw,3,wait,Continue cooking Ground turkey without constant attention.,12,0,0,burner,middle,1,2,1
+Ground turkey,protein,Frozen Raw,4,verify,Verify Ground turkey until the thickest part reaches 165°F.,2,1,1,counter,finish,0,3,1
+Ground turkey,protein,Frozen Raw,5,rest,Rest Ground turkey before slicing or serving.,5,0,0,counter,finish,1,4,1
+Ground turkey,protein,Cooked,1,prep,"Prep Ground turkey: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Ground turkey,protein,Cooked,2,reheat,Reheat Ground turkey gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Turkey breast,protein,Fresh Raw,1,prep,"Prep Turkey breast: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Turkey breast,protein,Fresh Raw,2,cook,Cook Turkey breast in a skillet until the thickest part reaches 165°F.,12,1,0.5,burner,middle,0,1,1
+Turkey breast,protein,Fresh Raw,3,rest,Rest Turkey breast before slicing or serving.,5,0,0,counter,finish,1,2,1
+Turkey breast,protein,Frozen Raw,1,prep,Prep Turkey breast: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Turkey breast,protein,Frozen Raw,2,cook,Begin cooking Turkey breast in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Turkey breast,protein,Frozen Raw,3,wait,Continue cooking Turkey breast without constant attention.,12,0,0,burner,middle,1,2,1
+Turkey breast,protein,Frozen Raw,4,verify,Verify Turkey breast until the thickest part reaches 165°F.,2,1,1,counter,finish,0,3,1
+Turkey breast,protein,Frozen Raw,5,rest,Rest Turkey breast before slicing or serving.,5,0,0,counter,finish,1,4,1
+Turkey breast,protein,Cooked,1,prep,"Prep Turkey breast: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Turkey breast,protein,Cooked,2,reheat,Reheat Turkey breast gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Turkey sausage,protein,Fresh Raw,1,prep,"Prep Turkey sausage: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Turkey sausage,protein,Fresh Raw,2,cook,Cook Turkey sausage in a skillet until the thickest part reaches 165°F.,12,1,0.5,burner,middle,0,1,1
+Turkey sausage,protein,Fresh Raw,3,rest,Rest Turkey sausage before slicing or serving.,5,0,0,counter,finish,1,2,1
+Turkey sausage,protein,Frozen Raw,1,prep,Prep Turkey sausage: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Turkey sausage,protein,Frozen Raw,2,cook,Begin cooking Turkey sausage in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Turkey sausage,protein,Frozen Raw,3,wait,Continue cooking Turkey sausage without constant attention.,12,0,0,burner,middle,1,2,1
+Turkey sausage,protein,Frozen Raw,4,verify,Verify Turkey sausage until the thickest part reaches 165°F.,2,1,1,counter,finish,0,3,1
+Turkey sausage,protein,Frozen Raw,5,rest,Rest Turkey sausage before slicing or serving.,5,0,0,counter,finish,1,4,1
+Turkey sausage,protein,Cooked,1,prep,"Prep Turkey sausage: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Turkey sausage,protein,Cooked,2,reheat,Reheat Turkey sausage gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Pork loin,protein,Fresh Raw,1,prep,"Prep Pork loin: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Pork loin,protein,Fresh Raw,2,cook,Cook Pork loin in a skillet until the thickest part reaches 145°F.,12,1,0.5,burner,middle,0,1,1
+Pork loin,protein,Fresh Raw,3,rest,Rest Pork loin before slicing or serving.,5,0,0,counter,finish,1,2,1
+Pork loin,protein,Frozen Raw,1,prep,Prep Pork loin: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Pork loin,protein,Frozen Raw,2,cook,Begin cooking Pork loin in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Pork loin,protein,Frozen Raw,3,wait,Continue cooking Pork loin without constant attention.,12,0,0,burner,middle,1,2,1
+Pork loin,protein,Frozen Raw,4,verify,Verify Pork loin until the thickest part reaches 145°F.,2,1,1,counter,finish,0,3,1
+Pork loin,protein,Frozen Raw,5,rest,Rest Pork loin before slicing or serving.,5,0,0,counter,finish,1,4,1
+Pork loin,protein,Cooked,1,prep,"Prep Pork loin: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Pork loin,protein,Cooked,2,reheat,Reheat Pork loin gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Pork shoulder,protein,Fresh Raw,1,prep,"Prep Pork shoulder: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Pork shoulder,protein,Fresh Raw,2,cook,Cook Pork shoulder in a covered pot until the thickest part reaches 205°F.,20,1,0.5,burner,middle,0,1,1
+Pork shoulder,protein,Fresh Raw,3,rest,Rest Pork shoulder before slicing or serving.,5,0,0,counter,finish,1,2,1
+Pork shoulder,protein,Frozen Raw,1,prep,Prep Pork shoulder: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Pork shoulder,protein,Frozen Raw,2,cook,Begin cooking Pork shoulder in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Pork shoulder,protein,Frozen Raw,3,wait,Continue cooking Pork shoulder without constant attention.,20,0,0,burner,middle,1,2,1
+Pork shoulder,protein,Frozen Raw,4,verify,Verify Pork shoulder until the thickest part reaches 205°F.,2,1,1,counter,finish,0,3,1
+Pork shoulder,protein,Frozen Raw,5,rest,Rest Pork shoulder before slicing or serving.,5,0,0,counter,finish,1,4,1
+Pork shoulder,protein,Cooked,1,prep,"Prep Pork shoulder: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Pork shoulder,protein,Cooked,2,reheat,Reheat Pork shoulder gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Pork chops,protein,Fresh Raw,1,prep,"Prep Pork chops: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Pork chops,protein,Fresh Raw,2,cook,Cook Pork chops in a skillet until the thickest part reaches 145°F.,12,1,0.5,burner,middle,0,1,1
+Pork chops,protein,Fresh Raw,3,rest,Rest Pork chops before slicing or serving.,5,0,0,counter,finish,1,2,1
+Pork chops,protein,Frozen Raw,1,prep,Prep Pork chops: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Pork chops,protein,Frozen Raw,2,cook,Begin cooking Pork chops in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Pork chops,protein,Frozen Raw,3,wait,Continue cooking Pork chops without constant attention.,12,0,0,burner,middle,1,2,1
+Pork chops,protein,Frozen Raw,4,verify,Verify Pork chops until the thickest part reaches 145°F.,2,1,1,counter,finish,0,3,1
+Pork chops,protein,Frozen Raw,5,rest,Rest Pork chops before slicing or serving.,5,0,0,counter,finish,1,4,1
+Pork chops,protein,Cooked,1,prep,"Prep Pork chops: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Pork chops,protein,Cooked,2,reheat,Reheat Pork chops gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Ham,protein,,1,prep,"Prep Ham: drain, shred, slice, or portion it as needed.",2,1,1,counter,late,1,,1
+Ham,protein,,2,warm,Warm Ham gently in a skillet or saucepan only until hot.,8,1,0.4,burner,late,1,1,1
+Bacon,protein,Fresh Raw,1,prep,"Prep Bacon: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Bacon,protein,Fresh Raw,2,cook,Cook Bacon in a skillet until the thickest part reaches 145°F.,12,1,0.5,burner,middle,0,1,1
+Bacon,protein,Fresh Raw,3,rest,Rest Bacon before slicing or serving.,5,0,0,counter,finish,1,2,1
+Bacon,protein,Frozen Raw,1,prep,Prep Bacon: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Bacon,protein,Frozen Raw,2,cook,Begin cooking Bacon in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Bacon,protein,Frozen Raw,3,wait,Continue cooking Bacon without constant attention.,12,0,0,burner,middle,1,2,1
+Bacon,protein,Frozen Raw,4,verify,Verify Bacon until the thickest part reaches 145°F.,2,1,1,counter,finish,0,3,1
+Bacon,protein,Frozen Raw,5,rest,Rest Bacon before slicing or serving.,5,0,0,counter,finish,1,4,1
+Bacon,protein,Cooked,1,prep,"Prep Bacon: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Bacon,protein,Cooked,2,reheat,Reheat Bacon gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Breakfast sausage,protein,Fresh Raw,1,prep,"Prep Breakfast sausage: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Breakfast sausage,protein,Fresh Raw,2,cook,Cook Breakfast sausage in a skillet until the thickest part reaches 160°F.,12,1,0.5,burner,middle,0,1,1
+Breakfast sausage,protein,Fresh Raw,3,rest,Rest Breakfast sausage before slicing or serving.,5,0,0,counter,finish,1,2,1
+Breakfast sausage,protein,Frozen Raw,1,prep,Prep Breakfast sausage: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Breakfast sausage,protein,Frozen Raw,2,cook,Begin cooking Breakfast sausage in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Breakfast sausage,protein,Frozen Raw,3,wait,Continue cooking Breakfast sausage without constant attention.,12,0,0,burner,middle,1,2,1
+Breakfast sausage,protein,Frozen Raw,4,verify,Verify Breakfast sausage until the thickest part reaches 160°F.,2,1,1,counter,finish,0,3,1
+Breakfast sausage,protein,Frozen Raw,5,rest,Rest Breakfast sausage before slicing or serving.,5,0,0,counter,finish,1,4,1
+Breakfast sausage,protein,Cooked,1,prep,"Prep Breakfast sausage: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Breakfast sausage,protein,Cooked,2,reheat,Reheat Breakfast sausage gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Italian sausage,protein,Fresh Raw,1,prep,"Prep Italian sausage: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Italian sausage,protein,Fresh Raw,2,cook,Cook Italian sausage in a skillet until the thickest part reaches 160°F.,12,1,0.5,burner,middle,0,1,1
+Italian sausage,protein,Fresh Raw,3,rest,Rest Italian sausage before slicing or serving.,5,0,0,counter,finish,1,2,1
+Italian sausage,protein,Frozen Raw,1,prep,Prep Italian sausage: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Italian sausage,protein,Frozen Raw,2,cook,Begin cooking Italian sausage in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Italian sausage,protein,Frozen Raw,3,wait,Continue cooking Italian sausage without constant attention.,12,0,0,burner,middle,1,2,1
+Italian sausage,protein,Frozen Raw,4,verify,Verify Italian sausage until the thickest part reaches 160°F.,2,1,1,counter,finish,0,3,1
+Italian sausage,protein,Frozen Raw,5,rest,Rest Italian sausage before slicing or serving.,5,0,0,counter,finish,1,4,1
+Italian sausage,protein,Cooked,1,prep,"Prep Italian sausage: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Italian sausage,protein,Cooked,2,reheat,Reheat Italian sausage gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Kielbasa,protein,,1,prep,"Prep Kielbasa: drain, shred, slice, or portion it as needed.",2,1,1,counter,late,1,,1
+Kielbasa,protein,,2,warm,Warm Kielbasa gently in a skillet or saucepan only until hot.,8,1,0.4,burner,late,1,1,1
+Shrimp,protein,Fresh Raw,1,prep,"Prep Shrimp: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Shrimp,protein,Fresh Raw,2,cook,Cook Shrimp in a skillet until the thickest part reaches 145°F.,12,1,0.5,burner,middle,0,1,1
+Shrimp,protein,Fresh Raw,3,rest,Rest Shrimp before slicing or serving.,5,0,0,counter,finish,1,2,1
+Shrimp,protein,Frozen Raw,1,prep,Prep Shrimp: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Shrimp,protein,Frozen Raw,2,cook,Begin cooking Shrimp in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Shrimp,protein,Frozen Raw,3,wait,Continue cooking Shrimp without constant attention.,12,0,0,burner,middle,1,2,1
+Shrimp,protein,Frozen Raw,4,verify,Verify Shrimp until the thickest part reaches 145°F.,2,1,1,counter,finish,0,3,1
+Shrimp,protein,Frozen Raw,5,rest,Rest Shrimp before slicing or serving.,5,0,0,counter,finish,1,4,1
+Shrimp,protein,Cooked,1,prep,"Prep Shrimp: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Shrimp,protein,Cooked,2,reheat,Reheat Shrimp gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Cod,protein,Fresh Raw,1,prep,"Prep Cod: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Cod,protein,Fresh Raw,2,cook,Cook Cod in a skillet until the thickest part reaches 145°F.,12,1,0.5,burner,middle,0,1,1
+Cod,protein,Fresh Raw,3,rest,Rest Cod before slicing or serving.,5,0,0,counter,finish,1,2,1
+Cod,protein,Frozen Raw,1,prep,Prep Cod: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Cod,protein,Frozen Raw,2,cook,Begin cooking Cod in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Cod,protein,Frozen Raw,3,wait,Continue cooking Cod without constant attention.,12,0,0,burner,middle,1,2,1
+Cod,protein,Frozen Raw,4,verify,Verify Cod until the thickest part reaches 145°F.,2,1,1,counter,finish,0,3,1
+Cod,protein,Frozen Raw,5,rest,Rest Cod before slicing or serving.,5,0,0,counter,finish,1,4,1
+Cod,protein,Cooked,1,prep,"Prep Cod: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Cod,protein,Cooked,2,reheat,Reheat Cod gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Tilapia,protein,Fresh Raw,1,prep,"Prep Tilapia: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Tilapia,protein,Fresh Raw,2,cook,Cook Tilapia in a skillet until the thickest part reaches 145°F.,12,1,0.5,burner,middle,0,1,1
+Tilapia,protein,Fresh Raw,3,rest,Rest Tilapia before slicing or serving.,5,0,0,counter,finish,1,2,1
+Tilapia,protein,Frozen Raw,1,prep,Prep Tilapia: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Tilapia,protein,Frozen Raw,2,cook,Begin cooking Tilapia in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Tilapia,protein,Frozen Raw,3,wait,Continue cooking Tilapia without constant attention.,12,0,0,burner,middle,1,2,1
+Tilapia,protein,Frozen Raw,4,verify,Verify Tilapia until the thickest part reaches 145°F.,2,1,1,counter,finish,0,3,1
+Tilapia,protein,Frozen Raw,5,rest,Rest Tilapia before slicing or serving.,5,0,0,counter,finish,1,4,1
+Tilapia,protein,Cooked,1,prep,"Prep Tilapia: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Tilapia,protein,Cooked,2,reheat,Reheat Tilapia gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Salmon,protein,Fresh Raw,1,prep,"Prep Salmon: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Salmon,protein,Fresh Raw,2,cook,Cook Salmon in a skillet until the thickest part reaches 145°F.,12,1,0.5,burner,middle,0,1,1
+Salmon,protein,Fresh Raw,3,rest,Rest Salmon before slicing or serving.,5,0,0,counter,finish,1,2,1
+Salmon,protein,Frozen Raw,1,prep,Prep Salmon: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Salmon,protein,Frozen Raw,2,cook,Begin cooking Salmon in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Salmon,protein,Frozen Raw,3,wait,Continue cooking Salmon without constant attention.,12,0,0,burner,middle,1,2,1
+Salmon,protein,Frozen Raw,4,verify,Verify Salmon until the thickest part reaches 145°F.,2,1,1,counter,finish,0,3,1
+Salmon,protein,Frozen Raw,5,rest,Rest Salmon before slicing or serving.,5,0,0,counter,finish,1,4,1
+Salmon,protein,Cooked,1,prep,"Prep Salmon: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Salmon,protein,Cooked,2,reheat,Reheat Salmon gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Canned tuna,protein,,1,prep,"Prep Canned tuna: drain, shred, slice, or portion it as needed.",2,1,1,counter,late,1,,1
+Canned tuna,protein,,2,warm,Warm Canned tuna gently in a skillet or saucepan only until hot.,8,1,0.4,burner,late,1,1,1
+Eggs,protein,Fresh Raw,1,prep,"Prep Eggs: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Eggs,protein,Fresh Raw,2,cook,Cook Eggs in a skillet until the thickest part reaches 160°F.,12,1,0.5,burner,middle,0,1,1
+Eggs,protein,Fresh Raw,3,rest,Rest Eggs before slicing or serving.,5,0,0,counter,finish,1,2,1
+Eggs,protein,Frozen Raw,1,prep,Prep Eggs: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Eggs,protein,Frozen Raw,2,cook,Begin cooking Eggs in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Eggs,protein,Frozen Raw,3,wait,Continue cooking Eggs without constant attention.,12,0,0,burner,middle,1,2,1
+Eggs,protein,Frozen Raw,4,verify,Verify Eggs until the thickest part reaches 160°F.,2,1,1,counter,finish,0,3,1
+Eggs,protein,Frozen Raw,5,rest,Rest Eggs before slicing or serving.,5,0,0,counter,finish,1,4,1
+Eggs,protein,Cooked,1,prep,"Prep Eggs: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Eggs,protein,Cooked,2,reheat,Reheat Eggs gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Tofu,protein,Fresh Raw,1,prep,"Prep Tofu: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Tofu,protein,Fresh Raw,2,cook,Cook Tofu in a skillet until safely cooked.,12,1,0.5,burner,middle,0,1,1
+Tofu,protein,Fresh Raw,3,rest,Rest Tofu before slicing or serving.,5,0,0,counter,finish,1,2,1
+Tofu,protein,Frozen Raw,1,prep,Prep Tofu: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Tofu,protein,Frozen Raw,2,cook,Begin cooking Tofu in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Tofu,protein,Frozen Raw,3,wait,Continue cooking Tofu without constant attention.,12,0,0,burner,middle,1,2,1
+Tofu,protein,Frozen Raw,4,verify,Verify Tofu until safely cooked.,2,1,1,counter,finish,0,3,1
+Tofu,protein,Frozen Raw,5,rest,Rest Tofu before slicing or serving.,5,0,0,counter,finish,1,4,1
+Tofu,protein,Cooked,1,prep,"Prep Tofu: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Tofu,protein,Cooked,2,reheat,Reheat Tofu gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Tempeh,protein,Fresh Raw,1,prep,"Prep Tempeh: keep it separate from ready-to-eat food, pat dry, and season.",2,1,1,counter,middle,1,,1
+Tempeh,protein,Fresh Raw,2,cook,Cook Tempeh in a skillet until safely cooked.,12,1,0.5,burner,middle,0,1,1
+Tempeh,protein,Fresh Raw,3,rest,Rest Tempeh before slicing or serving.,5,0,0,counter,finish,1,2,1
+Tempeh,protein,Frozen Raw,1,prep,Prep Tempeh: remove packaging and use a covered or moist method unless thawed first.,2,1,1,counter,early,1,,1
+Tempeh,protein,Frozen Raw,2,cook,Begin cooking Tempeh in a covered skillet or pot.,10,1,0.5,burner,early,0,1,1
+Tempeh,protein,Frozen Raw,3,wait,Continue cooking Tempeh without constant attention.,12,0,0,burner,middle,1,2,1
+Tempeh,protein,Frozen Raw,4,verify,Verify Tempeh until safely cooked.,2,1,1,counter,finish,0,3,1
+Tempeh,protein,Frozen Raw,5,rest,Rest Tempeh before slicing or serving.,5,0,0,counter,finish,1,4,1
+Tempeh,protein,Cooked,1,prep,"Prep Tempeh: slice, shred, or portion it for reheating.",2,1,1,counter,late,1,,1
+Tempeh,protein,Cooked,2,reheat,Reheat Tempeh gently in a skillet or saucepan until steaming hot.,5,1,0.5,burner,late,1,1,1
+Onions,vegetable,,1,prep,"Prep Onions: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Onions,vegetable,,2,cook,Cook Onions in a skillet until tender without overcooking.,8,1,0.5,burner,late,0,1,1
+Garlic,vegetable,,1,prep,"Prep Garlic: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Garlic,vegetable,,2,cook,Cook Garlic in a skillet until tender without overcooking.,2,1,0.5,burner,late,0,1,1
+Carrots,vegetable,,1,prep,"Prep Carrots: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Carrots,vegetable,,2,cook,Cook Carrots in a covered pot until tender without overcooking.,15,1,0.5,burner,early,0,1,1
+Celery,vegetable,,1,prep,"Prep Celery: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Celery,vegetable,,2,cook,Cook Celery in a skillet until tender without overcooking.,8,1,0.5,burner,late,0,1,1
+Potatoes,vegetable,,1,prep,"Prep Potatoes: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Potatoes,vegetable,,2,cook,Cook Potatoes in a covered pot until tender without overcooking.,20,1,0.5,burner,early,0,1,1
+Sweet potatoes,vegetable,,1,prep,"Prep Sweet potatoes: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Sweet potatoes,vegetable,,2,cook,Cook Sweet potatoes in a covered pot until tender without overcooking.,20,1,0.5,burner,early,0,1,1
+Broccoli,vegetable,,1,prep,"Prep Broccoli: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Broccoli,vegetable,,2,cook,Cook Broccoli in a covered pot until tender without overcooking.,8,1,0.5,burner,early,0,1,1
+Cauliflower,vegetable,,1,prep,"Prep Cauliflower: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Cauliflower,vegetable,,2,cook,Cook Cauliflower in a covered pot until tender without overcooking.,10,1,0.5,burner,early,0,1,1
+Cabbage,vegetable,,1,prep,"Prep Cabbage: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Cabbage,vegetable,,2,cook,Cook Cabbage in a covered pot until tender without overcooking.,15,1,0.5,burner,early,0,1,1
+Kale,vegetable,,1,prep,"Prep Kale: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Kale,vegetable,,2,cook,Cook Kale in a skillet until tender without overcooking.,10,1,0.5,burner,late,0,1,1
+Spinach,vegetable,,1,prep,"Prep Spinach: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Spinach,vegetable,,2,cook,Cook Spinach in a skillet until tender without overcooking.,3,1,0.5,burner,late,0,1,1
+Lettuce,vegetable,,1,prep,"Prep Lettuce: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Lettuce,vegetable,,2,assemble,Keep Lettuce crisp and add it at serving time.,1,1,0.2,counter,finish,1,1,1
+Romaine lettuce,vegetable,,1,prep,"Prep Romaine lettuce: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Romaine lettuce,vegetable,,2,assemble,Keep Romaine lettuce crisp and add it at serving time.,1,1,0.2,counter,finish,1,1,1
+Iceberg lettuce,vegetable,,1,prep,"Prep Iceberg lettuce: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Iceberg lettuce,vegetable,,2,assemble,Keep Iceberg lettuce crisp and add it at serving time.,1,1,0.2,counter,finish,1,1,1
+Green beans,vegetable,,1,prep,"Prep Green beans: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Green beans,vegetable,,2,cook,Cook Green beans in a skillet until tender without overcooking.,8,1,0.5,burner,late,0,1,1
+Peas,vegetable,,1,prep,"Prep Peas: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Peas,vegetable,,2,cook,Cook Peas in a skillet until tender without overcooking.,5,1,0.5,burner,late,0,1,1
+Corn,vegetable,,1,prep,"Prep Corn: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Corn,vegetable,,2,cook,Cook Corn in a skillet until tender without overcooking.,5,1,0.5,burner,late,0,1,1
+Zucchini,vegetable,,1,prep,"Prep Zucchini: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Zucchini,vegetable,,2,cook,Cook Zucchini in a skillet until tender without overcooking.,6,1,0.5,burner,late,0,1,1
+Yellow squash,vegetable,,1,prep,"Prep Yellow squash: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Yellow squash,vegetable,,2,cook,Cook Yellow squash in a skillet until tender without overcooking.,6,1,0.5,burner,late,0,1,1
+Butternut squash,vegetable,,1,prep,"Prep Butternut squash: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Butternut squash,vegetable,,2,cook,Cook Butternut squash in a roasting pan until tender without overcooking.,25,1,0.5,oven,early,0,1,1
+Acorn squash,vegetable,,1,prep,"Prep Acorn squash: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Acorn squash,vegetable,,2,cook,Cook Acorn squash in a roasting pan until tender without overcooking.,30,1,0.5,oven,early,0,1,1
+Pumpkin,vegetable,,1,prep,"Prep Pumpkin: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Pumpkin,vegetable,,2,cook,Cook Pumpkin in a roasting pan until tender without overcooking.,15,1,0.5,oven,early,0,1,1
+Green bell pepper,vegetable,,1,prep,"Prep Green bell pepper: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Green bell pepper,vegetable,,2,cook,Cook Green bell pepper in a skillet until tender without overcooking.,8,1,0.5,burner,late,0,1,1
+Red bell pepper,vegetable,,1,prep,"Prep Red bell pepper: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Red bell pepper,vegetable,,2,cook,Cook Red bell pepper in a skillet until tender without overcooking.,8,1,0.5,burner,late,0,1,1
+Yellow bell pepper,vegetable,,1,prep,"Prep Yellow bell pepper: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Yellow bell pepper,vegetable,,2,cook,Cook Yellow bell pepper in a skillet until tender without overcooking.,8,1,0.5,burner,late,0,1,1
+Orange bell pepper,vegetable,,1,prep,"Prep Orange bell pepper: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Orange bell pepper,vegetable,,2,cook,Cook Orange bell pepper in a skillet until tender without overcooking.,8,1,0.5,burner,late,0,1,1
+Jalapenos,vegetable,,1,prep,"Prep Jalapenos: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Jalapenos,vegetable,,2,cook,Cook Jalapenos in a skillet until tender without overcooking.,5,1,0.5,burner,late,0,1,1
+Poblanos,vegetable,,1,prep,"Prep Poblanos: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Poblanos,vegetable,,2,cook,Cook Poblanos in a skillet until tender without overcooking.,10,1,0.5,burner,late,0,1,1
+Serranos,vegetable,,1,prep,"Prep Serranos: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Serranos,vegetable,,2,cook,Cook Serranos in a skillet until tender without overcooking.,5,1,0.5,burner,late,0,1,1
+Tomatoes,vegetable,,1,prep,"Prep Tomatoes: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Tomatoes,vegetable,,2,cook,Cook Tomatoes in a skillet until tender without overcooking.,8,1,0.5,burner,late,0,1,1
+Cherry tomatoes,vegetable,,1,prep,"Prep Cherry tomatoes: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Cherry tomatoes,vegetable,,2,cook,Cook Cherry tomatoes in a skillet until tender without overcooking.,5,1,0.5,burner,late,0,1,1
+Tomatillos,vegetable,,1,prep,"Prep Tomatillos: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Tomatillos,vegetable,,2,cook,Cook Tomatillos in a skillet until tender without overcooking.,10,1,0.5,burner,late,0,1,1
+Cucumbers,vegetable,,1,prep,"Prep Cucumbers: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Cucumbers,vegetable,,2,assemble,Keep Cucumbers crisp and add it at serving time.,1,1,0.2,counter,finish,1,1,1
+Radishes,vegetable,,1,prep,"Prep Radishes: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Radishes,vegetable,,2,cook,Cook Radishes in a covered pot until tender without overcooking.,5,1,0.5,burner,early,0,1,1
+Turnips,vegetable,,1,prep,"Prep Turnips: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Turnips,vegetable,,2,cook,Cook Turnips in a covered pot until tender without overcooking.,20,1,0.5,burner,early,0,1,1
+Rutabagas,vegetable,,1,prep,"Prep Rutabagas: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Rutabagas,vegetable,,2,cook,Cook Rutabagas in a covered pot until tender without overcooking.,25,1,0.5,burner,early,0,1,1
+Parsnips,vegetable,,1,prep,"Prep Parsnips: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Parsnips,vegetable,,2,cook,Cook Parsnips in a covered pot until tender without overcooking.,20,1,0.5,burner,early,0,1,1
+Beets,vegetable,,1,prep,"Prep Beets: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Beets,vegetable,,2,cook,Cook Beets in a covered pot until tender without overcooking.,35,1,0.5,burner,early,0,1,1
+Brussels sprouts,vegetable,,1,prep,"Prep Brussels sprouts: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Brussels sprouts,vegetable,,2,cook,Cook Brussels sprouts in a covered pot until tender without overcooking.,15,1,0.5,burner,early,0,1,1
+Bok choy,vegetable,,1,prep,"Prep Bok choy: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Bok choy,vegetable,,2,cook,Cook Bok choy in a skillet until tender without overcooking.,6,1,0.5,burner,late,0,1,1
+Napa cabbage,vegetable,,1,prep,"Prep Napa cabbage: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Napa cabbage,vegetable,,2,cook,Cook Napa cabbage in a covered pot until tender without overcooking.,8,1,0.5,burner,early,0,1,1
+Leeks,vegetable,,1,prep,"Prep Leeks: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Leeks,vegetable,,2,cook,Cook Leeks in a skillet until tender without overcooking.,12,1,0.5,burner,late,0,1,1
+Scallions,vegetable,,1,prep,"Prep Scallions: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Scallions,vegetable,,2,cook,Cook Scallions in a skillet until tender without overcooking.,2,1,0.5,burner,late,0,1,1
+Shallots,vegetable,,1,prep,"Prep Shallots: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Shallots,vegetable,,2,cook,Cook Shallots in a skillet until tender without overcooking.,6,1,0.5,burner,late,0,1,1
+Artichokes,vegetable,,1,prep,"Prep Artichokes: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Artichokes,vegetable,,2,cook,Cook Artichokes in a covered pot until tender without overcooking.,10,1,0.5,burner,early,0,1,1
+Okra,vegetable,,1,prep,"Prep Okra: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Okra,vegetable,,2,cook,Cook Okra in a skillet until tender without overcooking.,10,1,0.5,burner,late,0,1,1
+Eggplant,vegetable,,1,prep,"Prep Eggplant: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Eggplant,vegetable,,2,cook,Cook Eggplant in a covered pot until tender without overcooking.,15,1,0.5,burner,early,0,1,1
+Water chestnuts,vegetable,,1,prep,"Prep Water chestnuts: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Water chestnuts,vegetable,,2,warm,Add Water chestnuts to the skillet or saucepan near the end and warm gently.,3,1,0.3,burner,late,1,1,1
+Bamboo shoots,vegetable,,1,prep,"Prep Bamboo shoots: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Bamboo shoots,vegetable,,2,warm,Add Bamboo shoots to the skillet or saucepan near the end and warm gently.,5,1,0.3,burner,late,1,1,1
+Black olives,vegetable,,1,drain,Drain Black olives well.,1,1,1,counter,late,1,,1
+Black olives,vegetable,,2,fold in,"Fold Black olives into the dish near the end, just long enough to warm them.",1,1,0.3,counter,late,1,1,1
+Green olives,vegetable,,1,drain,Drain Green olives well.,1,1,1,counter,late,1,,1
+Green olives,vegetable,,2,fold in,"Fold Green olives into the dish near the end, just long enough to warm them.",1,1,0.3,counter,late,1,1,1
+Sauerkraut,vegetable,,1,prep,"Prep Sauerkraut: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Sauerkraut,vegetable,,2,warm,Add Sauerkraut to the skillet or saucepan near the end and warm gently.,5,1,0.3,burner,late,1,1,1
+Pickles,vegetable,,1,prep,"Prep Pickles: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Pickles,vegetable,,2,assemble,Keep Pickles crisp and add it at serving time.,1,1,0.2,counter,finish,1,1,1
+Celery root,vegetable,,1,prep,"Prep Celery root: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,early,1,,1
+Celery root,vegetable,,2,cook,Cook Celery root in a covered pot until tender without overcooking.,25,1,0.5,burner,early,0,1,1
+Fennel,vegetable,,1,prep,"Prep Fennel: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Fennel,vegetable,,2,cook,Cook Fennel in a skillet until tender without overcooking.,12,1,0.5,burner,late,0,1,1
+Snap peas,vegetable,,1,prep,"Prep Snap peas: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Snap peas,vegetable,,2,cook,Cook Snap peas in a skillet until tender without overcooking.,3,1,0.5,burner,late,0,1,1
+Snow peas,vegetable,,1,prep,"Prep Snow peas: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Snow peas,vegetable,,2,cook,Cook Snow peas in a skillet until tender without overcooking.,3,1,0.5,burner,late,0,1,1
+Bean sprouts,vegetable,,1,prep,"Prep Bean sprouts: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Bean sprouts,vegetable,,2,cook,Cook Bean sprouts in a skillet until tender without overcooking.,2,1,0.5,burner,late,0,1,1
+Collard greens,vegetable,,1,prep,"Prep Collard greens: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Collard greens,vegetable,,2,cook,Cook Collard greens in a skillet until tender without overcooking.,25,1,0.5,burner,late,0,1,1
+Mustard greens,vegetable,,1,prep,"Prep Mustard greens: wash, trim, drain, and cut it into even pieces as appropriate.",2,1,1,counter,middle,1,,1
+Mustard greens,vegetable,,2,cook,Cook Mustard greens in a skillet until tender without overcooking.,20,1,0.5,burner,late,0,1,1
+White rice,foundation,,1,prep,Prep White rice: measure the rice and cooking liquid.,2,1,1,counter,early,1,,1
+White rice,foundation,,2,start,"Put White rice and its liquid in a saucepan, bring them to a simmer, then cover and reduce the heat.",2,1,1,burner,early,0,1,1
+White rice,foundation,,3,simmer,Let White rice simmer covered without constant attention.,20,0,0,burner,early,1,2,1
+White rice,foundation,,4,rest,Remove White rice from heat and let it rest covered before fluffing.,5,0,0,counter,finish,1,3,1
+Brown rice,foundation,,1,prep,Prep Brown rice: measure the rice and cooking liquid.,2,1,1,counter,early,1,,1
+Brown rice,foundation,,2,start,"Put Brown rice and its liquid in a saucepan, bring them to a simmer, then cover and reduce the heat.",2,1,1,burner,early,0,1,1
+Brown rice,foundation,,3,simmer,Let Brown rice simmer covered without constant attention.,40,0,0,burner,early,1,2,1
+Brown rice,foundation,,4,rest,Remove Brown rice from heat and let it rest covered before fluffing.,5,0,0,counter,finish,1,3,1
+Jasmine rice,foundation,,1,prep,Prep Jasmine rice: measure the rice and cooking liquid.,2,1,1,counter,early,1,,1
+Jasmine rice,foundation,,2,start,"Put Jasmine rice and its liquid in a saucepan, bring them to a simmer, then cover and reduce the heat.",2,1,1,burner,early,0,1,1
+Jasmine rice,foundation,,3,simmer,Let Jasmine rice simmer covered without constant attention.,18,0,0,burner,early,1,2,1
+Jasmine rice,foundation,,4,rest,Remove Jasmine rice from heat and let it rest covered before fluffing.,5,0,0,counter,finish,1,3,1
+Basmati rice,foundation,,1,prep,Prep Basmati rice: measure the rice and cooking liquid.,2,1,1,counter,early,1,,1
+Basmati rice,foundation,,2,start,"Put Basmati rice and its liquid in a saucepan, bring them to a simmer, then cover and reduce the heat.",2,1,1,burner,early,0,1,1
+Basmati rice,foundation,,3,simmer,Let Basmati rice simmer covered without constant attention.,18,0,0,burner,early,1,2,1
+Basmati rice,foundation,,4,rest,Remove Basmati rice from heat and let it rest covered before fluffing.,5,0,0,counter,finish,1,3,1
+Wild rice,foundation,,1,prep,Prep Wild rice: measure the rice and cooking liquid.,2,1,1,counter,early,1,,1
+Wild rice,foundation,,2,start,"Put Wild rice and its liquid in a saucepan, bring them to a simmer, then cover and reduce the heat.",2,1,1,burner,early,0,1,1
+Wild rice,foundation,,3,simmer,Let Wild rice simmer covered without constant attention.,45,0,0,burner,early,1,2,1
+Wild rice,foundation,,4,rest,Remove Wild rice from heat and let it rest covered before fluffing.,5,0,0,counter,finish,1,3,1
+Egg noodles,foundation,,1,prep,Prep Egg noodles: measure it and any cooking liquid.,2,1,1,counter,early,1,,1
+Egg noodles,foundation,,2,start,Put Egg noodles and its liquid in the appropriate saucepan or pot and begin cooking.,2,1,1,burner,early,0,1,1
+Egg noodles,foundation,,3,cook,Cook Egg noodles gently until tender without constant attention.,8,0,0,burner,early,1,2,1
+Egg noodles,foundation,,4,finish,Remove Egg noodles from heat and finish its texture before serving.,2,1,0.5,counter,finish,1,3,1
+Pasta,foundation,,1,prep,Prep Pasta: measure it and any cooking liquid.,2,1,1,counter,early,1,,1
+Pasta,foundation,,2,start,Put Pasta and its liquid in the appropriate saucepan or pot and begin cooking.,2,1,1,burner,early,0,1,1
+Pasta,foundation,,3,cook,Cook Pasta gently until tender without constant attention.,8,0,0,burner,early,1,2,1
+Pasta,foundation,,4,finish,Remove Pasta from heat and finish its texture before serving.,2,1,0.5,counter,finish,1,3,1
+Spaghetti,foundation,,1,prep,Prep Spaghetti: measure it and any cooking liquid.,2,1,1,counter,early,1,,1
+Spaghetti,foundation,,2,start,Put Spaghetti and its liquid in the appropriate saucepan or pot and begin cooking.,2,1,1,burner,early,0,1,1
+Spaghetti,foundation,,3,cook,Cook Spaghetti gently until tender without constant attention.,8,0,0,burner,early,1,2,1
+Spaghetti,foundation,,4,finish,Remove Spaghetti from heat and finish its texture before serving.,2,1,0.5,counter,finish,1,3,1
+Macaroni,foundation,,1,prep,Prep Macaroni: measure it and any cooking liquid.,2,1,1,counter,early,1,,1
+Macaroni,foundation,,2,start,Put Macaroni and its liquid in the appropriate saucepan or pot and begin cooking.,2,1,1,burner,early,0,1,1
+Macaroni,foundation,,3,cook,Cook Macaroni gently until tender without constant attention.,6,0,0,burner,early,1,2,1
+Macaroni,foundation,,4,finish,Remove Macaroni from heat and finish its texture before serving.,2,1,0.5,counter,finish,1,3,1
+Rotini,foundation,,1,prep,Prep Rotini: measure it and any cooking liquid.,2,1,1,counter,early,1,,1
+Rotini,foundation,,2,start,Put Rotini and its liquid in the appropriate saucepan or pot and begin cooking.,2,1,1,burner,early,0,1,1
+Rotini,foundation,,3,cook,Cook Rotini gently until tender without constant attention.,8,0,0,burner,early,1,2,1
+Rotini,foundation,,4,finish,Remove Rotini from heat and finish its texture before serving.,2,1,0.5,counter,finish,1,3,1
+Mashed potatoes,foundation,,1,prep,Prep Mashed potatoes: measure it and any cooking liquid.,2,1,1,counter,early,1,,1
+Mashed potatoes,foundation,,2,start,Put Mashed potatoes and its liquid in the appropriate saucepan or pot and begin cooking.,2,1,1,burner,early,0,1,1
+Mashed potatoes,foundation,,3,cook,Cook Mashed potatoes gently until tender without constant attention.,3,0,0,burner,early,1,2,1
+Mashed potatoes,foundation,,4,finish,Remove Mashed potatoes from heat and finish its texture before serving.,2,1,0.5,counter,finish,1,3,1
+Baked potatoes,foundation,,1,prep,Prep Baked potatoes: measure it and any cooking liquid.,2,1,1,counter,early,1,,1
+Baked potatoes,foundation,,2,start,Put Baked potatoes and its liquid in the appropriate saucepan or pot and begin cooking.,2,1,1,burner,early,0,1,1
+Baked potatoes,foundation,,3,cook,Cook Baked potatoes gently until tender without constant attention.,43,0,0,burner,early,1,2,1
+Baked potatoes,foundation,,4,finish,Remove Baked potatoes from heat and finish its texture before serving.,2,1,0.5,counter,finish,1,3,1
+Roasted potatoes,foundation,,1,prep,Prep Roasted potatoes: measure it and any cooking liquid.,2,1,1,counter,early,1,,1
+Roasted potatoes,foundation,,2,start,Put Roasted potatoes and its liquid in the appropriate saucepan or pot and begin cooking.,2,1,1,burner,early,0,1,1
+Roasted potatoes,foundation,,3,cook,Cook Roasted potatoes gently until tender without constant attention.,28,0,0,burner,early,1,2,1
+Roasted potatoes,foundation,,4,finish,Remove Roasted potatoes from heat and finish its texture before serving.,2,1,0.5,counter,finish,1,3,1
+Hash browns,foundation,,1,prepare,"Arrange Hash browns in a skillet, toaster, or baking pan as appropriate.",2,1,1,counter,late,1,,1
+Hash browns,foundation,,2,heat,Heat Hash browns until hot and properly textured.,12,0,0.2,oven,late,1,1,1
+French fries,foundation,,1,prepare,"Arrange French fries in a skillet, toaster, or baking pan as appropriate.",2,1,1,counter,late,1,,1
+French fries,foundation,,2,heat,Heat French fries until hot and properly textured.,20,0,0.2,oven,late,1,1,1
+Cornbread,foundation,,1,prepare,"Arrange Cornbread in a skillet, toaster, or baking pan as appropriate.",2,1,1,counter,late,1,,1
+Cornbread,foundation,,2,heat,Heat Cornbread until hot and properly textured.,25,0,0.2,oven,late,1,1,1
+Biscuits,foundation,,1,prepare,"Arrange Biscuits in a skillet, toaster, or baking pan as appropriate.",2,1,1,counter,late,1,,1
+Biscuits,foundation,,2,heat,Heat Biscuits until hot and properly textured.,15,0,0.2,oven,late,1,1,1
+Bread,foundation,,1,prepare,"Arrange Bread in a skillet, toaster, or baking pan as appropriate.",2,1,1,counter,late,1,,1
+Bread,foundation,,2,heat,Heat Bread until hot and properly textured.,2,0,0.2,burner,late,1,1,1
+Flour tortillas,foundation,,1,prepare,"Arrange Flour tortillas in a skillet, toaster, or baking pan as appropriate.",2,1,1,counter,late,1,,1
+Flour tortillas,foundation,,2,heat,Heat Flour tortillas until hot and properly textured.,2,0,0.2,burner,late,1,1,1
+Corn tortillas,foundation,,1,prepare,"Arrange Corn tortillas in a skillet, toaster, or baking pan as appropriate.",2,1,1,counter,late,1,,1
+Corn tortillas,foundation,,2,heat,Heat Corn tortillas until hot and properly textured.,2,0,0.2,burner,late,1,1,1
+Polenta,foundation,,1,prep,Prep Polenta: measure it and any cooking liquid.,2,1,1,counter,early,1,,1
+Polenta,foundation,,2,start,Put Polenta and its liquid in the appropriate saucepan or pot and begin cooking.,2,1,1,burner,early,0,1,1
+Polenta,foundation,,3,cook,Cook Polenta gently until tender without constant attention.,23,0,0,burner,early,1,2,1
+Polenta,foundation,,4,finish,Remove Polenta from heat and finish its texture before serving.,2,1,0.5,counter,finish,1,3,1
+Quinoa,foundation,,1,prep,Prep Quinoa: measure it and any cooking liquid.,2,1,1,counter,early,1,,1
+Quinoa,foundation,,2,start,Put Quinoa and its liquid in the appropriate saucepan or pot and begin cooking.,2,1,1,burner,early,0,1,1
+Quinoa,foundation,,3,cook,Cook Quinoa gently until tender without constant attention.,13,0,0,burner,early,1,2,1
+Quinoa,foundation,,4,finish,Remove Quinoa from heat and finish its texture before serving.,2,1,0.5,counter,finish,1,3,1
+Cauliflower rice,foundation,,1,prep,Prep Cauliflower rice: measure the rice and cooking liquid.,2,1,1,counter,early,1,,1
+Cauliflower rice,foundation,,2,start,"Put Cauliflower rice and its liquid in a saucepan, bring them to a simmer, then cover and reduce the heat.",2,1,1,burner,early,0,1,1
+Cauliflower rice,foundation,,3,simmer,Let Cauliflower rice simmer covered without constant attention.,8,0,0,burner,early,1,2,1
+Cauliflower rice,foundation,,4,rest,Remove Cauliflower rice from heat and let it rest covered before fluffing.,5,0,0,counter,finish,1,3,1
+Black beans,foundation,,1,prep,"Prep Black beans: drain and rinse if canned, or measure if already cooked.",2,1,1,counter,early,1,,1
+Black beans,foundation,,2,heat,Heat Black beans in a saucepan with enough liquid to prevent sticking.,10,0,0.2,burner,early,1,1,1
+Pinto beans,foundation,,1,prep,"Prep Pinto beans: drain and rinse if canned, or measure if already cooked.",2,1,1,counter,early,1,,1
+Pinto beans,foundation,,2,heat,Heat Pinto beans in a saucepan with enough liquid to prevent sticking.,10,0,0.2,burner,early,1,1,1
+Great Northern beans,foundation,,1,prep,"Prep Great Northern beans: drain and rinse if canned, or measure if already cooked.",2,1,1,counter,early,1,,1
+Great Northern beans,foundation,,2,heat,Heat Great Northern beans in a saucepan with enough liquid to prevent sticking.,10,0,0.2,burner,early,1,1,1
+Navy beans,foundation,,1,prep,"Prep Navy beans: drain and rinse if canned, or measure if already cooked.",2,1,1,counter,early,1,,1
+Navy beans,foundation,,2,heat,Heat Navy beans in a saucepan with enough liquid to prevent sticking.,10,0,0.2,burner,early,1,1,1
+Chickpeas,foundation,,1,prep,"Prep Chickpeas: drain and rinse if canned, or measure if already cooked.",2,1,1,counter,early,1,,1
+Chickpeas,foundation,,2,heat,Heat Chickpeas in a saucepan with enough liquid to prevent sticking.,10,0,0.2,burner,early,1,1,1
+Lentils,foundation,,1,prep,Prep Lentils: measure it and any cooking liquid.,2,1,1,counter,early,1,,1
+Lentils,foundation,,2,start,Put Lentils and its liquid in the appropriate saucepan or pot and begin cooking.,2,1,1,burner,early,0,1,1
+Lentils,foundation,,3,cook,Cook Lentils gently until tender without constant attention.,23,0,0,burner,early,1,2,1
+Lentils,foundation,,4,finish,Remove Lentils from heat and finish its texture before serving.,2,1,0.5,counter,finish,1,3,1
+Grits,foundation,,1,prep,Prep Grits: measure it and any cooking liquid.,2,1,1,counter,early,1,,1
+Grits,foundation,,2,start,Put Grits and its liquid in the appropriate saucepan or pot and begin cooking.,2,1,1,burner,early,0,1,1
+Grits,foundation,,3,cook,Cook Grits gently until tender without constant attention.,8,0,0,burner,early,1,2,1
+Grits,foundation,,4,finish,Remove Grits from heat and finish its texture before serving.,2,1,0.5,counter,finish,1,3,1

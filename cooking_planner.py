@@ -269,6 +269,91 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             if activity.component in names and _activity_id(activity) not in referenced
         ]
 
+    if strategy == "soup":
+        # Soup is shared-vessel orchestration. Ingredient KOs still own prep
+        # knowledge, but their separate skillet/pot cooking activities must not
+        # survive into a one-pot meal.
+        prep_activities = [
+            activity for activity in ko_activities
+            if activity.activity_type == "prep"
+        ]
+        activities = [activities[0], *prep_activities]
+        prep_ids = [_activity_id(activity) for activity in prep_activities]
+        protein_prep = [
+            _activity_id(activity) for activity in prep_activities
+            if activity.component == protein
+        ]
+        energy = _clean(candidate.get("user_energy")).lower()
+        raw_protein = bool(protein) and "cooked" not in protein_state.lower()
+        include_sear = raw_protein and energy not in {"very low", "barely breathing"}
+
+        previous = prep_ids
+        if include_sear:
+            activities.append(_planner_activity(
+                "optional sear",
+                (
+                    f"Optional but preferred: heat a little oil in the soup pot and brown {protein} "
+                    "for 2–5 minutes. Leave it in the pot; skip this step when energy is limited."
+                ),
+                minutes=4,
+                human_busy=True,
+                stage="early",
+                depends_on=protein_prep,
+                equipment="burner",
+            ))
+            previous = ["optional sear:meal", *[item for item in prep_ids if item not in protein_prep]]
+
+        sturdy_components = _join([*vegetables, foundation])
+        activities.append(_planner_activity(
+            "build soup",
+            (
+                "In the same soup pot, add broth or water and scrape up any browned bits. "
+                + (f"Add {sturdy_components}. " if sturdy_components else "")
+                + (f"Keep {protein} in the pot. " if protein else "")
+                + "Bring everything to a gentle simmer."
+            ),
+            minutes=3,
+            human_busy=True,
+            stage="middle",
+            depends_on=previous,
+            equipment="burner",
+        ))
+
+        protein_key = protein.lower()
+        if any(word in protein_key for word in ["stew meat", "chuck", "brisket", "shoulder"]):
+            simmer_minutes = 75
+        elif raw_protein and any(word in protein_key for word in ["chicken", "turkey", "pork"]):
+            simmer_minutes = 30
+        else:
+            simmer_minutes = 25
+        activities.append(_planner_activity(
+            "shared simmer",
+            (
+                f"Cover partially and gently simmer {protein or 'the soup ingredients'}, "
+                f"{_join(vegetables)}, and {foundation or 'the remaining ingredients'} together in the same pot "
+                "until the protein is safe and tender and the vegetables are cooked through."
+            ),
+            minutes=simmer_minutes,
+            human_busy=False,
+            stage="middle",
+            depends_on=["build soup:meal"],
+            equipment="burner",
+        ))
+        activities.append(_planner_activity(
+            "finish soup",
+            "Taste the soup. Adjust salt, pepper, richness, and acidity, then serve from the pot.",
+            minutes=2,
+            human_busy=True,
+            stage="finish",
+            depends_on=["shared simmer:meal"],
+            equipment="burner",
+        ))
+        stage_order = {"early": 0, "middle": 1, "late": 2, "finish": 3}
+        return sorted(
+            activities,
+            key=lambda activity: (stage_order.get(activity.stage, 1), activity.source != "ko"),
+        )
+
     if strategy == "casserole":
         activities.append(_planner_activity(
             "combine",
@@ -304,16 +389,6 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             stage="finish",
             depends_on=component_finishes,
             equipment="counter",
-        ))
-    elif strategy == "soup":
-        activities.append(_planner_activity(
-            "simmer",
-            f"Bring the prepared components together with liquid and season toward {sauce}.",
-            minutes=10,
-            human_busy=False,
-            stage="finish",
-            depends_on=component_finishes,
-            equipment="burner",
         ))
     else:
         mushroom_finish = terminal_ids(["Mushrooms"])
@@ -422,7 +497,7 @@ def consolidate_kitchen_activities(
             if _clean(candidate.get("protein")):
                 calculated_minutes += 1
         heading = (
-            "Prepare the long-lead components:"
+            "Start these first:"
             if activity_type == "launch prep"
             else "Ingredient Prep:"
         )
@@ -447,9 +522,11 @@ def consolidate_kitchen_activities(
     if launch_prep:
         replacements.append(consolidated_prep("launch prep", launch_prep, ["gather:meal"]))
     sauce = _clean((candidate or {}).get("sauce"))
+    strategy = _clean((candidate or {}).get("strategy"))
     sauce_profile = get_sauce_profile(sauce)
     sauce_instruction = (
-        sauce_profile.prep_instruction if sauce_profile
+        "" if strategy == "soup"
+        else sauce_profile.prep_instruction if sauce_profile
         else (f"measure and mix {sauce}" if sauce else "")
     )
     if general_prep or sauce_instruction:

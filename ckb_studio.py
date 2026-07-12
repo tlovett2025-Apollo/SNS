@@ -125,10 +125,11 @@ def ensure_training_schema():
     con = sqlite3.connect(DB_PATH)
     tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     state_columns = {row[1] for row in con.execute("PRAGMA table_info(ingredient_states)")}
+    ingredient_columns = {row[1] for row in con.execute("PRAGMA table_info(ingredients)")}
     con.close()
     required_tables = {"ko_profiles", "ko_activities", "ckb_change_log"}
     required_state_columns = {"active_minutes", "passive_minutes", "attention_score", "holdability", "verified"}
-    if required_tables <= tables and required_state_columns <= state_columns:
+    if required_tables <= tables and required_state_columns <= state_columns and "knowledge_status" in ingredient_columns:
         return None
     backup_path = backup_database()
     create_schema()
@@ -993,6 +994,7 @@ import_type_box = ttk.Combobox(
         "Ingredients", "Proteins", "Vegetables", "Foundations", "Techniques",
         "Ingredient Forms", "Ingredient States", "KO Profiles", "KO Activities",
         "Protein Safety Corrections",
+        "Ingredient Form Corrections", "Ingredient Metadata Corrections",
     ],
     state="readonly",
     width=20

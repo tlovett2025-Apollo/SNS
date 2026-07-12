@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS ingredients (
     pork_flag INTEGER DEFAULT 0,
     egg_flag INTEGER DEFAULT 0,
     active INTEGER DEFAULT 1,
-    notes TEXT
+    notes TEXT,
+    knowledge_status TEXT DEFAULT 'real'
 );
 
 
@@ -337,6 +338,7 @@ CREATE TABLE IF NOT EXISTS ckb_change_log (
 """
 
 MIGRATIONS = [
+    ("ingredients", "knowledge_status", "ALTER TABLE ingredients ADD COLUMN knowledge_status TEXT DEFAULT 'real'"),
     ("proteins", "animal_source", "ALTER TABLE proteins ADD COLUMN animal_source TEXT"),
     ("proteins", "meat_color", "ALTER TABLE proteins ADD COLUMN meat_color TEXT"),
     ("proteins", "alpha_gal_safe", "ALTER TABLE proteins ADD COLUMN alpha_gal_safe INTEGER DEFAULT 0"),

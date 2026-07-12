@@ -440,3 +440,51 @@ def test_candidate_total_uses_lane_schedule_makespan():
 
     assert candidate["minutes"] == makespan
     assert candidate["minutes"] == candidate["active_minutes"] + candidate["passive_minutes"]
+
+
+def soup_candidate(energy="Medium"):
+    candidates = generate_candidates(
+        "Beef stew meat", "Potatoes & Carrots", "", "Comfort Food",
+        energy, "Budget", 120, 4, 10,
+        vegetable_names=["Potatoes", "Carrots"],
+        protein_state="Fresh Raw",
+    )
+    return next(candidate for candidate in candidates if candidate["strategy"] == "soup")
+
+
+def test_soup_uses_one_shared_pot_instead_of_separate_component_cooking():
+    from cooking_planner import build_activity_graph
+
+    graph = build_activity_graph(soup_candidate())
+
+    assert "optional sear:meal" in graph
+    assert "build soup:meal" in graph
+    assert "shared simmer:meal" in graph
+    assert "finish soup:meal" in graph
+    assert "cook:Beef stew meat" not in graph
+    assert "cook:Potatoes" not in graph
+    assert "cook:Carrots" not in graph
+    assert graph["optional sear:meal"].equipment == "burner"
+    assert graph["build soup:meal"].equipment == "burner"
+    assert graph["shared simmer:meal"].equipment == "burner"
+
+
+def test_soup_instructions_name_same_pot_and_optional_sear():
+    from cooking_planner import generate_human_instructions
+
+    text = generate_human_instructions(soup_candidate()).lower()
+
+    assert "optional but preferred" in text
+    assert "soup pot" in text
+    assert "same pot" in text
+    assert "gently simmer" in text
+    assert "gravy or cream sauce" not in text
+
+
+def test_very_low_energy_soup_skips_optional_sear():
+    from cooking_planner import build_activity_graph
+
+    graph = build_activity_graph(soup_candidate("Very Low"))
+
+    assert "optional sear:meal" not in graph
+    assert graph["build soup:meal"].depends_on == ["prep:launch"]

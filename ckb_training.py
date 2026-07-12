@@ -34,12 +34,22 @@ PROTEIN_SAFETY_COLUMNS = [
     "ingredient_name", "alpha_gal_safe", "reason", "verified",
 ]
 
+FORM_CORRECTION_COLUMNS = [
+    "ingredient_name", "form_name", "action", "reason", "verified",
+]
+
+INGREDIENT_METADATA_COLUMNS = [
+    "ingredient_name", "knowledge_status", "reason", "verified",
+]
+
 TRAINING_COLUMNS = {
     "Ingredient Forms": FORM_COLUMNS,
     "Ingredient States": STATE_COLUMNS,
     "KO Profiles": PROFILE_COLUMNS,
     "KO Activities": ACTIVITY_COLUMNS,
     "Protein Safety Corrections": PROTEIN_SAFETY_COLUMNS,
+    "Ingredient Form Corrections": FORM_CORRECTION_COLUMNS,
+    "Ingredient Metadata Corrections": INGREDIENT_METADATA_COLUMNS,
 }
 
 FLAG_VALUES = {"0", "1", "false", "true", "no", "yes", "n", "y"}
@@ -281,6 +291,33 @@ def validate_training_file(csv_path, import_type, db_path):
                     raise ValueError(f"Safety value is already {safe} on CSV row {row_number}: {ingredient_name}")
                 if not reason:
                     raise ValueError(f"Blank correction reason on CSV row {row_number}.")
+
+            elif import_type == "Ingredient Form Corrections":
+                form_name = _require_text(row, "form_name", row_number)
+                action = _require_text(row, "action", row_number).lower()
+                reason = _require_text(row, "reason", row_number)
+                verified = flag(row["verified"], "verified", row_number)
+                if action != "delete":
+                    raise ValueError(f"Unsupported Form correction action on CSV row {row_number}: {action}")
+                if not verified:
+                    raise ValueError(f"Form correction must be verified on CSV row {row_number}.")
+                key = (ingredient_name.lower(), form_name.lower())
+                _reject_duplicates(seen, key, row_number)
+                if not cur.execute(
+                    "SELECT 1 FROM ingredient_forms WHERE ingredient_id=? AND lower(form_name)=lower(?)",
+                    (ingredient_id, form_name),
+                ).fetchone():
+                    raise ValueError(f"Ingredient Form not found on CSV row {row_number}: {ingredient_name} / {form_name}")
+
+            elif import_type == "Ingredient Metadata Corrections":
+                status = _require_text(row, "knowledge_status", row_number).lower()
+                reason = _require_text(row, "reason", row_number)
+                verified = flag(row["verified"], "verified", row_number)
+                if status not in {"real", "fictional_test", "discovery"}:
+                    raise ValueError(f"Invalid knowledge_status on CSV row {row_number}: {status}")
+                if not verified:
+                    raise ValueError(f"Metadata correction must be verified on CSV row {row_number}.")
+                _reject_duplicates(seen, ingredient_name.lower(), row_number)
         return rows, []
     finally:
         con.close()
@@ -373,7 +410,33 @@ def import_training_rows(rows, import_type, db_path):
                     (change_type, target_table, target_key, field_name, old_value, new_value, reason, changed_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     ("safety correction", "proteins", ingredient_name, "alpha_gal_safe",
-                     str(old_value), str(new_value), clean(row["reason"]), datetime.now().isoformat(timespec="seconds")),
+                    str(old_value), str(new_value), clean(row["reason"]), datetime.now().isoformat(timespec="seconds")),
+                )
+            elif import_type == "Ingredient Form Corrections":
+                form_name = clean(row["form_name"])
+                cur.execute(
+                    "DELETE FROM ingredient_forms WHERE ingredient_id=? AND lower(form_name)=lower(?)",
+                    (ingredient_id, form_name),
+                )
+                cur.execute(
+                    """INSERT INTO ckb_change_log
+                    (change_type, target_table, target_key, field_name, old_value, new_value, reason, changed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ("data correction", "ingredient_forms", ingredient_name, "form_name",
+                     form_name, "DELETED", clean(row["reason"]), datetime.now().isoformat(timespec="seconds")),
+                )
+            elif import_type == "Ingredient Metadata Corrections":
+                old_value = cur.execute(
+                    "SELECT knowledge_status FROM ingredients WHERE ingredient_id=?", (ingredient_id,)
+                ).fetchone()[0]
+                new_value = clean(row["knowledge_status"]).lower()
+                cur.execute("UPDATE ingredients SET knowledge_status=? WHERE ingredient_id=?", (new_value, ingredient_id))
+                cur.execute(
+                    """INSERT INTO ckb_change_log
+                    (change_type, target_table, target_key, field_name, old_value, new_value, reason, changed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ("metadata correction", "ingredients", ingredient_name, "knowledge_status",
+                     clean(old_value), new_value, clean(row["reason"]), datetime.now().isoformat(timespec="seconds")),
                 )
             else:
                 raise ValueError(f"Unsupported training import type: {import_type}")
