@@ -6,7 +6,7 @@ activities. The planner consumes and orchestrates those activities; it does not
 infer how an ingredient should be cooked.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import List, Optional
 
 
@@ -27,6 +27,7 @@ class KitchenActivity:
     instruction: str
     minutes: Optional[int] = None
     human_busy: bool = True
+    attention_load: float = 1.0  # fraction of the window needing human attention
     equipment: str = ""
     depends_on: List[str] = field(default_factory=list)
     stage: str = "middle"  # early, middle, late, finish
@@ -46,6 +47,7 @@ class IngredientState:
     holdability: str = ""
     timing_note: str = ""
     handling_note: str = ""
+    cooking_note: str = ""
 
 
 @dataclass
@@ -71,6 +73,7 @@ class IngredientProfile:
     start_first: bool = False
     timing_note: str = ""
     handling_note: str = ""
+    cooking_note: str = ""
     work_score: int = 5
     cleanup_score: int = 5
     mental_load_score: int = 5
@@ -101,6 +104,8 @@ class IngredientProfile:
         return f"Prep {self.name}."
 
     def cook_instruction(self, strategy=""):
+        if self.cooking_note:
+            return self.cooking_note
         strategy = _key(strategy)
         if self.add_stage == "late":
             return f"Add {self.name} near the end and {self.preferred_method} just until ready."
@@ -156,6 +161,7 @@ class IngredientProfile:
             instruction=self.cook_instruction(strategy),
             minutes=cook_minutes or None,
             human_busy=(self.active_minutes or cook_minutes) > 0,
+            attention_load=max(0.1, min(1.0, self.attention_score / 10)),
             stage=stage,
             parallel_ok=self.parallel_ok,
             depends_on=[f"prep:{self.name}"] if prep_minutes > 0 else [],
@@ -197,8 +203,8 @@ class IngredientProfile:
 SWISS_CHARD = IngredientProfile(
     name="Swiss chard",
     role="vegetable",
-    prep_minutes=5,
-    cook_minutes=4,
+    prep_minutes=2,
+    cook_minutes=6,
     add_stage="late",
     holdability="poor",
     preferred_method="saute",
@@ -207,7 +213,8 @@ SWISS_CHARD = IngredientProfile(
     recovery_hint="If it gets watery, drain excess liquid and season again before serving.",
     teaching_note="Swiss chard cooks fast because the leaves collapse quickly under heat.",
     parallel_ok=False,
-    handling_note="wash well, trim tough stems, and chop leaves separately from stems if needed.",
+    handling_note="rinse the leaves and stems thoroughly. Cut the stems away from the leaves and slice the edible stems into small pieces. Leave the leaves in large pieces or tear them into manageable sections.",
+    cooking_note="Heat a small amount of oil in a skillet. Add the sliced Swiss chard stems first and cook 3–5 minutes, until they begin to soften. Add the leaves with a small splash of water or broth and toss 2–3 minutes, until wilted and tender. Season with salt and a bright finish such as lemon juice or vinegar.",
     timing_note="Swiss chard wilts quickly and does not hold well, so cook it near the end.",
     work_score=4,
     cleanup_score=3,
@@ -252,7 +259,8 @@ CHICKEN_BREAST = IngredientProfile(
     recovery_hint="If it seems dry, slice it thinly and serve with sauce or gravy.",
     teaching_note="Resting helps the juices settle before slicing.",
     parallel_ok=False,
-    handling_note="pat dry, season before cooking, and avoid overcooking.",
+    handling_note="remove loose membrane and as much visible fat as desired. Do not rinse raw chicken. Pat dry, make the thickness even if needed, and season both sides.",
+    cooking_note="Heat a lightly oiled skillet over medium to medium-high heat. Add the chicken breast and let the first side brown before turning. Turn and continue cooking, checking it periodically rather than watching it continuously.",
     timing_note="Chicken breast needs active attention while cooking and benefits from a short rest before slicing.",
     attention_score=6,
     work_score=6,
@@ -263,7 +271,7 @@ CHICKEN_BREAST = IngredientProfile(
         "Fresh Raw": IngredientState(
             name="Fresh Raw", prep_minutes=3, cook_minutes=12, active_minutes=10,
             passive_minutes=5, attention_score=6, holdability="fair",
-            handling_note="pat dry, season before cooking, and avoid overcooking.",
+            handling_note="remove loose membrane and as much visible fat as desired. Do not rinse raw chicken. Pat dry, make the thickness even if needed, and season both sides.",
             timing_note="Fresh raw chicken breast cooks quickly but needs attention.",
         ),
         "Frozen Raw": IngredientState(
@@ -310,10 +318,10 @@ RICE = IngredientProfile(
 MUSHROOMS = IngredientProfile(
     name="Mushrooms",
     role="vegetable",
-    prep_minutes=4,
-    cook_minutes=8,
-    active_minutes=8,
-    add_stage="middle",
+    prep_minutes=2,
+    cook_minutes=6,
+    active_minutes=6,
+    add_stage="early",
     holdability="good",
     preferred_method="saute",
     desired_outcome="deeply browned mushrooms with concentrated savory flavor.",
@@ -321,9 +329,10 @@ MUSHROOMS = IngredientProfile(
     recovery_hint="Increase the heat and let excess moisture evaporate before seasoning again.",
     teaching_note="Mushrooms benefit from browning before liquid is added.",
     parallel_ok=False,
-    handling_note="wipe or rinse briefly, dry well, and slice evenly.",
+    handling_note="quickly rinse off attached dirt or wipe with a damp towel; do not soak. Trim and discard only the dry end of each stem. Slice approximately 1/4 inch (6 mm) thick.",
+    cooking_note="Heat a skillet over medium-high heat. Add the mushrooms in a single, uncrowded layer and leave them undisturbed while they release moisture. When the moisture evaporates and the bottoms brown, stir or turn them and cook about 2 minutes longer. Season after browning.",
     timing_note="Brown mushrooms before adding liquid so they contribute fond and concentrated flavor.",
-    attention_score=6,
+    attention_score=2,
     work_score=4,
     cleanup_score=3,
     mental_load_score=4,
@@ -332,7 +341,7 @@ MUSHROOMS = IngredientProfile(
 ASPARAGUS = IngredientProfile(
     name="Asparagus",
     role="vegetable",
-    prep_minutes=3,
+    prep_minutes=2,
     cook_minutes=6,
     active_minutes=6,
     add_stage="middle",
@@ -343,7 +352,8 @@ ASPARAGUS = IngredientProfile(
     recovery_hint="Serve promptly and add a bright finishing seasoning if it has softened too far.",
     teaching_note="Evenly sized pieces help asparagus cook at the same rate.",
     parallel_ok=False,
-    handling_note="trim woody ends and cut into even pieces if needed.",
+    handling_note="wash the asparagus and trim or snap off the woody ends. Leave the spears whole or cut them into bite-size pieces.",
+    cooking_note="Heat a small amount of oil or butter in a skillet. Add the asparagus and sauté 2–3 minutes. For thick or firm stalks, add 1–2 tablespoons of water and cover briefly to steam. Uncover and continue cooking until bright green and crisp-tender, then season and serve promptly.",
     timing_note="Cook asparagus after sturdy components but before quick-wilting greens.",
     attention_score=5,
     work_score=3,
@@ -353,33 +363,36 @@ ASPARAGUS = IngredientProfile(
 
 
 def _rice_activities(self, strategy="", state_name=""):
+    prep_id = f"prep:{self.name}"
+    start_id = f"start:{self.name}"
+    simmer_id = f"simmer:{self.name}"
     return [
         KitchenActivity(
             component=self.name, activity_type="prep",
             instruction="Measure the rice and cooking liquid.",
             minutes=2, human_busy=True, stage="early", parallel_ok=True,
-            equipment="counter", activity_id="prep:Rice",
+            equipment="counter", activity_id=prep_id,
         ),
         KitchenActivity(
             component=self.name, activity_type="start",
             instruction="Bring the rice and liquid to a simmer, then cover and reduce the heat.",
             minutes=2, human_busy=True, stage="early", parallel_ok=False,
-            depends_on=["prep:Rice"], equipment="burner",
-            activity_id="start:Rice",
+            depends_on=[prep_id], equipment="burner",
+            activity_id=start_id,
         ),
         KitchenActivity(
             component=self.name, activity_type="simmer",
             instruction="Let the rice simmer covered without constant attention.",
             minutes=18, human_busy=False, stage="early", parallel_ok=True,
-            depends_on=["start:Rice"], equipment="burner",
-            activity_id="simmer:Rice",
+            depends_on=[start_id], equipment="burner",
+            activity_id=simmer_id,
         ),
         KitchenActivity(
             component=self.name, activity_type="rest",
             instruction="Remove the rice from heat and let it rest covered before fluffing.",
             minutes=5, human_busy=False, stage="finish", parallel_ok=True,
-            depends_on=["simmer:Rice"], equipment="counter",
-            activity_id="rest:Rice",
+            depends_on=[simmer_id], equipment="counter",
+            activity_id=f"rest:{self.name}",
         ),
     ]
 
@@ -452,6 +465,11 @@ def _chicken_activities(self, strategy="", state_name=""):
         ]
 
     activities = IngredientProfile.publish_activities(self, strategy, "Fresh Raw")
+    for activity in activities:
+        if activity.activity_type == "cook":
+            activity.attention_load = 0.25
+        elif activity.activity_type == "wait":
+            activity.instruction = "Continue cooking until the thickest part of the chicken breast reaches 165°F. Remove it from the pan and let it rest before slicing."
     activities.append(KitchenActivity(
         component=self.name,
         activity_type="slice",
@@ -468,6 +486,9 @@ def _chicken_activities(self, strategy="", state_name=""):
 
 def _chard_activities(self, strategy="", state_name=""):
     activities = IngredientProfile.publish_activities(self, strategy, state_name)
+    for activity in activities:
+        if activity.activity_type == "saute":
+            activity.attention_load = 0.75
     activities.append(KitchenActivity(
         component=self.name,
         activity_type="serve",
@@ -533,6 +554,10 @@ def get_ingredient_profile(name, role="ingredient"):
         return BLACK_OLIVES
     if k == "rice":
         return RICE
+    if k.endswith(" rice"):
+        profile = replace(RICE, name=cleaned_name)
+        profile.publish_activities = _rice_activities.__get__(profile, IngredientProfile)
+        return profile
     if k == "mushrooms":
         return MUSHROOMS
     if k == "asparagus":

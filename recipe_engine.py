@@ -1,11 +1,13 @@
 from ingredient_profiles import get_ingredient_profile
 from cooking_planner import (
+    assess_time_feasibility,
     build_kitchen_lane_schedule,
     generate_human_instructions,
     summarize_cooking_activities,
     summarize_kitchen_lanes,
 )
 from culinary_opportunities import discover_opportunities, serialize_opportunities
+from sauce_profiles import get_sauce_profile
 
 def _clean(value):
     return "" if value is None else str(value).strip()
@@ -67,6 +69,18 @@ def _sauce_for_cuisine(cuisine):
     return "simple sauce"
 
 
+def _cuisine_requirements(cuisine):
+    """Prototype pantry requirements for optional cuisine intent."""
+    k = _key(cuisine)
+    if "chinese" in k:
+        return ["Soy sauce", "Garlic"]
+    if "italian" in k:
+        return ["Tomato sauce", "Garlic"]
+    if "mexican" in k:
+        return ["Chili powder", "Cumin"]
+    return []
+
+
 def generate_candidates(
     protein_name="",
     vegetable_name="",
@@ -79,6 +93,9 @@ def generate_candidates(
     max_results=10,
     vegetable_names=None,
     protein_state="Fresh Raw",
+    available_items=None,
+    requested_items=None,
+    available_equipment=None,
 ):
     protein = _clean(protein_name)
     protein_state = _clean(protein_state) or "Fresh Raw"
@@ -90,6 +107,14 @@ def generate_candidates(
     
     foundation = _clean(foundation_name)
     cuisine = _clean(cuisine_name) or "Comfort Food"
+    sauce = _sauce_for_cuisine(cuisine)
+    sauce_profile = get_sauce_profile(sauce)
+    selected_components = _unique([protein, *_clean(vegetable).split(" & "), foundation])
+    available = _unique(list(available_items or []) + selected_components)
+    sauce_items = [item.name for item in sauce_profile.ingredients] if sauce_profile else _cuisine_requirements(cuisine)
+    required = _unique(selected_components + sauce_items + list(requested_items or []))
+    available_keys = {_key(item) for item in available}
+    needed = [item for item in required if _key(item) not in available_keys]
     try:
         time_limit = int(time_minutes)
     except Exception:
@@ -100,7 +125,6 @@ def generate_candidates(
         servings = 4
 
     base = _join([protein, vegetable]) or protein or vegetable or "Pantry"
-    sauce = _sauce_for_cuisine(cuisine)
     strategies = [
         {"strategy": "quick_bowl", "label": "Quick Bowl", "title": f"{cuisine} {base} Bowl" if foundation else f"{cuisine} {base} Dinner Bowl", "minutes": 15, "energy": "Very Low", "energy_rank": 0, "budget": "Budget", "budget_rank": 1, "why": "fastest low-energy assembly"},
         {"strategy": "skillet", "label": "Skillet", "title": f"{cuisine} {base} Skillet", "minutes": 25, "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "one pan, flexible texture"},
@@ -190,14 +214,31 @@ def generate_candidates(
             "minutes": active_minutes + passive_minutes,
             "attention_score": attention_score,
             "effort_score": effort_score,
+            "inventory_have": available,
+            "inventory_need": needed,
+            "available_equipment": list(available_equipment or []),
         })
 
         schedule = build_kitchen_lane_schedule(c)
         c["minutes"] = max((item.end_minute for item in schedule), default=0)
+        c["active_minutes"] = sum(item.attention_minutes for item in schedule)
+        c["passive_minutes"] = max(0, c["minutes"] - c["active_minutes"])
+        c["inventory_requirements"] = [
+            {
+                "name": item.name,
+                "quantity": item.quantity,
+                "status": "Have" if _key(item.name) in available_keys else "Need",
+            }
+            for item in (sauce_profile.ingredients if sauce_profile else [])
+        ]
+        feasibility = assess_time_feasibility(c, time_limit)
+        c.update(feasibility)
+        if not c["time_feasible"]:
+            c["score"] = max(0, c["score"] - c["time_shortfall_minutes"] * 5)
         c["opportunities"] = serialize_opportunities(discover_opportunities(c))
         candidates.append(c)
 
-    candidates.sort(key=lambda x: x["score"], reverse=True)
+    candidates.sort(key=lambda x: (x["time_feasible"], x["score"]), reverse=True)
     return candidates[:max_results]
 
 
@@ -215,7 +256,9 @@ def build_recipe_from_candidate(candidate):
         "activity_debug": activity_debug,
         "lane_debug": lane_debug,
         "opportunities": list(candidate.get("opportunities") or []),
-        "grocery_list": _unique([protein, vegetable, foundation]),
+        "grocery_list": list(candidate.get("inventory_need") or []),
+        "inventory_requirements": list(candidate.get("inventory_requirements") or []),
+        "selected_rice_equipment": candidate.get("selected_rice_equipment", ""),
         "servings": candidate.get("servings", 4),
         "summary": f"{candidate.get('label')} · {candidate.get('energy')} energy · {candidate.get('budget')} · {candidate.get('minutes')} min · serves {candidate.get('servings', 4)}"
     }

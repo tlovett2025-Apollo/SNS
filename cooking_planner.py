@@ -7,8 +7,11 @@ then deepen the cooking intelligence as more CKB fields become available.
 """
 
 from dataclasses import dataclass, field
+from math import ceil
 from typing import Dict, List, Optional
 from ingredient_profiles import KitchenActivity, get_ingredient_profile
+from equipment_profiles import build_rice_equipment_activities, choose_rice_equipment
+from sauce_profiles import get_sauce_profile
 
 
 @dataclass
@@ -218,6 +221,7 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
     strategy = _clean(candidate.get("strategy")) or "plate"
     protein_state = _clean(candidate.get("protein_state")) or "Fresh Raw"
     sauce = _clean(candidate.get("sauce")) or "simple sauce"
+    sauce_profile = get_sauce_profile(sauce)
     components = [item for item in [protein, *vegetables, foundation] if item]
 
     activities: List[KitchenActivity] = [
@@ -249,6 +253,21 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         for activity in activities
         if activity.source == "ko" and activity.stage in {"middle", "late", "finish"}
     ]
+
+    ko_activities = [activity for activity in activities if activity.source == "ko"]
+    referenced = {
+        dependency
+        for activity in ko_activities
+        for dependency in activity.depends_on
+    }
+
+    def terminal_ids(component_names):
+        names = set(component_names)
+        return [
+            _activity_id(activity)
+            for activity in ko_activities
+            if activity.component in names and _activity_id(activity) not in referenced
+        ]
 
     if strategy == "casserole":
         activities.append(_planner_activity(
@@ -297,13 +316,35 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             equipment="burner",
         ))
     else:
+        mushroom_finish = terminal_ids(["Mushrooms"])
+        chicken_cook = [
+            _activity_id(activity)
+            for activity in ko_activities
+            if activity.component == protein and activity.activity_type in {"cook", "reheat"}
+        ]
         activities.append(_planner_activity(
-            "finish",
-            f"Bring the prepared components together and season toward {sauce}.",
-            minutes=5,
+            "finish sauce",
+            sauce_profile.cook_instruction if sauce_profile else f"Taste, adjust seasoning, and finish {sauce}; use the browned pan flavor when available.",
+            minutes=sauce_profile.finish_minutes if sauce_profile else 3,
             stage="finish",
-            depends_on=component_finishes,
+            depends_on=mushroom_finish or chicken_cook,
             equipment="burner",
+        ))
+        activities.append(_planner_activity(
+            "plate sides",
+            f"Plate {foundation or 'the foundation'} and {_join(vegetables)} with the finished sauce while the protein rests.",
+            minutes=2,
+            stage="finish",
+            depends_on=terminal_ids([*vegetables, foundation]) + ["finish sauce:meal"],
+            equipment="counter",
+        ))
+        activities.append(_planner_activity(
+            "serve chicken",
+            f"Add {protein or 'the protein'} to the plated meal and serve immediately.",
+            minutes=1,
+            stage="finish",
+            depends_on=terminal_ids([protein]) + ["plate sides:meal"],
+            equipment="counter",
         ))
 
     stage_order = {"early": 0, "middle": 1, "late": 2, "finish": 3}
@@ -313,6 +354,133 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
     )
 
 
+def consolidate_kitchen_activities(
+    activities: List[KitchenActivity],
+    candidate: Optional[dict] = None,
+) -> List[KitchenActivity]:
+    """Translate ingredient activities into work a cook actually performs.
+
+    Long-lead components receive a small launch-prep phase so they can begin
+    before general mise en place. Remaining ingredient prep plus sauce/spice
+    measuring becomes one calm meal-level prep phase while passive work runs.
+    """
+
+    prep_activities = [
+        activity
+        for activity in activities
+        if activity.source == "ko"
+        and activity.activity_type == "prep"
+        and activity.human_busy
+        and (activity.equipment or "counter").lower() == "counter"
+    ]
+    if len(prep_activities) < 2:
+        return activities
+
+    prep_ids = {_activity_id(activity) for activity in prep_activities}
+    by_id = {_activity_id(activity): activity for activity in activities}
+    dependents: Dict[str, List[KitchenActivity]] = {}
+    for activity in activities:
+        for dependency in activity.depends_on:
+            dependents.setdefault(dependency, []).append(activity)
+
+    def launches_long_lead(prep_activity):
+        pending = list(dependents.get(_activity_id(prep_activity), []))
+        seen = set()
+        while pending:
+            activity = pending.pop(0)
+            activity_id = _activity_id(activity)
+            if activity_id in seen:
+                continue
+            seen.add(activity_id)
+            if (
+                (not activity.human_busy and int(activity.minutes or 0) >= 10)
+                or ((activity.equipment or "").lower() == "oven" and int(activity.minutes or 0) >= 15)
+            ):
+                return True
+            pending.extend(dependents.get(activity_id, []))
+        return False
+
+    launch_prep = [activity for activity in prep_activities if launches_long_lead(activity)]
+    general_prep = [activity for activity in prep_activities if activity not in launch_prep]
+    launch_ids = {_activity_id(activity) for activity in launch_prep}
+    general_ids = {_activity_id(activity) for activity in general_prep}
+    launch_starts = []
+    for prep_activity in launch_prep:
+        for dependent in dependents.get(_activity_id(prep_activity), []):
+            dependent_id = _activity_id(dependent)
+            if dependent_id not in launch_starts:
+                launch_starts.append(dependent_id)
+
+    def consolidated_prep(activity_type, selected, depends_on, extra_instruction="", extra_minutes=0):
+        instructions = [activity.instruction.rstrip(".") for activity in selected]
+        if extra_instruction:
+            instructions.append(extra_instruction.rstrip("."))
+        calculated_minutes = sum(max(0, int(activity.minutes or 0)) for activity in selected)
+        if activity_type == "prep" and candidate:
+            vegetables = _split_joined_items(candidate.get("vegetable"))
+            calculated_minutes = len(vegetables)
+            if vegetables:
+                calculated_minutes += 1  # one shared slicing/dicing/modification allowance
+            if _clean(candidate.get("protein")):
+                calculated_minutes += 1
+        return KitchenActivity(
+            component="meal",
+            activity_type=activity_type,
+            instruction=(
+                "Prepare the long-lead components: " if activity_type == "launch prep"
+                else "Complete mise en place: "
+            ) + "; ".join(instructions) + ".",
+            minutes=calculated_minutes + extra_minutes,
+            human_busy=True,
+            equipment="counter",
+            depends_on=list(depends_on),
+            stage="early" if activity_type == "launch prep" else "middle",
+            parallel_ok=False,
+            source="consolidator",
+            activity_id="prep:launch" if activity_type == "launch prep" else "prep:meal",
+        )
+
+    replacements = []
+    if launch_prep:
+        replacements.append(consolidated_prep("launch prep", launch_prep, ["gather:meal"]))
+    sauce = _clean((candidate or {}).get("sauce"))
+    sauce_profile = get_sauce_profile(sauce)
+    sauce_instruction = (
+        sauce_profile.prep_instruction if sauce_profile
+        else (f"measure and mix {sauce}" if sauce else "")
+    )
+    if general_prep or sauce_instruction:
+        general_dependencies = launch_starts or ["gather:meal"]
+        replacements.append(consolidated_prep(
+            "prep", general_prep, general_dependencies,
+            extra_instruction=sauce_instruction,
+            extra_minutes=0,
+        ))
+
+    consolidated = []
+    inserted = False
+    for activity in activities:
+        if activity in prep_activities:
+            if not inserted:
+                consolidated.extend(replacements)
+                inserted = True
+            continue
+
+        if activity.depends_on:
+            rewritten = []
+            for dependency in activity.depends_on:
+                if dependency in launch_ids:
+                    dependency = "prep:launch"
+                elif dependency in general_ids:
+                    dependency = "prep:meal"
+                if dependency not in rewritten:
+                    rewritten.append(dependency)
+            activity.depends_on = rewritten
+        consolidated.append(activity)
+
+    return consolidated
+
+
 
 @dataclass
 class ScheduledActivity:
@@ -320,16 +488,55 @@ class ScheduledActivity:
     lane: str
     start_minute: int
     end_minute: int
+    attention_minutes: int = 0
+
+
+def _energy_attention_multiplier(candidate: dict) -> float:
+    """Scale human work conservatively when the cook has less energy."""
+    energy = _clean(candidate.get("user_energy") or candidate.get("energy")).lower()
+    if "barely" in energy:
+        return 2.0
+    if "very low" in energy:
+        return 1.6
+    if "low" in energy:
+        return 1.25
+    return 1.0
 
 
 def _activity_id(activity: KitchenActivity) -> str:
     return activity.activity_id or f"{activity.activity_type}:{activity.component}"
 
 
+def assign_available_equipment(activities: List[KitchenActivity], candidate: dict) -> List[KitchenActivity]:
+    """Route supported activities to household equipment before scheduling."""
+    value = candidate.get("available_equipment") or []
+    if isinstance(value, str):
+        value = [item.strip() for item in value.split(",")]
+    available = {_clean(item).lower() for item in value if _clean(item)}
+    foundation_name = _clean(candidate.get("foundation"))
+    rice_device = choose_rice_equipment(available)
+    candidate["selected_rice_equipment"] = rice_device
+    if "rice" in foundation_name.lower() and rice_device != "stovetop":
+        activities = [activity for activity in activities if activity.component != foundation_name]
+        activities.extend(build_rice_equipment_activities(foundation_name, rice_device))
+        if rice_device == "pressure cooker":
+            old_terminal = f"rest:{foundation_name}"
+            new_terminal = f"natural release:{foundation_name}"
+            for activity in activities:
+                activity.depends_on = [
+                    new_terminal if dependency == old_terminal else dependency
+                    for dependency in activity.depends_on
+                ]
+    return activities
+
+
 def build_activity_graph(candidate: dict) -> Dict[str, KitchenActivity]:
     """Return the dependency graph keyed by stable activity identifiers."""
     graph: Dict[str, KitchenActivity] = {}
-    for activity in build_cooking_activities(candidate):
+    activities = build_cooking_activities(candidate)
+    activities = assign_available_equipment(activities, candidate)
+    activities = consolidate_kitchen_activities(activities, candidate)
+    for activity in activities:
         activity.activity_id = _activity_id(activity)
         if activity.activity_id in graph:
             raise ValueError(f"Duplicate activity id: {activity.activity_id}")
@@ -362,10 +569,15 @@ def build_kitchen_lane_schedule(
 
     lane_free = {f"Burner {i}": 0 for i in range(1, burner_count + 1)}
     lane_free.update({"Oven": 0, "Counter": 0})
+    for activity in graph.values():
+        equipment = (activity.equipment or "counter").lower()
+        if equipment not in {"burner", "oven", "counter"}:
+            lane_free.setdefault(equipment.title(), 0)
     human_free = [0] * human_attention_lanes
     completed: Dict[str, ScheduledActivity] = {}
     unscheduled = dict(graph)
     scheduled: List[ScheduledActivity] = []
+    attention_multiplier = _energy_attention_multiplier(candidate)
 
     while unscheduled:
         ready = [
@@ -383,14 +595,26 @@ def build_kitchen_lane_schedule(
 
             equipment = (activity.equipment or "counter").lower()
             if equipment == "burner":
-                lane = min(
+                dependency_lanes = [
+                    completed[dependency].lane
+                    for dependency in activity.depends_on
+                    if completed[dependency].lane.startswith("Burner ")
+                    and completed[dependency].activity.component == activity.component
+                ]
+                lane = dependency_lanes[0] if dependency_lanes else min(
                     (name for name in lane_free if name.startswith("Burner ")),
                     key=lambda name: lane_free[name],
                 )
             elif equipment == "oven":
                 lane = "Oven"
+            elif equipment not in {"counter", ""}:
+                lane = equipment.title()
+            elif not activity.human_busy:
+                lane = f"Holding ({activity.component})"
             else:
                 lane = "Counter"
+
+            lane_free.setdefault(lane, 0)
 
             start = max(dependency_end, lane_free[lane])
             human_index = None
@@ -401,30 +625,44 @@ def build_kitchen_lane_schedule(
                 )
                 start = max(start, human_free[human_index])
 
-            return start, lane, human_index
+            continues_component = any(
+                completed[dependency].activity.component == activity.component
+                for dependency in activity.depends_on
+            )
+            return start, lane, human_index, continues_component
 
         stage_order = {"early": 0, "middle": 1, "late": 2, "finish": 3}
         placements = [
             (*placement_for(activity), activity)
             for activity in ready
         ]
-        start, lane, human_index, activity = min(
+        start, lane, human_index, continues_component, activity = min(
             placements,
             key=lambda item: (
                 item[0],
-                stage_order.get(item[3].stage, 1),
-                _activity_id(item[3]),
+                not item[3],
+                stage_order.get(item[4].stage, 1),
+                _activity_id(item[4]),
             ),
         )
 
         duration = max(0, int(activity.minutes or 0))
+        attention_minutes = 0
+        if activity.human_busy and duration:
+            attention_minutes = min(
+                duration,
+                max(1, ceil(duration * float(activity.attention_load or 0) * attention_multiplier)),
+            )
         end = start + duration
-        item = ScheduledActivity(activity=activity, lane=lane, start_minute=start, end_minute=end)
+        item = ScheduledActivity(
+            activity=activity, lane=lane, start_minute=start, end_minute=end,
+            attention_minutes=attention_minutes,
+        )
         scheduled.append(item)
         completed[_activity_id(activity)] = item
         lane_free[lane] = end
         if human_index is not None:
-            human_free[human_index] = end
+            human_free[human_index] = start + attention_minutes
         del unscheduled[_activity_id(activity)]
 
     return sorted(scheduled, key=lambda item: (item.start_minute, item.lane, item.end_minute))
@@ -436,12 +674,29 @@ def summarize_kitchen_lanes(candidate: dict, burner_count: int = 2, human_attent
     lines = []
     for item in schedule:
         activity = item.activity
-        attention = " + human" if activity.human_busy else ""
+        attention = (
+            f" + human {item.attention_minutes}m/{item.end_minute - item.start_minute}m"
+            if activity.human_busy and item.end_minute > item.start_minute else ""
+        )
         lines.append(
             f"{item.start_minute:>3}-{item.end_minute:<3} · {item.lane}{attention} · "
             f"{activity.activity_type}: {activity.component}"
         )
     return lines
+
+
+def assess_time_feasibility(candidate: dict, available_minutes: int) -> dict:
+    """Compare the meal's scheduled lead time with the available dinner window."""
+    schedule = build_kitchen_lane_schedule(candidate)
+    required = max((item.end_minute for item in schedule), default=0)
+    available = max(0, int(available_minutes or 0))
+    shortfall = max(0, required - available)
+    return {
+        "required_lead_minutes": required,
+        "available_minutes": available,
+        "time_feasible": shortfall == 0,
+        "time_shortfall_minutes": shortfall,
+    }
 
 def summarize_cooking_activities(candidate: dict) -> List[str]:
     """Return developer-readable evidence of activity ownership and semantics."""
@@ -660,12 +915,9 @@ def build_cooking_plan(candidate: dict) -> List[CookingStep]:
 
 
 def generate_human_instructions(candidate: dict) -> str:
-    """
-    Convert the cooking plan into readable timeline instructions.
-    """
+    """Render the actual scheduled activity graph as the user-facing recipe."""
 
-    steps = build_cooking_plan(candidate)
-    blocks = build_timeline_blocks(steps)
+    schedule = build_kitchen_lane_schedule(candidate)
     lines = []
 
     total_minutes = candidate.get("minutes")
@@ -679,15 +931,14 @@ def generate_human_instructions(candidate: dict) -> str:
             "Some steps may overlap, so step times are guidance rather than a strict sequence."
         )
 
-    for block in blocks:
-        if len(block.steps) == 1:
-            step = block.steps[0]
-            time_note = f" ({step.minutes} min)" if step.minutes else ""
-            lines.append(f"Stage {block.stage}: {step.instruction}{time_note}")
-        else:
-            lines.append(f"Stage {block.stage}: Work on these components in parallel:")
-            for step in block.steps:
-                time_note = f" ({step.minutes} min)" if step.minutes else ""
-                lines.append(f"  - {step.instruction}{time_note}")
+    for item in schedule:
+        activity = item.activity
+        if not activity.instruction or item.end_minute <= item.start_minute:
+            continue
+        time_window = f"Minutes {item.start_minute}–{item.end_minute}"
+        attention = ""
+        if item.attention_minutes and item.attention_minutes < item.end_minute - item.start_minute:
+            attention = f" About {item.attention_minutes} minutes of attention are needed during this window."
+        lines.append(f"{time_window}: {activity.instruction}{attention}")
 
     return "\n".join(lines)

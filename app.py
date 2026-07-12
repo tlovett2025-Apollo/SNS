@@ -125,10 +125,31 @@ with tabs[0]:
     servings = c8.number_input("Servings", min_value=1, max_value=24, value=4, step=1)
     if "candidates" not in st.session_state: st.session_state.candidates = []
     if st.button("Find Recipe Options", type="primary"):
-        st.session_state.candidates = generate_candidates(protein_name, vegetable_name, foundation_name, cuisine_name, energy_level, budget_level, int(time_minutes), int(servings), 10, vegetable_names=vegetable_names, protein_state=protein_state)
+        st.session_state.candidates = generate_candidates(
+            protein_name, vegetable_name, foundation_name, cuisine_name,
+            energy_level, budget_level, int(time_minutes), int(servings), 10,
+            vegetable_names=vegetable_names, protein_state=protein_state,
+            available_items=[
+                "Water or broth", "Cold water",
+                "Sugar or preferred sweetener", "Cornstarch",
+            ],
+            available_equipment=["Rice cooker", "Pressure cooker"],
+        )
     if st.session_state.candidates:
         st.subheader("Top Recipe Options")
-        option_labels = [f"{i+1}. {c['title']} — {c['energy']} energy · {c['budget']} · {c['minutes']} min total · {c.get('active_minutes', 0)} active · {c.get('passive_minutes', 0)} passive · attention {c.get('attention_score', 0)}/10 · effort {c.get('effort_score', 0)}/10 · score {c['score']}" for i,c in enumerate(st.session_state.candidates)]
+        first = st.session_state.candidates[0]
+        meal_title = " ".join(
+            item for item in [first.get("cuisine"), first.get("protein"), first.get("vegetable")]
+            if item
+        )
+        st.markdown(f"**Title: {meal_title}**")
+        option_labels = [
+            f"{i+1}. {c['label']} — Energy: {c['energy']} · Budget: {c['budget']} · "
+            f"Total: {c['minutes']} min · Active: {c.get('active_minutes', 0)} min · "
+            f"Passive: {c.get('passive_minutes', 0)} min · Attention Required: {c.get('attention_score', 0)}/10 · "
+            f"Effort Needed: {c.get('effort_score', 0)}/10 · SCORE: {c['score']}"
+            for i,c in enumerate(st.session_state.candidates)
+        ]
         chosen = st.radio("Choose one to generate", option_labels)
         candidate = st.session_state.candidates[option_labels.index(chosen)]
         st.caption(f"Why: {candidate['why']} | Sauce/seasoning direction: {candidate['sauce']}")
@@ -137,6 +158,8 @@ with tabs[0]:
     if "generated_recipe" in st.session_state:
         result = st.session_state.generated_recipe
         st.divider(); st.subheader(result["name"]); st.caption(result["summary"])
+        if result.get("selected_rice_equipment") and result["selected_rice_equipment"] != "stovetop":
+            st.caption(f"Rice equipment selected: {result['selected_rice_equipment'].title()}")
         st.markdown("### Recipe")
         for i, step in enumerate(result["instructions"], 1):
             clean_step = str(step).strip()
@@ -170,6 +193,10 @@ with tabs[0]:
 
         st.markdown("### Grocery List / Component List")        
         for item in result["grocery_list"]: st.write(f"- {item}")
+        if result.get("inventory_requirements"):
+            st.markdown("### Sauce Ingredients — Have / Need")
+            for item in result["inventory_requirements"]:
+                st.write(f"- {item['quantity']} {item['name']} — **{item['status']}**")
 
 with tabs[1]:
     st.header("Ingredients")
