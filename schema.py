@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS proteins (
     energy_level TEXT,
     animal_source TEXT,
     meat_color TEXT,
-    alpha_gal_safe INTEGER DEFAULT 1,
+    alpha_gal_safe INTEGER DEFAULT 0,
     default_prep TEXT,
     notes TEXT,
     FOREIGN KEY (ingredient_id) REFERENCES ingredients(ingredient_id),
@@ -269,13 +269,86 @@ CREATE TABLE IF NOT EXISTS collections (
     collection_type TEXT,
     description TEXT
 );
+
+CREATE TABLE IF NOT EXISTS ko_profiles (
+    ko_profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ingredient_id INTEGER,
+    component_name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    default_state TEXT,
+    prep_minutes INTEGER DEFAULT 0,
+    cook_minutes INTEGER DEFAULT 0,
+    active_minutes INTEGER DEFAULT 0,
+    passive_minutes INTEGER DEFAULT 0,
+    attention_score INTEGER DEFAULT 0,
+    rest_minutes INTEGER DEFAULT 0,
+    add_stage TEXT DEFAULT 'middle',
+    holdability TEXT,
+    preferred_method TEXT,
+    desired_outcome TEXT,
+    failure_mode TEXT,
+    recovery_hint TEXT,
+    teaching_note TEXT,
+    parallel_ok INTEGER DEFAULT 1,
+    start_first INTEGER DEFAULT 0,
+    timing_note TEXT,
+    handling_note TEXT,
+    cooking_note TEXT,
+    work_score INTEGER DEFAULT 0,
+    cleanup_score INTEGER DEFAULT 0,
+    mental_load_score INTEGER DEFAULT 0,
+    verified INTEGER DEFAULT 0,
+    UNIQUE(component_name, role),
+    FOREIGN KEY (ingredient_id) REFERENCES ingredients(ingredient_id)
+);
+
+CREATE TABLE IF NOT EXISTS ko_activities (
+    ko_activity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ingredient_id INTEGER,
+    component_name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    state_name TEXT NOT NULL DEFAULT '',
+    sequence INTEGER NOT NULL,
+    activity_type TEXT NOT NULL,
+    instruction TEXT NOT NULL,
+    minutes INTEGER,
+    human_busy INTEGER DEFAULT 1,
+    attention_load REAL DEFAULT 1.0,
+    equipment_name TEXT,
+    stage TEXT DEFAULT 'middle',
+    parallel_ok INTEGER DEFAULT 1,
+    depends_on_sequence INTEGER,
+    verified INTEGER DEFAULT 0,
+    UNIQUE(component_name, role, state_name, sequence),
+    FOREIGN KEY (ingredient_id) REFERENCES ingredients(ingredient_id)
+);
+
+CREATE TABLE IF NOT EXISTS ckb_change_log (
+    change_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    change_type TEXT NOT NULL,
+    target_table TEXT NOT NULL,
+    target_key TEXT NOT NULL,
+    field_name TEXT NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    reason TEXT NOT NULL,
+    changed_at TEXT NOT NULL
+);
 """
 
 MIGRATIONS = [
     ("proteins", "animal_source", "ALTER TABLE proteins ADD COLUMN animal_source TEXT"),
     ("proteins", "meat_color", "ALTER TABLE proteins ADD COLUMN meat_color TEXT"),
-    ("proteins", "alpha_gal_safe", "ALTER TABLE proteins ADD COLUMN alpha_gal_safe INTEGER DEFAULT 1"),
+    ("proteins", "alpha_gal_safe", "ALTER TABLE proteins ADD COLUMN alpha_gal_safe INTEGER DEFAULT 0"),
     ("proteins", "default_prep", "ALTER TABLE proteins ADD COLUMN default_prep TEXT"),
+    ("ingredient_states", "active_minutes", "ALTER TABLE ingredient_states ADD COLUMN active_minutes INTEGER DEFAULT 0"),
+    ("ingredient_states", "passive_minutes", "ALTER TABLE ingredient_states ADD COLUMN passive_minutes INTEGER DEFAULT 0"),
+    ("ingredient_states", "attention_score", "ALTER TABLE ingredient_states ADD COLUMN attention_score INTEGER DEFAULT 0"),
+    ("ingredient_states", "holdability", "ALTER TABLE ingredient_states ADD COLUMN holdability TEXT"),
+    ("ingredient_states", "handling_note", "ALTER TABLE ingredient_states ADD COLUMN handling_note TEXT"),
+    ("ingredient_states", "timing_note", "ALTER TABLE ingredient_states ADD COLUMN timing_note TEXT"),
+    ("ingredient_states", "cooking_note", "ALTER TABLE ingredient_states ADD COLUMN cooking_note TEXT"),
+    ("ingredient_states", "verified", "ALTER TABLE ingredient_states ADD COLUMN verified INTEGER DEFAULT 0"),
 ]
 
 

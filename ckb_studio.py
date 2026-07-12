@@ -6,6 +6,12 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from ckb_training import (
+    TRAINING_COLUMNS, import_training_rows, validate_alpha_gal_classification,
+    validate_training_file,
+)
+from schema import create_schema
+
 DB_PATH = Path(r"data\ckb_seed_001.db")
 
 INGREDIENT_COLUMNS = [
@@ -114,11 +120,26 @@ def backup_database():
     return backup_path
 
 
+def ensure_training_schema():
+    """Apply additive training migrations only after preserving the current CKB."""
+    con = sqlite3.connect(DB_PATH)
+    tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    state_columns = {row[1] for row in con.execute("PRAGMA table_info(ingredient_states)")}
+    con.close()
+    required_tables = {"ko_profiles", "ko_activities", "ckb_change_log"}
+    required_state_columns = {"active_minutes", "passive_minutes", "attention_score", "holdability", "verified"}
+    if required_tables <= tables and required_state_columns <= state_columns:
+        return None
+    backup_path = backup_database()
+    create_schema()
+    return backup_path
+
+
 def get_ckb_counts():
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
     counts = {}
-    for table in ["ingredients", "proteins", "vegetables", "foundations", "sauces", "techniques", "signature_recipes"]:
+    for table in ["ingredients", "proteins", "vegetables", "foundations", "sauces", "techniques", "signature_recipes", "ingredient_forms", "ingredient_states", "ko_profiles", "ko_activities"]:
         try:
             counts[table] = cur.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         except Exception:
@@ -237,7 +258,7 @@ def validate_proteins(csv_path):
     existing = []
     missing_ingredients = []
 
-    for row in rows:
+    for row_number, row in enumerate(rows, start=2):
         ingredient_name = clean_text(row["ingredient_name"])
         try:
             ingredient_id = get_ingredient_id_by_name(cur, ingredient_name, required=True)
@@ -251,6 +272,13 @@ def validate_proteins(csv_path):
         # Data type checks
         optional_int(row["default_cook_temp_f"])
         optional_float(row["default_serving_oz"])
+        try:
+            validate_alpha_gal_classification(
+                ingredient_name, row["animal_source"], row["alpha_gal_safe"], row_number
+            )
+        except ValueError:
+            con.close()
+            raise
 
     con.close()
 
@@ -643,6 +671,8 @@ def get_import_type():
 
 
 def validate_selected_file(csv_path, import_type):
+    if import_type in TRAINING_COLUMNS:
+        return validate_training_file(csv_path, import_type, DB_PATH)
     if import_type == "Ingredients":
         return validate_ingredients(csv_path)
     if import_type == "Proteins":
@@ -657,6 +687,10 @@ def validate_selected_file(csv_path, import_type):
 
 
 def import_selected_rows(rows, import_type):
+    if import_type in TRAINING_COLUMNS:
+        backup_path = backup_database()
+        imported, skipped = import_training_rows(rows, import_type, DB_PATH)
+        return imported, skipped, backup_path
     if import_type == "Ingredients":
         return import_ingredients(rows)
     if import_type == "Proteins":
@@ -677,6 +711,8 @@ def refresh_counts():
         f"Proteins: {counts['proteins']} | Vegetables: {counts['vegetables']} | "
         f"Foundations: {counts['foundations']} | Sauces: {counts['sauces']} | "
         f"Techniques: {counts['techniques']} | Recipes: {counts['signature_recipes']}"
+        f" | Forms: {counts['ingredient_forms']} | States: {counts['ingredient_states']}"
+        f" | KO Profiles: {counts['ko_profiles']} | KO Activities: {counts['ko_activities']}"
     )
 
 
@@ -804,7 +840,7 @@ def set_preview_for_import_type(import_type):
             "freeze_dry_friendly": 55, "default_cook_time": 80,
             "verified": 70, "notes": 330,
         }
-    else:  # Techniques
+    elif import_type == "Techniques":
         columns = ("name", "technique_type", "energy_level", "default_time_minutes", "verified", "notes")
         headings = {
             "name": "Name", "technique_type": "Type",
@@ -814,6 +850,13 @@ def set_preview_for_import_type(import_type):
         widths = {
             "name": 180, "technique_type": 140, "energy_level": 90,
             "default_time_minutes": 90, "verified": 70, "notes": 650,
+        }
+    else:
+        columns = tuple(TRAINING_COLUMNS[import_type])
+        headings = {column: column.replace("_", " ").title() for column in columns}
+        widths = {
+            column: (360 if column in {"instruction", "notes", "reason", "handling_note", "timing_note", "cooking_note", "desired_outcome", "failure_mode", "recovery_hint", "teaching_note"} else 120)
+            for column in columns
         }
 
     reset_preview_columns(columns, headings, widths)
@@ -946,7 +989,11 @@ tk.Label(type_frame, text="Import Type:").pack(side="left", padx=5)
 import_type_box = ttk.Combobox(
     type_frame,
     textvariable=import_type_var,
-    values=["Ingredients", "Proteins", "Vegetables", "Foundations", "Techniques"],
+    values=[
+        "Ingredients", "Proteins", "Vegetables", "Foundations", "Techniques",
+        "Ingredient Forms", "Ingredient States", "KO Profiles", "KO Activities",
+        "Protein Safety Corrections",
+    ],
     state="readonly",
     width=20
 )
@@ -975,6 +1022,9 @@ preview_table.pack(fill="both", expand=True, padx=20, pady=10)
 status_label = tk.Label(root, textvariable=status_var, anchor="w")
 status_label.pack(fill="x", padx=20, pady=5)
 
+schema_backup = ensure_training_schema()
+if schema_backup:
+    status_var.set(f"Training schema added safely. Pre-migration backup: {schema_backup}")
 set_preview_for_import_type("Ingredients")
 refresh_counts()
 root.mainloop()

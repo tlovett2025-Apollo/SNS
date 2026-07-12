@@ -1,0 +1,24 @@
+ingredient_name,role,state_name,sequence,activity_type,instruction,minutes,human_busy,attention_load,equipment_name,stage,parallel_ok,depends_on_sequence,verified
+Chicken breast,protein,Fresh Raw,1,prep,"Prep Chicken breast: remove loose membrane and visible fat as desired. Do not rinse raw chicken. Pat dry, even the thickness, and season both sides.",3,1,1.0,counter,middle,1,,1
+Chicken breast,protein,Fresh Raw,2,cook,"Heat a lightly oiled skillet over medium to medium-high heat. Brown the first side, turn, and cook until the thickest part reaches 165°F.",12,1,0.25,burner,middle,0,1,1
+Chicken breast,protein,Fresh Raw,3,rest,Remove the chicken from the skillet and let it rest before slicing.,5,0,0.0,counter,finish,1,2,1
+Chicken breast,protein,Fresh Raw,4,slice,Slice the rested chicken breast just before serving.,2,1,1.0,counter,finish,0,3,1
+Chicken breast,protein,Frozen Raw,1,prep,Prep Chicken breast: remove packaging and season the frozen chicken breast. Use a covered or moist method unless thawed first.,2,1,1.0,counter,early,1,,1
+Chicken breast,protein,Frozen Raw,2,cook,Begin cooking the frozen chicken breast with a covered or moist method.,8,1,0.5,burner,early,0,1,1
+Chicken breast,protein,Frozen Raw,3,wait,Let the frozen chicken continue cooking through without constant attention.,15,0,0.0,burner,middle,1,2,1
+Chicken breast,protein,Frozen Raw,4,verify,Verify that the thickest part of the chicken breast has reached 165°F.,2,1,1.0,counter,finish,0,3,1
+Chicken breast,protein,Frozen Raw,5,rest,Rest the chicken breast before slicing.,5,0,0.0,counter,finish,1,4,1
+Chicken breast,protein,Frozen Raw,6,slice,Slice the rested chicken breast just before serving.,2,1,1.0,counter,finish,0,5,1
+Chicken breast,protein,Cooked,1,prep,"Prep Chicken breast: slice, shred, or dice the cooked chicken breast as needed.",2,1,1.0,counter,middle,1,,1
+Chicken breast,protein,Cooked,2,reheat,Reheat the cooked chicken breast gently in a skillet until hot; avoid drying it out.,5,1,0.5,burner,late,1,1,1
+Rice,foundation,,1,prep,Prep Rice: measure the rice and cooking liquid.,2,1,1.0,counter,early,1,,1
+Rice,foundation,,2,start,"Put the rice and liquid in the saucepan, bring them to a simmer, then cover and reduce the heat.",2,1,1.0,burner,early,0,1,1
+Rice,foundation,,3,simmer,Let the rice simmer covered without constant attention.,18,0,0.0,burner,early,1,2,1
+Rice,foundation,,4,rest,Remove the rice from heat and let it rest covered before fluffing.,5,0,0.0,counter,finish,1,3,1
+Mushrooms,vegetable,,1,prep,"Prep Mushrooms: quickly rinse attached dirt or wipe with a damp towel; do not soak. Trim dry stem ends and slice about 1/4 inch thick.",2,1,1.0,counter,early,1,,1
+Mushrooms,vegetable,,2,saute,"Heat a skillet over medium-high heat. Cook the mushrooms in a single, uncrowded layer until their moisture evaporates and the bottoms brown. Turn and finish cooking.",6,1,0.2,burner,early,0,1,1
+Asparagus,vegetable,,1,prep,Prep Asparagus: wash the asparagus and remove the woody ends. Leave the spears whole or cut them into bite-size pieces.,2,1,1.0,counter,middle,1,,1
+Asparagus,vegetable,,2,saute,Heat oil or butter in a skillet. Sauté the asparagus 2–3 minutes. Add a little water and cover briefly for thick stalks. Finish until bright green and crisp-tender.,6,1,0.5,burner,middle,0,1,1
+Swiss chard,vegetable,,1,prep,Prep Swiss chard: rinse the leaves and stems thoroughly. Separate and slice the edible stems. Leave the leaves large or tear them into manageable pieces.,2,1,1.0,counter,late,1,,1
+Swiss chard,vegetable,,2,saute,Heat oil in a skillet. Cook the sliced stems first until they begin to soften. Add the leaves with a splash of liquid and toss until wilted and tender.,6,1,0.75,burner,late,0,1,1
+Swiss chard,vegetable,,3,serve,Serve Swiss chard promptly because it does not hold well after cooking.,,1,1.0,counter,finish,0,2,1

@@ -7,7 +7,14 @@ infer how an ingredient should be cooked.
 """
 
 from dataclasses import dataclass, field, replace
+from pathlib import Path
+import sqlite3
 from typing import List, Optional
+
+try:
+    from config import DB_PATH
+except Exception:
+    DB_PATH = Path("data") / "ckb_seed_001.db"
 
 
 def _clean(value):
@@ -16,6 +23,91 @@ def _clean(value):
 
 def _key(value):
     return _clean(value).lower().replace("-", " ")
+
+
+def _ckb_profile(name, role):
+    """Load a verified KO from the CKB, returning None for a safe Python fallback."""
+    try:
+        con = sqlite3.connect(DB_PATH)
+        con.row_factory = sqlite3.Row
+        row = con.execute(
+            """SELECT * FROM ko_profiles
+               WHERE lower(component_name)=lower(?) AND role=? AND verified=1""",
+            (_clean(name), _clean(role).lower()),
+        ).fetchone()
+        if not row:
+            con.close()
+            return None
+
+        profile = IngredientProfile(
+            name=row["component_name"], role=row["role"],
+            default_state=row["default_state"] or "",
+            prep_minutes=row["prep_minutes"] or 0, cook_minutes=row["cook_minutes"] or 0,
+            active_minutes=row["active_minutes"] or 0, passive_minutes=row["passive_minutes"] or 0,
+            attention_score=row["attention_score"] or 0, rest_minutes=row["rest_minutes"] or 0,
+            add_stage=row["add_stage"] or "middle", holdability=row["holdability"] or "fair",
+            preferred_method=row["preferred_method"] or "cook",
+            desired_outcome=row["desired_outcome"] or "", failure_mode=row["failure_mode"] or "",
+            recovery_hint=row["recovery_hint"] or "", teaching_note=row["teaching_note"] or "",
+            parallel_ok=bool(row["parallel_ok"]), start_first=bool(row["start_first"]),
+            timing_note=row["timing_note"] or "", handling_note=row["handling_note"] or "",
+            cooking_note=row["cooking_note"] or "", work_score=row["work_score"] or 0,
+            cleanup_score=row["cleanup_score"] or 0, mental_load_score=row["mental_load_score"] or 0,
+        )
+
+        if row["ingredient_id"] is not None:
+            state_rows = con.execute(
+                "SELECT * FROM ingredient_states WHERE ingredient_id=? AND verified=1",
+                (row["ingredient_id"],),
+            ).fetchall()
+            profile.states = {
+                state["state_name"]: IngredientState(
+                    name=state["state_name"], prep_minutes=state["typical_prep_minutes"] or 0,
+                    cook_minutes=state["typical_cook_minutes"] or 0,
+                    active_minutes=state["active_minutes"] or 0,
+                    passive_minutes=state["passive_minutes"] or 0,
+                    attention_score=state["attention_score"] or 0,
+                    holdability=state["holdability"] or "",
+                    handling_note=state["handling_note"] or "",
+                    timing_note=state["timing_note"] or "",
+                    cooking_note=state["cooking_note"] or "",
+                ) for state in state_rows
+            }
+
+        activity_rows = con.execute(
+            """SELECT * FROM ko_activities
+               WHERE lower(component_name)=lower(?) AND role=? AND verified=1
+               ORDER BY state_name, sequence""",
+            (row["component_name"], row["role"]),
+        ).fetchall()
+        con.close()
+
+        def publish_from_ckb(self, strategy="", state_name=""):
+            selected_state = _clean(state_name) or self.default_state
+            exact = [activity for activity in activity_rows if activity["state_name"] == selected_state]
+            selected = exact or [activity for activity in activity_rows if not activity["state_name"]]
+            ids = {
+                activity["sequence"]: f"{activity['activity_type']}:{self.name}"
+                for activity in selected
+            }
+            return [
+                KitchenActivity(
+                    component=self.name, activity_type=activity["activity_type"],
+                    instruction=activity["instruction"], minutes=activity["minutes"],
+                    human_busy=bool(activity["human_busy"]),
+                    attention_load=float(activity["attention_load"] or 0),
+                    equipment=activity["equipment_name"] or "counter",
+                    depends_on=[ids[activity["depends_on_sequence"]]] if activity["depends_on_sequence"] else [],
+                    stage=activity["stage"] or "middle", parallel_ok=bool(activity["parallel_ok"]),
+                    source="ko", activity_id=ids[activity["sequence"]],
+                ) for activity in selected
+            ]
+
+        if activity_rows:
+            profile.publish_activities = publish_from_ckb.__get__(profile, IngredientProfile)
+        return profile
+    except (sqlite3.Error, OSError, KeyError):
+        return None
 
 
 @dataclass
@@ -545,6 +637,9 @@ def get_ingredient_profile(name, role="ingredient"):
     k = _key(cleaned_name)
     if not cleaned_name:
         return IngredientProfile(name=cleaned_name, role=role)
+    ckb_profile = _ckb_profile(cleaned_name, role)
+    if ckb_profile is not None:
+        return ckb_profile
     if k == "swiss chard":
         return SWISS_CHARD
     if k == "chicken breast":
