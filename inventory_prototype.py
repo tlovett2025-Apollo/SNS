@@ -11,7 +11,9 @@ import sqlite3
 
 import streamlit as st
 
-from inventory_store import inventory_payload, load_saved_form_ids, save_inventory
+from inventory_store import (
+    inventory_payload, load_saved_form_ids, local_context, save_inventory,
+)
 
 
 DB_PATH = Path(os.environ.get("SNS_CKB_PATH", Path("data") / "ckb_seed_001.db"))
@@ -160,10 +162,12 @@ if not rows:
     st.error("The Cooking Knowledge Base could not be found, or it has no ingredient Forms yet.")
     st.stop()
 
+context = local_context(DB_PATH)
+
 if "custom_inventory" not in st.session_state:
     st.session_state.custom_inventory = []
 if "saved_inventory_loaded" not in st.session_state:
-    saved_form_ids = load_saved_form_ids(DB_PATH)
+    saved_form_ids = load_saved_form_ids(DB_PATH, context)
     for row in rows:
         st.session_state[inventory_key(row)] = int(row["form_id"]) in saved_form_ids
     st.session_state.saved_inventory_loaded = True
@@ -277,22 +281,31 @@ for tab, section_name in zip(tabs, section_help):
             label = f"{category} · {len(ingredients)} items"
             if selected_in_category:
                 label += f" · {selected_in_category} selected"
-            with st.expander(label, expanded=bool(search)):
-                st.caption("Choose as many as you have. Every check is kept immediately.")
-                for ingredient, forms in ingredients.items():
-                    name_col, forms_col = st.columns([1.25, 3.75], vertical_alignment="center")
-                    with name_col:
-                        st.markdown(f"**{ingredient}**")
-                    with forms_col:
-                        form_columns = st.columns(min(4, max(1, len(forms))))
-                        for index, form in enumerate(forms):
-                            with form_columns[index % len(form_columns)]:
-                                st.checkbox(
-                                    form["form_name"],
-                                    key=inventory_key(form),
-                                    help=f"Stored in: {section_name.lower()}",
-                                )
-                    st.divider()
+            form_key = f"select_{section_name}_{category}".replace(" ", "_").replace("&", "and")
+            keep_open = st.session_state.get("last_inventory_group") == form_key
+            with st.expander(label, expanded=bool(search) or keep_open):
+                st.caption("Check everything you have, then save the whole group once.")
+                with st.form(form_key):
+                    for ingredient, forms in ingredients.items():
+                        name_col, forms_col = st.columns([1.25, 3.75], vertical_alignment="center")
+                        with name_col:
+                            st.markdown(f"**{ingredient}**")
+                        with forms_col:
+                            form_columns = st.columns(min(4, max(1, len(forms))))
+                            for index, form in enumerate(forms):
+                                with form_columns[index % len(form_columns)]:
+                                    st.checkbox(
+                                        form["form_name"],
+                                        key=inventory_key(form),
+                                        help=f"Stored in: {section_name.lower()}",
+                                    )
+                        st.divider()
+                    group_saved = st.form_submit_button(
+                        "Save these choices", use_container_width=True
+                    )
+                if group_saved:
+                    st.session_state.last_inventory_group = form_key
+                    st.success("Choices kept. You can continue in this group or open another one.")
 
 st.subheader("Your kitchen so far")
 selected = selected_rows(rows)
@@ -319,27 +332,28 @@ else:
 left, right = st.columns([1, 1])
 with left:
     if st.button("Save my kitchen", use_container_width=True):
-        saved_count = save_inventory(storage_rows(selected), DB_PATH)
-        if custom_selected:
-            st.success(
-                f"Saved {saved_count} recognized items. "
-                f"Kept {len(custom_selected)} quick-entry item(s) in this session for review."
-            )
-        else:
-            st.success(f"Saved {saved_count} items.")
+        saved_count, pending_count = save_inventory(
+            storage_rows(selected), custom_selected, DB_PATH, context
+        )
+        st.success(
+            f"Saved {saved_count} recognized items to this household. "
+            f"Queued {pending_count} quick-entry item(s) for matching."
+        )
 with right:
     if st.button("Find meals with this food", type="primary", use_container_width=True):
         if selected or custom_selected:
-            st.session_state.recipe_inventory_payload = inventory_payload(storage_rows(selected), custom_selected)
+            st.session_state.recipe_inventory_payload = {
+                "household_id": context["household_id"]
+            }
             st.success("Inventory is ready for the meal-choice page.")
         else:
             st.warning("Choose at least one food first.")
 
-payload = inventory_payload(storage_rows(selected), custom_selected)
+payload = inventory_payload(context, storage_rows(selected), custom_selected)
 with st.expander("Developer view: recipe inventory payload"):
     st.code(json.dumps(payload, indent=2), language="json")
 
 st.caption(
-    "Recognized selections save only to the dedicated Local Pantry Prototype user. "
-    "Quick-entry foods remain unsaved until they are matched to the CKB."
+    "This page is using an explicit local user and household. Recognized foods save to "
+    "the household inventory; quick-entry foods enter a pending review queue."
 )

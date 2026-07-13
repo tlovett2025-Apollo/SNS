@@ -236,9 +236,28 @@ CREATE TABLE IF NOT EXISTS users (
     energy_default TEXT
 );
 
+CREATE TABLE IF NOT EXISTS households (
+    household_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    household_name TEXT NOT NULL,
+    created_by_user_id INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by_user_id) REFERENCES users(user_id)
+);
+
+CREATE TABLE IF NOT EXISTS household_members (
+    household_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    role TEXT NOT NULL DEFAULT 'member',
+    joined_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (household_id, user_id),
+    FOREIGN KEY (household_id) REFERENCES households(household_id),
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
 CREATE TABLE IF NOT EXISTS user_inventory (
     inventory_id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
+    household_id INTEGER,
     ingredient_id INTEGER NOT NULL,
     form_id INTEGER,
     prep_id INTEGER,
@@ -248,9 +267,24 @@ CREATE TABLE IF NOT EXISTS user_inventory (
     expiration_date TEXT,
     confidence_level TEXT,
     FOREIGN KEY (user_id) REFERENCES users(user_id),
+    FOREIGN KEY (household_id) REFERENCES households(household_id),
     FOREIGN KEY (ingredient_id) REFERENCES ingredients(ingredient_id),
     FOREIGN KEY (form_id) REFERENCES ingredient_forms(form_id),
     FOREIGN KEY (prep_id) REFERENCES prep_forms(prep_id)
+);
+
+CREATE TABLE IF NOT EXISTS pending_inventory_items (
+    pending_item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    household_id INTEGER NOT NULL,
+    submitted_by_user_id INTEGER NOT NULL,
+    raw_text TEXT NOT NULL,
+    requested_form TEXT,
+    storage_location TEXT,
+    source_type TEXT NOT NULL DEFAULT 'quick_entry',
+    match_status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (household_id) REFERENCES households(household_id),
+    FOREIGN KEY (submitted_by_user_id) REFERENCES users(user_id)
 );
 
 CREATE TABLE IF NOT EXISTS user_preferences (
@@ -351,6 +385,7 @@ MIGRATIONS = [
     ("ingredient_states", "timing_note", "ALTER TABLE ingredient_states ADD COLUMN timing_note TEXT"),
     ("ingredient_states", "cooking_note", "ALTER TABLE ingredient_states ADD COLUMN cooking_note TEXT"),
     ("ingredient_states", "verified", "ALTER TABLE ingredient_states ADD COLUMN verified INTEGER DEFAULT 0"),
+    ("user_inventory", "household_id", "ALTER TABLE user_inventory ADD COLUMN household_id INTEGER"),
 ]
 
 
@@ -375,6 +410,9 @@ def create_schema():
     with sqlite3.connect(DB_PATH) as conn:
         conn.executescript(SCHEMA_SQL)
         _run_migrations(conn)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_inventory_household ON user_inventory(household_id)"
+        )
         conn.commit()
 
 
