@@ -4,13 +4,17 @@ This page reads real ingredient Forms from the CKB. It intentionally keeps
 selections in the Streamlit session only; it does not modify the database.
 """
 
+import json
+import os
 from pathlib import Path
 import sqlite3
 
 import streamlit as st
 
+from inventory_store import inventory_payload, load_saved_form_ids, save_inventory
 
-DB_PATH = Path("data") / "ckb_seed_001.db"
+
+DB_PATH = Path(os.environ.get("SNS_CKB_PATH", Path("data") / "ckb_seed_001.db"))
 
 st.set_page_config(page_title="My Stock & Stir Kitchen", page_icon="🥫", layout="wide")
 
@@ -147,6 +151,10 @@ def selected_rows(rows):
     return [row for row in rows if st.session_state.get(inventory_key(row), False)]
 
 
+def storage_rows(selected):
+    return [dict(row, storage=section_for(row)) for row in selected]
+
+
 rows = load_inventory_choices()
 if not rows:
     st.error("The Cooking Knowledge Base could not be found, or it has no ingredient Forms yet.")
@@ -154,6 +162,11 @@ if not rows:
 
 if "custom_inventory" not in st.session_state:
     st.session_state.custom_inventory = []
+if "saved_inventory_loaded" not in st.session_state:
+    saved_form_ids = load_saved_form_ids(DB_PATH)
+    for row in rows:
+        st.session_state[inventory_key(row)] = int(row["form_id"]) in saved_form_ids
+    st.session_state.saved_inventory_loaded = True
 
 st.markdown(
     """
@@ -190,10 +203,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-with st.expander("Can’t find something? Add it quickly"):
-    st.caption("This adds a household item for this session. It does not change the shared Cooking Knowledge Base.")
+with st.expander("Quickly add food that is not listed"):
+    st.caption("Enter one food per line. These stay in this session and never silently change the shared Cooking Knowledge Base.")
     with st.form("quick_inventory_entry", clear_on_submit=True):
-        quick_name = st.text_input("What is it?", placeholder="Lasagna noodles")
+        quick_names = st.text_area(
+            "What do you have?",
+            placeholder="Lasagna noodles\nTomato paste\nCrackers",
+            height=110,
+        )
         quick_location = st.selectbox("Where do you keep it?", ["Pantry", "Refrigerator", "Freezer", "Fresh"])
         quick_form = st.selectbox(
             "How do you have it?",
@@ -201,22 +218,25 @@ with st.expander("Can’t find something? Add it quickly"):
         )
         quick_add = st.form_submit_button("Add to my kitchen", type="primary", use_container_width=True)
     if quick_add:
-        clean_name = quick_name.strip()
-        if not clean_name:
-            st.warning("Enter the food name first.")
+        names = [name.strip() for name in quick_names.splitlines() if name.strip()]
+        if not names:
+            st.warning("Enter at least one food first.")
         else:
-            new_item = {"name": clean_name, "form_name": quick_form, "section": quick_location}
-            duplicate = any(
-                item["name"].lower() == clean_name.lower()
-                and item["form_name"].lower() == quick_form.lower()
-                and item["section"] == quick_location
-                for item in st.session_state.custom_inventory
-            )
-            if duplicate:
-                st.info("That household item is already listed.")
-            else:
-                st.session_state.custom_inventory.append(new_item)
+            added = 0
+            for clean_name in names:
+                new_item = {"name": clean_name, "form_name": quick_form, "section": quick_location}
+                duplicate = any(
+                    item["name"].lower() == clean_name.lower()
+                    and item["form_name"].lower() == quick_form.lower()
+                    and item["section"] == quick_location
+                    for item in st.session_state.custom_inventory
+                )
+                if not duplicate:
+                    st.session_state.custom_inventory.append(new_item)
+                    added += 1
+            if added:
                 st.rerun()
+            st.info("Those foods were already listed.")
 
 section_help = {
     "Pantry": "Shelf-stable food: cans, jars, boxes, dry goods, spices, and pouches.",
@@ -258,24 +278,21 @@ for tab, section_name in zip(tabs, section_help):
             if selected_in_category:
                 label += f" · {selected_in_category} selected"
             with st.expander(label, expanded=bool(search)):
-                st.caption("Choose as many as you have, then keep the whole group at once.")
-                form_key = f"batch_{section_name}_{category}".replace(" ", "_").replace("&", "and")
-                with st.form(form_key):
-                    for ingredient, forms in ingredients.items():
-                        name_col, forms_col = st.columns([1.25, 3.75], vertical_alignment="center")
-                        with name_col:
-                            st.markdown(f"**{ingredient}**")
-                        with forms_col:
-                            form_columns = st.columns(min(4, max(1, len(forms))))
-                            for index, form in enumerate(forms):
-                                with form_columns[index % len(form_columns)]:
-                                    st.checkbox(
-                                        form["form_name"],
-                                        key=inventory_key(form),
-                                        help=f"Stored in: {section_name.lower()}",
-                                    )
-                        st.divider()
-                    st.form_submit_button("Keep these selections", use_container_width=True)
+                st.caption("Choose as many as you have. Every check is kept immediately.")
+                for ingredient, forms in ingredients.items():
+                    name_col, forms_col = st.columns([1.25, 3.75], vertical_alignment="center")
+                    with name_col:
+                        st.markdown(f"**{ingredient}**")
+                    with forms_col:
+                        form_columns = st.columns(min(4, max(1, len(forms))))
+                        for index, form in enumerate(forms):
+                            with form_columns[index % len(form_columns)]:
+                                st.checkbox(
+                                    form["form_name"],
+                                    key=inventory_key(form),
+                                    help=f"Stored in: {section_name.lower()}",
+                                )
+                    st.divider()
 
 st.subheader("Your kitchen so far")
 selected = selected_rows(rows)
@@ -301,13 +318,28 @@ else:
 
 left, right = st.columns([1, 1])
 with left:
-    st.button("Save for later", disabled=True, use_container_width=True,
-              help="Prototype only: this version does not write to the household inventory.")
+    if st.button("Save my kitchen", use_container_width=True):
+        saved_count = save_inventory(storage_rows(selected), DB_PATH)
+        if custom_selected:
+            st.success(
+                f"Saved {saved_count} recognized items. "
+                f"Kept {len(custom_selected)} quick-entry item(s) in this session for review."
+            )
+        else:
+            st.success(f"Saved {saved_count} items.")
 with right:
     if st.button("Find meals with this food", type="primary", use_container_width=True):
         if selected or custom_selected:
-            st.success("Prototype complete: the next page would use these selections to offer a few meal choices.")
+            st.session_state.recipe_inventory_payload = inventory_payload(storage_rows(selected), custom_selected)
+            st.success("Inventory is ready for the meal-choice page.")
         else:
             st.warning("Choose at least one food first.")
 
-st.caption("Prototype page — reads the real CKB but does not save or change inventory data.")
+payload = inventory_payload(storage_rows(selected), custom_selected)
+with st.expander("Developer view: recipe inventory payload"):
+    st.code(json.dumps(payload, indent=2), language="json")
+
+st.caption(
+    "Recognized selections save only to the dedicated Local Pantry Prototype user. "
+    "Quick-entry foods remain unsaved until they are matched to the CKB."
+)
