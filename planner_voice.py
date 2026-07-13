@@ -52,25 +52,25 @@ def time_summary(total_minutes, active_minutes, passive_minutes) -> Optional[str
     )
 
 
-def _friendly_prefix(activity_type: str) -> str:
-    prefixes = {
-        "gather": "Let's get everything together.",
-        "launch prep": "We will start the long-lead items first.",
-        "prep": "Nice. Let's finish the ingredient prep now.",
+def _friendly_closing(activity_type: str) -> str:
+    closings = {
+        "gather": "Now everything is within reach.",
+        "launch prep": "That gets the long-lead items moving first.",
+        "prep": "Nice. The ingredient prep is handled.",
         "optional sear": "This step is optional.",
-        "build soup": "Good. Now we can build the soup.",
-        "shared simmer": "Everything is together now.",
-        "combine": "Now bring the components together.",
+        "build soup": "Good. The soup is built.",
+        "shared simmer": "Everything can cook together now.",
+        "combine": "Now the components are working as one meal.",
         "assemble": "Everything is ready to assemble.",
         "plate": "You are ready to plate.",
-        "finish sauce": "Let's finish the sauce.",
+        "finish sauce": "The sauce is ready.",
         "finish soup": "The soup is nearly ready.",
         "finish and serve": "You are at the finish.",
         "bake": "The oven can take over for a while.",
         "rest": "Let it rest.",
         "natural release": "Let the pressure release naturally.",
     }
-    return prefixes.get(activity_type, "")
+    return closings.get(activity_type, "")
 
 
 def _passive_reassurance(activity, duration: int) -> str:
@@ -87,13 +87,9 @@ def activity_message(activity, duration: int, attention_minutes: int = 0) -> str
     """Turn one scheduled activity into trusted-advisor language."""
     instruction = _clean(getattr(activity, "instruction", ""))
     activity_type = _clean(getattr(activity, "activity_type", "")).lower()
-    prefix = _friendly_prefix(activity_type)
+    closing = _friendly_closing(activity_type)
 
-    if prefix and instruction:
-        message = f"{prefix} {instruction}"
-    else:
-        message = instruction or f"Continue with {_component_name(activity)}."
-
+    message = instruction or f"Continue with {_component_name(activity)}."
     message += _passive_reassurance(activity, duration)
 
     if 0 < attention_minutes < duration:
@@ -101,6 +97,9 @@ def activity_message(activity, duration: int, attention_minutes: int = 0) -> str
             f" You will need about {attention_minutes} minutes of attention "
             "during this window."
         )
+
+    if closing:
+        message += f" {closing}"
 
     return " ".join(message.split())
 

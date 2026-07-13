@@ -8,6 +8,7 @@ then deepen the cooking intelligence as more CKB fields become available.
 
 from dataclasses import dataclass, field
 from math import ceil
+import re
 from typing import Dict, List, Optional
 from ingredient_profiles import KitchenActivity, get_ingredient_profile
 from equipment_profiles import build_rice_equipment_activities, choose_rice_equipment
@@ -327,19 +328,36 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         ))
 
         protein_key = protein.lower()
-        if any(word in protein_key for word in ["stew meat", "chuck", "brisket", "shoulder"]):
+        tough_beef = any(
+            word in protein_key
+            for word in ["stew meat", "chuck", "brisket", "shoulder"]
+        )
+        if tough_beef:
             simmer_minutes = 75
+            simmer_instruction = (
+                f"Cover the pot and keep {protein or 'the soup ingredients'}, "
+                f"{_join(vegetables)}, and {foundation or 'the remaining ingredients'} "
+                "together in the same pot. Gently simmer Begin checking the beef "
+                "at 60 minutes and continue until it is fork-tender, usually 60–90 minutes. "
+                "Crack the lid only if the soup needs to reduce."
+            )
         elif raw_protein and any(word in protein_key for word in ["chicken", "turkey", "pork"]):
             simmer_minutes = 30
+            simmer_instruction = (
+                f"Cover the pot and gently simmer {protein or 'the soup ingredients'}, "
+                f"{_join(vegetables)}, and {foundation or 'the remaining ingredients'} "
+                "together until the protein is safe and tender and the vegetables are cooked through."
+            )
         else:
             simmer_minutes = 25
+            simmer_instruction = (
+                f"Cover the pot and gently simmer {protein or 'the soup ingredients'}, "
+                f"{_join(vegetables)}, and {foundation or 'the remaining ingredients'} "
+                "together until the protein is safe and tender and the vegetables are cooked through."
+            )
         activities.append(_planner_activity(
             "shared simmer",
-            (
-                f"Cover partially and gently simmer {protein or 'the soup ingredients'}, "
-                f"{_join(vegetables)}, and {foundation or 'the remaining ingredients'} together in the same pot "
-                "until the protein is safe and tender and the vegetables are cooked through."
-            ),
+            simmer_instruction,
             minutes=simmer_minutes,
             human_busy=False,
             stage="middle",
@@ -498,10 +516,28 @@ def consolidate_kitchen_activities(
         calculated_minutes = sum(max(0, int(activity.minutes or 0)) for activity in selected)
         if activity_type == "prep" and candidate:
             vegetables = _split_joined_items(candidate.get("vegetable"))
-            calculated_minutes = len(vegetables)
-            if vegetables:
-                calculated_minutes += 1  # one shared slicing/dicing/modification allowance
-            if _clean(candidate.get("protein")):
+            protein = _clean(candidate.get("protein"))
+
+            # Prep timing rule:
+            # 1 minute per vegetable + 1 minute per protein
+            # + 1 additional minute for each ingredient that must be
+            # sliced, chopped, or diced.
+            calculated_minutes = len(vegetables) + (1 if protein else 0)
+
+            timed_components = {item.lower() for item in vegetables}
+            if protein:
+                timed_components.add(protein.lower())
+
+            needs_cutting_allowance = any(
+                _clean(getattr(activity, "component", "")).lower() in timed_components
+                and re.search(
+                    r"\b(?:slice|sliced|slicing|chop|chopped|chopping|dice|diced|dicing)\b",
+                    _clean(getattr(activity, "instruction", "")).lower(),
+                )
+                for activity in selected
+            )
+
+            if needs_cutting_allowance:
                 calculated_minutes += 1
         heading = (
             "Start these first:"
@@ -1075,16 +1111,23 @@ def generate_human_instruction_steps(candidate: dict) -> List[str]:
             continue
 
         transition = transition_message(previous_activity, activity)
-        if transition:
-            lines.append(transition)
 
-        time_window = f"Minutes {item.start_minute}–{item.end_minute}"
+        if (
+            activity.activity_type == "shared simmer"
+            and "60–90 minutes" in activity.instruction
+        ):
+            time_window = "About 60–90 minutes"
+        else:
+            time_window = f"Minutes {item.start_minute}–{item.end_minute}"
+
         message = activity_message(
             activity,
             duration=item.end_minute - item.start_minute,
             attention_minutes=item.attention_minutes,
         )
-        lines.append(f"{time_window}: {message}")
+        if transition:
+            message = f"{message} {transition}"
+        lines.append(f"{time_window}: {' '.join(message.split())}")
         previous_activity = activity
 
     lines.append(completion_message(candidate))
