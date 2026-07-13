@@ -20,31 +20,69 @@ class CKBTrainingSafetyTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.tempdir.name) / "test_ckb.db"
         shutil.copy(HERE / "data" / "ckb_seed_001.db", self.db_path)
-        con = sqlite3.connect(self.db_path)
-        con.executescript(SCHEMA_SQL)
-        for table, column, sql in MIGRATIONS:
-            columns = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
-            if column not in columns:
-                con.execute(sql)
-        target_names = ("Chicken breast", "White rice", "Mushrooms", "Asparagus", "Swiss chard", "Ground beef")
-        marks = ",".join("?" for _ in target_names)
-        target_ids = [row[0] for row in con.execute(
-            f"SELECT ingredient_id FROM ingredients WHERE name IN ({marks})", target_names
-        )]
-        if target_ids:
-            id_marks = ",".join("?" for _ in target_ids)
-            con.execute(f"DELETE FROM ingredient_forms WHERE ingredient_id IN ({id_marks})", target_ids)
-            con.execute(f"DELETE FROM ingredient_states WHERE ingredient_id IN ({id_marks})", target_ids)
-        con.execute("DELETE FROM ko_activities WHERE component_name IN ('Chicken breast','Rice','Mushrooms','Asparagus','Swiss chard','Ground beef')")
-        con.execute("DELETE FROM ko_profiles WHERE component_name IN ('Chicken breast','Rice','Mushrooms','Asparagus','Swiss chard','Ground beef')")
-        con.execute("DELETE FROM ckb_change_log WHERE change_type='safety correction'")
-        con.execute(
-            """UPDATE proteins SET alpha_gal_safe=1 WHERE ingredient_id IN
-               (SELECT ingredient_id FROM ingredients WHERE name IN
-               ('Beef brisket','Beef stew meat','Chuck roast','Corned beef','Flank steak','Ground beef','Ribeye steak','Sirloin steak'))"""
-        )
-        con.commit()
-        con.close()
+
+        with closing(sqlite3.connect(self.db_path)) as con:
+            con.executescript(SCHEMA_SQL)
+
+            for table, column, sql in MIGRATIONS:
+                columns = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+                if column not in columns:
+                    con.execute(sql)
+
+            target_names = (
+                "Chicken breast",
+                "White rice",
+                "Mushrooms",
+                "Asparagus",
+                "Swiss chard",
+                "Ground beef",
+            )
+            marks = ",".join("?" for _ in target_names)
+            target_ids = [
+                row[0]
+                for row in con.execute(
+                    f"SELECT ingredient_id FROM ingredients WHERE name IN ({marks})",
+                    target_names,
+                )
+            ]
+
+            # Remove dependent knowledge before removing forms and states.
+            con.execute(
+                """DELETE FROM ko_activities
+                   WHERE component_name IN
+                   ('Chicken breast','Rice','Mushrooms','Asparagus','Swiss chard','Ground beef')"""
+            )
+            con.execute(
+                """DELETE FROM ko_profiles
+                   WHERE component_name IN
+                   ('Chicken breast','Rice','Mushrooms','Asparagus','Swiss chard','Ground beef')"""
+            )
+
+            if target_ids:
+                id_marks = ",".join("?" for _ in target_ids)
+                con.execute(
+                    f"DELETE FROM user_inventory WHERE ingredient_id IN ({id_marks})",
+                    target_ids,
+                )
+                con.execute(
+                    f"DELETE FROM ingredient_forms WHERE ingredient_id IN ({id_marks})",
+                    target_ids,
+                )
+                con.execute(
+                    f"DELETE FROM ingredient_states WHERE ingredient_id IN ({id_marks})",
+                    target_ids,
+                )
+
+            con.execute(
+                "DELETE FROM ckb_change_log WHERE change_type='safety correction'"
+            )
+            con.execute(
+                """UPDATE proteins SET alpha_gal_safe=1 WHERE ingredient_id IN
+                   (SELECT ingredient_id FROM ingredients WHERE name IN
+                   ('Beef brisket','Beef stew meat','Chuck roast','Corned beef',
+                    'Flank steak','Ground beef','Ribeye steak','Sirloin steak'))"""
+            )
+            con.commit()
 
     def tearDown(self):
         self.tempdir.cleanup()

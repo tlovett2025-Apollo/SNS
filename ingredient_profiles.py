@@ -6,6 +6,7 @@ activities. The planner consumes and orchestrates those activities; it does not
 infer how an ingredient should be cooked.
 """
 
+from contextlib import closing
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 import sqlite3
@@ -28,59 +29,62 @@ def _key(value):
 def _ckb_profile(name, role):
     """Load a verified KO from the CKB, returning None for a safe Python fallback."""
     try:
-        con = sqlite3.connect(DB_PATH)
-        con.row_factory = sqlite3.Row
-        row = con.execute(
-            """SELECT * FROM ko_profiles
-               WHERE lower(component_name)=lower(?) AND role=? AND verified=1""",
-            (_clean(name), _clean(role).lower()),
-        ).fetchone()
-        if not row:
-            con.close()
-            return None
+        # sqlite3.Connection's own context manager commits or rolls back, but it
+        # does not close the connection. closing(...) guarantees Windows releases
+        # the database file handle on every return and exception path.
+        with closing(sqlite3.connect(DB_PATH)) as con:
+            con.row_factory = sqlite3.Row
+            row = con.execute(
+                """SELECT * FROM ko_profiles
+                   WHERE lower(component_name)=lower(?) AND role=? AND verified=1""",
+                (_clean(name), _clean(role).lower()),
+            ).fetchone()
+            if not row:
+                return None
 
-        profile = IngredientProfile(
-            name=row["component_name"], role=row["role"],
-            default_state=row["default_state"] or "",
-            prep_minutes=row["prep_minutes"] or 0, cook_minutes=row["cook_minutes"] or 0,
-            active_minutes=row["active_minutes"] or 0, passive_minutes=row["passive_minutes"] or 0,
-            attention_score=row["attention_score"] or 0, rest_minutes=row["rest_minutes"] or 0,
-            add_stage=row["add_stage"] or "middle", holdability=row["holdability"] or "fair",
-            preferred_method=row["preferred_method"] or "cook",
-            desired_outcome=row["desired_outcome"] or "", failure_mode=row["failure_mode"] or "",
-            recovery_hint=row["recovery_hint"] or "", teaching_note=row["teaching_note"] or "",
-            parallel_ok=bool(row["parallel_ok"]), start_first=bool(row["start_first"]),
-            timing_note=row["timing_note"] or "", handling_note=row["handling_note"] or "",
-            cooking_note=row["cooking_note"] or "", work_score=row["work_score"] or 0,
-            cleanup_score=row["cleanup_score"] or 0, mental_load_score=row["mental_load_score"] or 0,
-        )
+            profile = IngredientProfile(
+                name=row["component_name"], role=row["role"],
+                default_state=row["default_state"] or "",
+                prep_minutes=row["prep_minutes"] or 0, cook_minutes=row["cook_minutes"] or 0,
+                active_minutes=row["active_minutes"] or 0, passive_minutes=row["passive_minutes"] or 0,
+                attention_score=row["attention_score"] or 0, rest_minutes=row["rest_minutes"] or 0,
+                add_stage=row["add_stage"] or "middle", holdability=row["holdability"] or "fair",
+                preferred_method=row["preferred_method"] or "cook",
+                desired_outcome=row["desired_outcome"] or "", failure_mode=row["failure_mode"] or "",
+                recovery_hint=row["recovery_hint"] or "", teaching_note=row["teaching_note"] or "",
+                parallel_ok=bool(row["parallel_ok"]), start_first=bool(row["start_first"]),
+                timing_note=row["timing_note"] or "", handling_note=row["handling_note"] or "",
+                cooking_note=row["cooking_note"] or "", work_score=row["work_score"] or 0,
+                cleanup_score=row["cleanup_score"] or 0, mental_load_score=row["mental_load_score"] or 0,
+            )
 
-        if row["ingredient_id"] is not None:
-            state_rows = con.execute(
-                "SELECT * FROM ingredient_states WHERE ingredient_id=? AND verified=1",
-                (row["ingredient_id"],),
+            if row["ingredient_id"] is not None:
+                state_rows = con.execute(
+                    "SELECT * FROM ingredient_states WHERE ingredient_id=? AND verified=1",
+                    (row["ingredient_id"],),
+                ).fetchall()
+                profile.states = {
+                    state["state_name"]: IngredientState(
+                        name=state["state_name"], prep_minutes=state["typical_prep_minutes"] or 0,
+                        cook_minutes=state["typical_cook_minutes"] or 0,
+                        active_minutes=state["active_minutes"] or 0,
+                        passive_minutes=state["passive_minutes"] or 0,
+                        attention_score=state["attention_score"] or 0,
+                        holdability=state["holdability"] or "",
+                        handling_note=state["handling_note"] or "",
+                        timing_note=state["timing_note"] or "",
+                        cooking_note=state["cooking_note"] or "",
+                    ) for state in state_rows
+                }
+
+            # Fetch all activity data before the connection closes. sqlite3.Row
+            # values remain usable after fetchall() because the data is materialized.
+            activity_rows = con.execute(
+                """SELECT * FROM ko_activities
+                   WHERE lower(component_name)=lower(?) AND role=? AND verified=1
+                   ORDER BY state_name, sequence""",
+                (row["component_name"], row["role"]),
             ).fetchall()
-            profile.states = {
-                state["state_name"]: IngredientState(
-                    name=state["state_name"], prep_minutes=state["typical_prep_minutes"] or 0,
-                    cook_minutes=state["typical_cook_minutes"] or 0,
-                    active_minutes=state["active_minutes"] or 0,
-                    passive_minutes=state["passive_minutes"] or 0,
-                    attention_score=state["attention_score"] or 0,
-                    holdability=state["holdability"] or "",
-                    handling_note=state["handling_note"] or "",
-                    timing_note=state["timing_note"] or "",
-                    cooking_note=state["cooking_note"] or "",
-                ) for state in state_rows
-            }
-
-        activity_rows = con.execute(
-            """SELECT * FROM ko_activities
-               WHERE lower(component_name)=lower(?) AND role=? AND verified=1
-               ORDER BY state_name, sequence""",
-            (row["component_name"], row["role"]),
-        ).fetchall()
-        con.close()
 
         def publish_from_ckb(self, strategy="", state_name=""):
             selected_state = _clean(state_name) or self.default_state

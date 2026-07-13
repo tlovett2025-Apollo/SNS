@@ -12,6 +12,13 @@ from typing import Dict, List, Optional
 from ingredient_profiles import KitchenActivity, get_ingredient_profile
 from equipment_profiles import build_rice_equipment_activities, choose_rice_equipment
 from sauce_profiles import get_sauce_profile
+from planner_voice import (
+    activity_message,
+    completion_message,
+    meal_introduction,
+    time_summary,
+    transition_message,
+)
 
 
 @dataclass
@@ -1048,34 +1055,40 @@ def build_cooking_plan(candidate: dict) -> List[CookingStep]:
 
 
 def generate_human_instruction_steps(candidate: dict) -> List[str]:
-    """Render the actual scheduled activity graph as logical recipe steps."""
+    """Render the scheduled activity graph in the Stock & Stir kitchen voice."""
 
     schedule = build_kitchen_lane_schedule(candidate)
-    lines = []
+    lines = [meal_introduction(candidate)]
 
-    total_minutes = candidate.get("minutes")
-    active_minutes = candidate.get("active_minutes")
-    passive_minutes = candidate.get("passive_minutes")
+    summary = time_summary(
+        candidate.get("minutes"),
+        candidate.get("active_minutes"),
+        candidate.get("passive_minutes"),
+    )
+    if summary:
+        lines.append(summary)
 
-    if total_minutes is not None:
-        lines.append(
-            f"Estimated meal time: {total_minutes} minutes "
-            f"({active_minutes or 0} active, {passive_minutes or 0} passive). "
-            "Some steps may overlap, so step times are guidance rather than a strict sequence."
-        )
-
+    previous_activity = None
     for item in schedule:
         activity = item.activity
         if not activity.instruction or item.end_minute <= item.start_minute:
             continue
+
+        transition = transition_message(previous_activity, activity)
+        if transition:
+            lines.append(transition)
+
         time_window = f"Minutes {item.start_minute}–{item.end_minute}"
-        attention = ""
-        if item.attention_minutes and item.attention_minutes < item.end_minute - item.start_minute:
-            attention = f" About {item.attention_minutes} minutes of attention are needed during this window."
-        lines.append(f"{time_window}: {activity.instruction}{attention}")
+        message = activity_message(
+            activity,
+            duration=item.end_minute - item.start_minute,
+            attention_minutes=item.attention_minutes,
+        )
+        lines.append(f"{time_window}: {message}")
+        previous_activity = activity
 
+    lines.append(completion_message(candidate))
     return lines
-
 
 def generate_human_instructions(candidate: dict) -> str:
     """Return recipe steps as plain text for exports and diagnostics."""
