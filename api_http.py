@@ -22,10 +22,22 @@ from household_inventory import (
 )
 
 
+_PUBLIC_FRONTEND_ORIGINS = (
+    "https://sns-web-um3d.onrender.com",
+    "https://stockandstir.co",
+    "https://www.stockandstir.co",
+    "https://getstockandstir.co",
+    "https://www.getstockandstir.co",
+)
+
+
 def _cors_origins() -> list[str]:
     configured = os.getenv("SNS_CORS_ORIGINS", "*")
     origins = [origin.strip() for origin in configured.split(",") if origin.strip()]
-    return origins or ["*"]
+    for origin in _PUBLIC_FRONTEND_ORIGINS:
+        if origin not in origins:
+            origins.append(origin)
+    return origins
 
 
 app = FastAPI(
