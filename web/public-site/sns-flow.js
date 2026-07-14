@@ -1,10 +1,13 @@
 const SNS = (() => {
+  const runtime = window.SNS_CONFIG || {};
+  const apiBase = String(runtime.apiBaseUrl || "").replace(/\/$/, "");
+  const endpoint = path => `${apiBase}${path}`;
   const API = {
-    saveKitchen: "/api/SaveMyKitchen",
-    getRecipeList: "/api/GetRecipeList",
-    getRecipe: "/api/GetRecipe",
-    createCheckout: "/api/CreateCheckoutSession",
-    billingPortal: "/api/CreateBillingPortalSession"
+    saveKitchen: endpoint("/api/SaveMyKitchen"),
+    getRecipeList: endpoint("/api/GetRecipeList"),
+    getRecipe: endpoint("/api/GetRecipe"),
+    createCheckout: endpoint("/api/CreateCheckoutSession"),
+    billingPortal: endpoint("/api/CreateBillingPortalSession")
   };
 
   const levelMeaning = {
@@ -38,11 +41,26 @@ const SNS = (() => {
     }).filter(item => item.amount !== "none");
 
     return {
+      api_version: "1.0",
       contract_version: "my-kitchen-v1",
       household_id: "local-demo-household",
       generated_at: new Date().toISOString(),
-      inventory: items
+      servings: 4,
+      energy: "Low",
+      inventory: items,
+      equipment: [],
+      meal_preferences: {},
+      cost_filter: null
     };
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
   }
 
   function bindAmounts() {
@@ -72,12 +90,16 @@ const SNS = (() => {
     if (has("chicken") && has("rice")) recipes.push({
       id:"chicken-rice-skillet", title:"Comforting Chicken & Rice Skillet",
       minutes:35, effort:"Low", match:"Strong match",
-      summary:"A calm one-pan meal built from familiar pantry food."
+      summary:"A calm one-pan meal built from familiar pantry food.",
+      meal_shape:"plate", serving_temperature:"hot", preparation_mode:"cooked",
+      capability_status:"prototype"
     });
     if (has("beef") && (has("potato") || has("carrot"))) recipes.push({
       id:"beef-stew", title:"Beef, Potato & Carrot Stew",
       minutes:90, effort:"Low attention", match:"Strong match",
-      summary:"A covered gentle simmer with a fork-tender finish."
+      summary:"A covered gentle simmer with a fork-tender finish.",
+      meal_shape:"stew", serving_temperature:"hot", preparation_mode:"cooked",
+      capability_status:"prototype"
     });
     recipes.push(
       {id:"pantry-soup", title:"Use-What-You-Have Pantry Soup", minutes:40, effort:"Flexible", match:"Good match", summary:"A forgiving soup shaped around the foods already selected."},
@@ -104,7 +126,7 @@ const SNS = (() => {
     let recipes;
     try {
       const response = await postJson(API.getRecipeList, payload);
-      recipes = response.recipes || response;
+      recipes = response.candidates || response.recipes || response;
     } catch {
       recipes = fallbackRecipes(payload);
     }
@@ -125,13 +147,17 @@ const SNS = (() => {
         <div class="recipe-art"></div>
         <div class="recipe-body">
           <div class="meta">
-            <span class="pill">${recipe.minutes || "Flexible"} min</span>
-            <span class="pill">${recipe.effort || "Practical"}</span>
-            <span class="pill">${recipe.match || "Match"}</span>
+            <span class="pill">${escapeHtml(recipe.total_minutes || recipe.minutes || "Flexible")} min</span>
+            <span class="pill">Effort ${escapeHtml(recipe.effort ?? "Practical")}</span>
+            <span class="pill">${escapeHtml(recipe.match || "Match")}</span>
           </div>
-          <h2>${recipe.title}</h2>
-          <p>${recipe.summary || ""}</p>
-          <button class="btn btn-primary" data-recipe-id="${recipe.id}">Make this recipe</button>
+          <h2>${escapeHtml(recipe.title)}</h2>
+          <p>${escapeHtml(recipe.summary || "")}</p>
+          <div class="meta">
+            <span class="pill">${escapeHtml(recipe.meal_shape || "meal")}</span>
+            <span class="pill">${escapeHtml(recipe.serving_temperature || "")}</span>
+          </div>
+          <button class="btn btn-primary" data-recipe-id="${escapeHtml(recipe.candidate_id || recipe.id)}">Make this recipe</button>
         </div>
       </article>`).join("");
 
@@ -142,14 +168,14 @@ const SNS = (() => {
 
   async function requestRecipe(recipeId) {
     const kitchen = JSON.parse(sessionStorage.getItem("snsKitchenPayload") || "{}");
-    const request = { recipe_id: recipeId, kitchen };
+    const request = { candidate_id: recipeId, recipe_id: recipeId, kitchen };
     sessionStorage.setItem("snsRecipeRequest", JSON.stringify(request));
     let recipe;
     try {
       recipe = await postJson(API.getRecipe, request);
     } catch {
       const choices = JSON.parse(sessionStorage.getItem("snsRecipeChoices") || "[]");
-      const choice = choices.find(r => r.id === recipeId) || {};
+      const choice = choices.find(r => (r.candidate_id || r.id) === recipeId) || {};
       recipe = {
         id: recipeId,
         title: choice.title || "Stock & Stir Recipe",
@@ -174,8 +200,8 @@ const SNS = (() => {
     document.querySelector("[data-recipe-title]").textContent = recipe.title || "Your recipe";
     document.querySelector("[data-recipe-summary]").textContent = recipe.summary || "";
     document.querySelector("[data-recipe-time]").textContent = recipe.total_minutes ? `${recipe.total_minutes} minutes` : "Flexible timing";
-    document.querySelector("[data-ingredients]").innerHTML = (recipe.ingredients || []).map(x => `<li>${x}</li>`).join("");
-    document.querySelector("[data-steps]").innerHTML = (recipe.steps || []).map(x => `<li>${x}</li>`).join("");
+    document.querySelector("[data-ingredients]").innerHTML = (recipe.ingredients || []).map(x => `<li>${escapeHtml(x)}</li>`).join("");
+    document.querySelector("[data-steps]").innerHTML = (recipe.steps || recipe.instructions || []).map(x => `<li>${escapeHtml(x)}</li>`).join("");
   }
 
   async function checkout(plan) {

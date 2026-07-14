@@ -60,6 +60,10 @@ def ensure_inventory_schema(con):
     columns = {row[1] for row in con.execute("PRAGMA table_info(user_inventory)")}
     if "household_id" not in columns:
         con.execute("ALTER TABLE user_inventory ADD COLUMN household_id INTEGER")
+    if "quantity_band" not in columns:
+        con.execute("ALTER TABLE user_inventory ADD COLUMN quantity_band TEXT")
+    if "origin" not in columns:
+        con.execute("ALTER TABLE user_inventory ADD COLUMN origin TEXT DEFAULT 'manual'")
     con.execute(
         "CREATE INDEX IF NOT EXISTS idx_user_inventory_household ON user_inventory(household_id)"
     )
@@ -120,6 +124,9 @@ def _validate_item(con, item):
         quantity = float(quantity)
         if quantity < 0:
             raise InventoryError("quantity cannot be negative")
+    quantity_band = item.get("quantity_band")
+    if quantity_band not in (None, "", "a_little", "some", "plenty"):
+        raise InventoryError("quantity_band must be a_little, some, or plenty")
     expiration = item.get("expiration_date")
     if expiration:
         try:
@@ -137,10 +144,12 @@ def _validate_item(con, item):
         "ingredient_id": ingredient_id,
         "form_id": form_id,
         "quantity": quantity,
+        "quantity_band": quantity_band or None,
         "unit": item.get("unit"),
         "storage_location": item.get("storage_location") or item.get("storage"),
         "expiration_date": expiration or None,
         "confidence_level": item.get("confidence_level") or "user_selected",
+        "origin": item.get("origin") or "manual",
     }
 
 
@@ -155,12 +164,13 @@ def replace_household_inventory(db_path, household_id, acting_user_id, items):
             con.executemany(
                 """INSERT INTO user_inventory
                    (household_id,user_id,ingredient_id,form_id,quantity,unit,
-                    storage_location,expiration_date,confidence_level)
-                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                    storage_location,expiration_date,confidence_level,quantity_band,origin)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 [(
                     household_id, acting_user_id, item["ingredient_id"], item["form_id"],
                     item["quantity"], item["unit"], item["storage_location"],
                     item["expiration_date"], item["confidence_level"],
+                    item["quantity_band"], item["origin"],
                 ) for item in validated],
             )
             return len(validated)
@@ -174,7 +184,7 @@ def get_household_inventory(db_path, household_id, acting_user_id):
         return [dict(row) for row in con.execute(
             """SELECT ui.inventory_id,ui.household_id,ui.ingredient_id,ui.form_id,
                       i.name, f.form_name, ui.quantity,ui.unit,ui.storage_location,
-                      ui.expiration_date,ui.confidence_level
+                      ui.expiration_date,ui.confidence_level,ui.quantity_band,ui.origin
                FROM user_inventory ui
                JOIN ingredients i ON i.ingredient_id=ui.ingredient_id
                LEFT JOIN ingredient_forms f ON f.form_id=ui.form_id

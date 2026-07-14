@@ -262,10 +262,12 @@ CREATE TABLE IF NOT EXISTS user_inventory (
     form_id INTEGER,
     prep_id INTEGER,
     quantity REAL,
+    quantity_band TEXT,
     unit TEXT,
     storage_location TEXT,
     expiration_date TEXT,
     confidence_level TEXT,
+    origin TEXT DEFAULT 'manual',
     FOREIGN KEY (user_id) REFERENCES users(user_id),
     FOREIGN KEY (household_id) REFERENCES households(household_id),
     FOREIGN KEY (ingredient_id) REFERENCES ingredients(ingredient_id),
@@ -386,6 +388,8 @@ MIGRATIONS = [
     ("ingredient_states", "cooking_note", "ALTER TABLE ingredient_states ADD COLUMN cooking_note TEXT"),
     ("ingredient_states", "verified", "ALTER TABLE ingredient_states ADD COLUMN verified INTEGER DEFAULT 0"),
     ("user_inventory", "household_id", "ALTER TABLE user_inventory ADD COLUMN household_id INTEGER"),
+    ("user_inventory", "quantity_band", "ALTER TABLE user_inventory ADD COLUMN quantity_band TEXT"),
+    ("user_inventory", "origin", "ALTER TABLE user_inventory ADD COLUMN origin TEXT DEFAULT 'manual'"),
 ]
 
 

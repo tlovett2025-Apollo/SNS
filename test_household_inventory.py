@@ -57,7 +57,7 @@ class HouseholdInventoryTests(unittest.TestCase):
 
     def items(self):
         return [
-            {"ingredient_id": 1, "form_id": 10, "storage": "Pantry", "quantity": 2, "unit": "bags"},
+            {"ingredient_id": 1, "form_id": 10, "storage": "Pantry", "quantity": 2, "unit": "bags", "quantity_band": "plenty"},
             {"ingredient_id": 2, "form_id": 20, "storage": "Freezer", "expiration_date": "2026-08-01"},
         ]
 
@@ -66,6 +66,8 @@ class HouseholdInventoryTests(unittest.TestCase):
             ensure_inventory_schema(con)
             columns = {row[1] for row in con.execute("PRAGMA table_info(user_inventory)")}
         self.assertIn("household_id", columns)
+        self.assertIn("quantity_band", columns)
+        self.assertIn("origin", columns)
 
     def test_replace_and_reload_canonical_household_inventory(self):
         self.assertEqual(replace_household_inventory(
@@ -76,6 +78,8 @@ class HouseholdInventoryTests(unittest.TestCase):
         )
         self.assertEqual({row["name"] for row in loaded}, {"White rice", "Corn"})
         self.assertEqual(next(row for row in loaded if row["name"] == "White rice")["quantity"], 2)
+        self.assertEqual(next(row for row in loaded if row["name"] == "White rice")["quantity_band"], "plenty")
+        self.assertEqual(next(row for row in loaded if row["name"] == "White rice")["origin"], "manual")
 
     def test_replace_is_atomic_when_a_later_item_is_invalid(self):
         replace_household_inventory(
@@ -135,6 +139,13 @@ class HouseholdInventoryTests(unittest.TestCase):
                 replace_household_inventory(
                     self.db_path, self.household_id, self.user_id, [item]
                 )
+
+    def test_rejects_unknown_quantity_band(self):
+        with self.assertRaises(InventoryError):
+            replace_household_inventory(
+                self.db_path, self.household_id, self.user_id,
+                [{"ingredient_id": 1, "form_id": 10, "quantity_band": "truckload"}],
+            )
 
 
 if __name__ == "__main__":
