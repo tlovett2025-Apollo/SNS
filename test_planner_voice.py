@@ -44,6 +44,20 @@ class PlannerVoiceTests(unittest.TestCase):
         result = activity_message(activity, duration=6, attention_minutes=2)
         self.assertIn("2 minutes of attention", result)
 
+    def test_launch_prep_uses_kitchen_language_not_engine_jargon(self):
+        activity = SimpleNamespace(
+            activity_type="launch prep",
+            component="meal",
+            instruction="Start the rice.",
+            human_busy=True,
+            stage="early",
+        )
+
+        result = activity_message(activity, duration=2, attention_minutes=2)
+
+        self.assertIn("first part cooking while you finish the prep", result)
+        self.assertNotIn("long-lead", result.lower())
+
     def test_finish_transition_is_brief(self):
         previous = SimpleNamespace(stage="middle")
         next_activity = SimpleNamespace(stage="finish")

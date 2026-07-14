@@ -55,7 +55,7 @@ def time_summary(total_minutes, active_minutes, passive_minutes) -> Optional[str
 def _friendly_closing(activity_type: str) -> str:
     closings = {
         "gather": "Now everything is within reach.",
-        "launch prep": "That gets the long-lead items moving first.",
+        "launch prep": "That gets the first part cooking while you finish the prep.",
         "prep": "Nice. The ingredient prep is handled.",
         "optional sear": "This step is optional.",
         "build soup": "Good. The soup is built.",
