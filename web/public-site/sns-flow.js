@@ -15,6 +15,13 @@ const SNS = (() => {
     little: { label: "A little", quantity_band: 1 },
     plenty: { label: "Plenty", quantity_band: 3 }
   };
+  const kitchenStorageKey = "snsKitchenStateV1";
+  const defaultForms = {
+    Pantry: "Shelf-stable",
+    Fridge: "Refrigerated",
+    Freezer: "Frozen",
+    Fresh: "Fresh"
+  };
 
   function postJson(url, payload) {
     return fetch(url, {
@@ -66,17 +73,131 @@ const SNS = (() => {
       .replaceAll("'", "&#039;");
   }
 
-  function bindAmounts() {
-    document.querySelectorAll(".amount").forEach(group => {
-      group.querySelectorAll("button").forEach(button => {
-        button.addEventListener("click", () => {
-          group.querySelectorAll("button").forEach(b => b.classList.remove("active"));
-          button.classList.add("active");
-          updateCount();
-          markChanged();
-        });
+  function browserKitchenState() {
+    return {
+      foods: [...document.querySelectorAll("[data-food]")].map(row => ({
+        name: row.dataset.food,
+        storage: row.dataset.storage,
+        form: row.dataset.form || "On hand",
+        level: row.querySelector(".amount button.active")?.dataset.level || "none",
+        custom: row.dataset.custom === "true"
+      })),
+      equipment: [...document.querySelectorAll("[data-equipment]")].map(button => ({
+        name: button.dataset.equipment,
+        active: button.classList.contains("active"),
+        custom: button.dataset.custom === "true"
+      }))
+    };
+  }
+
+  function storeBrowserKitchen() {
+    localStorage.setItem(kitchenStorageKey, JSON.stringify(browserKitchenState()));
+  }
+
+  function amountButtons(activeLevel) {
+    return Object.entries(levelMeaning).map(([level, meaning]) =>
+      `<button class="${level === activeLevel ? "active" : ""}" data-level="${level}" type="button">${meaning.label}</button>`
+    ).join("");
+  }
+
+  function createFoodRow({ name, storage, form, level = "little", custom = true }) {
+    const row = document.createElement("div");
+    row.className = "food-row";
+    row.dataset.food = name;
+    row.dataset.storage = storage;
+    row.dataset.form = form || defaultForms[storage] || "On hand";
+    row.dataset.custom = String(Boolean(custom));
+    row.innerHTML = `
+      <div><div class="food-name">${escapeHtml(name)}</div><div class="food-note">${escapeHtml(row.dataset.form)}</div></div>
+      <div class="amount" aria-label="${escapeHtml(name)} amount">${amountButtons(level)}</div>`;
+    return row;
+  }
+
+  function createEquipmentButton({ name, active = true, custom = true }) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `equipment-item${active ? " active" : ""}`;
+    button.dataset.equipment = name;
+    button.dataset.custom = String(Boolean(custom));
+    button.setAttribute("aria-pressed", String(active));
+    button.textContent = name;
+    return button;
+  }
+
+  function findFoodRow(name, storage) {
+    return [...document.querySelectorAll("[data-food]")].find(row =>
+      row.dataset.food.toLowerCase() === name.toLowerCase()
+      && row.dataset.storage === storage
+    );
+  }
+
+  function restoreBrowserKitchen() {
+    let state;
+    try { state = JSON.parse(localStorage.getItem(kitchenStorageKey) || "null"); }
+    catch { state = null; }
+    if (!state) return;
+
+    (state.foods || []).forEach(food => {
+      let row = findFoodRow(food.name, food.storage);
+      if (!row && food.custom) {
+        const list = document.querySelector(`[data-section="${food.storage}"] .item-list`);
+        row = createFoodRow(food);
+        list?.append(row);
+      }
+      if (row) {
+        row.querySelectorAll(".amount button").forEach(button =>
+          button.classList.toggle("active", button.dataset.level === food.level)
+        );
+      }
+    });
+
+    (state.equipment || []).forEach(equipment => {
+      let button = [...document.querySelectorAll("[data-equipment]")].find(item =>
+        item.dataset.equipment.toLowerCase() === equipment.name.toLowerCase()
+      );
+      if (!button && equipment.custom) {
+        button = createEquipmentButton(equipment);
+        document.querySelector(".equipment-grid")?.append(button);
+      }
+      if (button) {
+        button.classList.toggle("active", Boolean(equipment.active));
+        button.setAttribute("aria-pressed", String(Boolean(equipment.active)));
+      }
+    });
+  }
+
+  function ensureRemoveControl(row) {
+    if (row.querySelector("[data-remove-food]")) return;
+    const actions = document.createElement("div");
+    actions.className = "inventory-row-actions";
+    actions.innerHTML = '<button class="remove-kitchen-item" data-remove-food type="button">Remove</button>';
+    actions.querySelector("button").addEventListener("click", () => {
+      if (row.dataset.custom === "true") row.remove();
+      else row.querySelectorAll(".amount button").forEach(button =>
+        button.classList.toggle("active", button.dataset.level === "none")
+      );
+      updateCount();
+      markChanged();
+    });
+    row.append(actions);
+  }
+
+  function bindAmountGroup(group) {
+    if (group.dataset.bound === "true") return;
+    group.dataset.bound = "true";
+    group.querySelectorAll("button").forEach(button => {
+      button.addEventListener("click", () => {
+        group.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+        button.classList.add("active");
+        updateCount();
+        markChanged();
       });
     });
+  }
+
+  function bindAmounts() {
+    document.querySelectorAll(".amount").forEach(bindAmountGroup);
+    document.querySelectorAll("[data-food]").forEach(ensureRemoveControl);
   }
 
   function updateCount() {
@@ -113,6 +234,7 @@ const SNS = (() => {
   }
 
   function markChanged() {
+    storeBrowserKitchen();
     const status = document.querySelector("[data-save-status]");
     if (status) status.textContent = "You have unsaved changes.";
   }
@@ -167,6 +289,78 @@ const SNS = (() => {
       updateCount();
       markChanged();
     }));
+
+    const dialog = document.querySelector("[data-kitchen-dialog]");
+    const dialogForm = document.querySelector("[data-kitchen-dialog-form]");
+    const addName = document.querySelector("[data-dialog-name]");
+    const addForm = document.querySelector("[data-dialog-form]");
+    const addAmount = document.querySelector("[data-dialog-amount]");
+    let addSection = "";
+
+    function openAddDialog(sectionName) {
+      addSection = sectionName;
+      const equipmentMode = sectionName === "Equipment";
+      document.querySelector("[data-dialog-title]").textContent = equipmentMode ? "Add equipment" : `Add to ${sectionName}`;
+      document.querySelector("[data-dialog-name-label]").textContent = equipmentMode ? "Equipment name" : "Item name";
+      document.querySelector("[data-dialog-form-field]").hidden = equipmentMode;
+      document.querySelector("[data-dialog-amount-field]").hidden = equipmentMode;
+      addName.value = "";
+      addForm.value = defaultForms[sectionName] || "";
+      addAmount.value = "little";
+      dialog.showModal();
+      setTimeout(() => addName.focus(), 0);
+    }
+
+    document.querySelectorAll("[data-section]").forEach(section => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "add-kitchen-item";
+      button.dataset.addKitchenItem = section.dataset.section;
+      button.textContent = section.dataset.section === "Equipment" ? "+ Add equipment" : `+ Add ${section.dataset.section.toLowerCase()} item`;
+      section.querySelector(".section-body")?.append(button);
+      button.addEventListener("click", () => openAddDialog(section.dataset.section));
+    });
+
+    document.querySelector("[data-dialog-cancel]")?.addEventListener("click", () => dialog.close());
+    dialogForm?.addEventListener("submit", event => {
+      event.preventDefault();
+      const name = addName.value.trim();
+      if (!name) return;
+
+      if (addSection === "Equipment") {
+        let button = [...document.querySelectorAll("[data-equipment]")].find(item =>
+          item.dataset.equipment.toLowerCase() === name.toLowerCase()
+        );
+        if (!button) {
+          button = createEquipmentButton({ name });
+          document.querySelector(".equipment-grid")?.append(button);
+          button.addEventListener("click", () => {
+            button.classList.toggle("active");
+            button.setAttribute("aria-pressed", String(button.classList.contains("active")));
+            updateCount();
+            markChanged();
+          });
+        } else {
+          button.classList.add("active");
+          button.setAttribute("aria-pressed", "true");
+        }
+      } else {
+        let row = findFoodRow(name, addSection);
+        if (!row) {
+          row = createFoodRow({ name, storage: addSection, form: addForm.value.trim(), level: addAmount.value });
+          document.querySelector(`[data-section="${addSection}"] .item-list`)?.append(row);
+          bindAmountGroup(row.querySelector(".amount"));
+          ensureRemoveControl(row);
+        } else {
+          row.querySelectorAll(".amount button").forEach(button =>
+            button.classList.toggle("active", button.dataset.level === addAmount.value)
+          );
+        }
+      }
+      dialog.close();
+      updateCount();
+      markChanged();
+    });
   }
 
   function fallbackRecipes(payload) {
@@ -198,6 +392,7 @@ const SNS = (() => {
   async function saveKitchen() {
     const payload = kitchenPayload();
     sessionStorage.setItem("snsKitchenPayload", JSON.stringify(payload));
+    storeBrowserKitchen();
     try {
       await postJson(API.saveKitchen, payload);
       const status = document.querySelector("[data-save-status]");
@@ -315,6 +510,7 @@ const SNS = (() => {
   }
 
   function init() {
+    restoreBrowserKitchen();
     bindAmounts();
     bindKitchenDashboard();
     updateCount();
