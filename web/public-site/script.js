@@ -1,17 +1,16 @@
 /*
   ENGINEERING-OWNED LINK MAP
   ==========================
-  Replace these placeholder routes as the authenticated SNS application
-  and APIs become available. Public website editors should not need to
-  change every button individually.
+  Replace these routes as the authenticated SNS application and APIs become available.
+  Public website editors should not need to change every button individually.
 */
 const APP_URLS = {
-  login: "/login",
-  signup: "/signup",
-  "signup-basic": "/signup?plan=basic",
-  "signup-premium": "/signup?plan=premium",
-  kitchen: "/app/kitchen",
-  demo: "/sample-meal"
+  login: "login.html",
+  signup: "login.html?mode=signup",
+  "signup-basic": "login.html?mode=signup&plan=basic",
+  "signup-premium": "login.html?mode=signup&plan=premium",
+  kitchen: "my-kitchen.html",
+  demo: "my-kitchen.html"
 };
 
 document.querySelectorAll("[data-app-link]").forEach((link) => {
@@ -23,8 +22,52 @@ document.querySelectorAll("[data-app-link]").forEach((link) => {
   }
 });
 
+/*
+  Mobile portrait always exposes Log In directly in the header. The full account
+  links remain in the navigation menu as well, so login never depends on rotation.
+*/
+const headerInner = document.querySelector(".header-inner");
 const menuToggle = document.querySelector(".menu-toggle");
 const primaryNav = document.querySelector(".primary-nav");
+
+if (headerInner && menuToggle) {
+  const mobileLogin = document.createElement("a");
+  mobileLogin.href = APP_URLS.login;
+  mobileLogin.textContent = "Log In";
+  mobileLogin.setAttribute("aria-label", "Log in to Stock and Stir");
+  mobileLogin.className = "mobile-login-quick";
+  Object.assign(mobileLogin.style, {
+    minHeight: "44px",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "8px 13px",
+    border: "1px solid rgba(226, 206, 165, 0.65)",
+    borderRadius: "9px",
+    color: "white",
+    fontSize: "14px",
+    fontWeight: "700",
+    whiteSpace: "nowrap",
+    gridColumn: "2",
+    gridRow: "1"
+  });
+  headerInner.insertBefore(mobileLogin, menuToggle);
+
+  const mobilePortrait = window.matchMedia("(max-width: 760px)");
+  const syncMobileLogin = () => {
+    mobileLogin.style.display = mobilePortrait.matches ? "inline-flex" : "none";
+    if (mobilePortrait.matches) {
+      menuToggle.style.gridColumn = "3";
+      headerInner.style.gridTemplateColumns = "minmax(0, 1fr) auto auto";
+      headerInner.style.gap = "10px";
+    } else {
+      menuToggle.style.gridColumn = "";
+      headerInner.style.gridTemplateColumns = "";
+      headerInner.style.gap = "";
+    }
+  };
+  syncMobileLogin();
+  mobilePortrait.addEventListener?.("change", syncMobileLogin);
+}
 
 if (menuToggle && primaryNav) {
   menuToggle.addEventListener("click", () => {
