@@ -61,21 +61,14 @@ class APIHTTPTests(unittest.TestCase):
         self.assertEqual(response.headers["access-control-allow-origin"], "*")
 
     def test_configured_cors_origins_are_parsed_for_fastapi(self):
-        configured = (
-            "https://sns-web-um3d.onrender.com,"
-            "https://stockandstir.co,"
-            "https://www.stockandstir.co"
-        )
+        configured = "https://sns-web-um3d.onrender.com"
 
         with patch.dict("os.environ", {"SNS_CORS_ORIGINS": configured}):
-            self.assertEqual(
-                _cors_origins(),
-                [
-                    "https://sns-web-um3d.onrender.com",
-                    "https://stockandstir.co",
-                    "https://www.stockandstir.co",
-                ],
-            )
+            origins = _cors_origins()
+
+        self.assertIn("https://sns-web-um3d.onrender.com", origins)
+        self.assertIn("https://stockandstir.co", origins)
+        self.assertIn("https://www.stockandstir.co", origins)
 
     def test_render_blueprint_allows_the_live_custom_domain(self):
         blueprint = (Path(__file__).parent / "render.yaml").read_text(encoding="utf-8")
