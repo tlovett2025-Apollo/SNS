@@ -194,6 +194,33 @@
   <p class="empty-search" data-empty-search hidden>No kitchen items match that search.</p>
   <details class="dev-panel"><summary>Developer view · My Kitchen payload</summary><pre data-payload></pre></details>
 </main>
+<dialog class="kitchen-dialog" data-kitchen-dialog>
+  <form class="kitchen-dialog-form" data-kitchen-dialog-form>
+    <div>
+      <div class="eyebrow">My Kitchen</div>
+      <h2 data-dialog-title>Add an item</h2>
+    </div>
+    <label>
+      <span data-dialog-name-label>Item name</span>
+      <input type="text" data-dialog-name required autocomplete="off" placeholder="What do you have?">
+    </label>
+    <label data-dialog-form-field>
+      <span>Form</span>
+      <input type="text" data-dialog-form autocomplete="off" placeholder="Canned, dry, frozen, fresh…">
+    </label>
+    <label data-dialog-amount-field>
+      <span>Amount</span>
+      <select data-dialog-amount>
+        <option value="little">A little</option>
+        <option value="plenty">Plenty</option>
+      </select>
+    </label>
+    <div class="dialog-actions">
+      <button class="btn btn-secondary" type="button" data-dialog-cancel>Cancel</button>
+      <button class="btn btn-primary" type="submit">Add to My Kitchen</button>
+    </div>
+  </form>
+</dialog>
 <div class="action-bar" aria-label="My Kitchen actions">
   <div class="save-status" data-save-status>Changes are stored in this browser.</div>
   <button class="btn btn-secondary" data-save-kitchen>Save My Kitchen</button>
