@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from api_service import (
     APIContractError,
+    _candidate_view,
     get_recipe,
     get_recipe_list,
     normalize_kitchen_snapshot,
@@ -46,6 +47,25 @@ def kitchen_payload():
     }
 
 
+def diverse_kitchen_payload():
+    return {
+        "household_id": "local-demo-household",
+        "servings": 4,
+        "energy": "Low",
+        "inventory": [
+            {"name": "Canned chicken", "form": "Canned", "amount": "little"},
+            {"name": "White rice", "form": "Dry", "amount": "plenty"},
+            {"name": "White beans", "form": "Canned", "amount": "little"},
+            {"name": "Chicken broth", "form": "Canned", "amount": "little"},
+            {"name": "Eggs", "form": "Fresh Raw", "amount": "plenty"},
+            {"name": "Cheese", "form": "Fresh", "amount": "little"},
+            {"name": "Chicken breast", "form": "Frozen Raw", "amount": "plenty"},
+            {"name": "Onions", "form": "Fresh Raw", "amount": "plenty"},
+            {"name": "Carrots", "form": "Fresh Raw", "amount": "plenty"},
+        ],
+    }
+
+
 class APIServiceTests(unittest.TestCase):
     def test_snapshot_normalizes_current_browser_payload(self):
         snapshot = normalize_kitchen_snapshot(kitchen_payload())
@@ -81,6 +101,37 @@ class APIServiceTests(unittest.TestCase):
         self.assertTrue(recipe["steps"])
         self.assertIn("Chicken breast", recipe["ingredients"])
         self.assertEqual(recipe["capability_status"], "supported")
+
+    def test_recipe_list_builds_distinct_meal_concepts_not_one_bundle_in_forms(self):
+        candidates = get_recipe_list(diverse_kitchen_payload())["candidates"]
+
+        self.assertGreaterEqual(len(candidates), 4)
+        self.assertEqual(len({item["candidate_id"] for item in candidates}), len(candidates))
+        self.assertGreaterEqual(
+            len({item["candidate_id"].rsplit("-", 1)[0] for item in candidates}),
+            3,
+        )
+        self.assertFalse(any(item["candidate_id"].startswith("cold-meal") for item in candidates))
+        self.assertTrue(all("Comfort Food" not in item["title"] for item in candidates))
+
+    def test_opened_recipe_lists_only_its_selected_components(self):
+        kitchen = diverse_kitchen_payload()
+        candidate = get_recipe_list(kitchen)["candidates"][0]
+
+        recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
+
+        self.assertLess(len(recipe["ingredients"]), len(kitchen["inventory"]))
+        self.assertNotIn("Milk", recipe["ingredients"])
+
+        soup = next(item for item in get_recipe_list(kitchen)["candidates"] if item["meal_shape"] == "soup")
+        soup_recipe = get_recipe({"candidate_id": soup["candidate_id"], "kitchen": kitchen})
+        self.assertIn("Chicken broth", soup_recipe["ingredients"])
+
+    def test_candidate_temperature_and_preparation_follow_the_method(self):
+        cold = _candidate_view({"strategy": "cold_meal", "candidate_id": "cold-1"})
+
+        self.assertEqual(cold["serving_temperature"], "cold")
+        self.assertEqual(cold["preparation_mode"], "assembled")
 
     def test_cost_filter_is_reserved_but_does_not_change_culinary_generation(self):
         payload = kitchen_payload()
