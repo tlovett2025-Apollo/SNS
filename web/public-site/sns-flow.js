@@ -272,7 +272,7 @@ const SNS = (() => {
         steps: [
           "Gather the selected ingredients and the equipment you need.",
           "Prep the protein and vegetables before the main cooking begins.",
-          "Cook the longest-lead component first, then add quick-cooking ingredients later.",
+          "Start anything that needs extra cooking time first, then add quick-cooking ingredients closer to the end.",
           "Taste, adjust the seasoning, and serve when everything is safely cooked and ready."
         ],
         total_minutes: choice.minutes || 35

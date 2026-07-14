@@ -17,10 +17,13 @@ def test_handheld_requires_a_wrapper_or_bread():
     assert _method_is_eligible("handheld", ["Chicken", "Bread"], "", [])
 
 
-def test_soup_requires_a_liquid_path():
+def test_soup_requires_a_liquid_path_or_an_inherently_stewable_protein():
     assert not _method_is_eligible("soup", ["Chicken", "Carrots"], "", [])
     assert _method_is_eligible("soup", ["Chicken", "Chicken broth"], "", [])
     assert _method_is_eligible("soup", ["Chicken", "Cream of chicken soup"], "", [])
+    assert _method_is_eligible(
+        "soup", ["Beef stew meat", "Potatoes", "Carrots"], "", []
+    )
 
 
 def test_casserole_requires_structure():

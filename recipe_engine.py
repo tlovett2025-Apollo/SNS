@@ -100,10 +100,12 @@ def _method_is_eligible(method, available, foundation, equipment):
     if method == "skillet":
         return True
     if method == "soup":
-        return _contains_any(
+        has_liquid_path = _contains_any(
             available,
             ("broth", "stock", "bouillon", "soup base", "cream of", "consomme"),
         )
+        inherently_stewable = _contains_any(available, ("stew meat",))
+        return has_liquid_path or inherently_stewable
     if method == "casserole":
         return bool(foundation) or _contains_any(
             available,
