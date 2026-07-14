@@ -30,10 +30,14 @@ _MEAL_SHAPES = {
     "plate": "plate",
     "handheld": "sandwich",
     "kid_adventure": "plate",
+    "cold_meal": "plate",
+    "grill": "plate",
 }
 
+_LIVE_PLANNER_METHODS = {"skillet", "casserole", "soup", "handheld"}
+
 _PROTEIN_CATEGORIES = {
-    "beef", "chicken", "eggs", "plant protein", "pork", "processed meat",
+    "beans", "beef", "chicken", "eggs", "plant protein", "pork", "processed meat",
     "protein", "seafood", "turkey",
 }
 
@@ -273,16 +277,143 @@ def _match_text(score: int) -> str:
     return "Possible match"
 
 
+def _slug(value: str) -> str:
+    return "-".join(part for part in _key(value).split() if part)
+
+
+def _concept_requests(engine_request: dict, resolved: list[ResolvedIngredient]):
+    """Build distinct ingredient concepts before asking the planner for methods."""
+    proteins = [
+        item for item in resolved if _key(item.category) in _PROTEIN_CATEGORIES
+    ]
+    vegetables = [item for item in resolved if _key(item.category) == "vegetables"]
+    foundation = engine_request.get("foundation_name", "")
+
+    if not proteins:
+        return [(dict(engine_request), None)]
+
+    concepts = []
+    for index, protein in enumerate(proteins):
+        request = dict(engine_request)
+        request["protein_name"] = protein.name
+        request["protein_state"] = _protein_state(protein)
+
+        if vegetables:
+            if len(proteins) > 1 and index % 3 == 0 and len(vegetables) > 1:
+                selected_vegetables = vegetables[:2]
+            else:
+                selected_vegetables = [vegetables[index % len(vegetables)]]
+        else:
+            selected_vegetables = []
+        request["vegetable_names"] = [item.name for item in selected_vegetables]
+        request["vegetable_name"] = (
+            selected_vegetables[0].name if selected_vegetables else ""
+        )
+        request["foundation_name"] = foundation if index % 2 == 0 else ""
+        concepts.append((request, protein))
+
+    # A kitchen with one protein can still offer distinct vegetable-centered
+    # ideas instead of repeating one ingredient bundle under several methods.
+    if len(proteins) == 1 and len(vegetables) > 1:
+        for vegetable in vegetables[1:]:
+            request = dict(engine_request)
+            request["protein_name"] = proteins[0].name
+            request["protein_state"] = _protein_state(proteins[0])
+            request["vegetable_names"] = [vegetable.name]
+            request["vegetable_name"] = vegetable.name
+            request["foundation_name"] = ""
+            concepts.append((request, proteins[0]))
+
+    return concepts
+
+
+def _method_preferences(protein: ResolvedIngredient | None) -> tuple[str, ...]:
+    category = _key(protein.category if protein else "")
+    state = _protein_state(protein)
+    if category == "eggs":
+        return ("skillet", "casserole", "handheld", "soup")
+    if category == "beans":
+        return ("soup", "skillet", "casserole", "handheld")
+    if state == "Cooked":
+        return ("casserole", "handheld", "soup", "skillet")
+    return ("skillet", "casserole", "soup", "handheld")
+
+
+def _choose_concept_candidate(options, protein, used_methods):
+    supported = {
+        item.get("cooking_method", item.get("strategy")): item
+        for item in options
+        if item.get("cooking_method", item.get("strategy")) in _LIVE_PLANNER_METHODS
+    }
+    preferences = _method_preferences(protein)
+    for method in preferences:
+        if method in supported and method not in used_methods:
+            return supported[method]
+    for method in preferences:
+        if method in supported:
+            return supported[method]
+    return next(iter(supported.values()), None)
+
+
+def _concept_title(candidate: dict) -> str:
+    components = []
+    for item in (
+        candidate.get("protein"),
+        *str(candidate.get("vegetable") or "").split(" & "),
+        candidate.get("foundation"),
+    ):
+        name = _clean(item)
+        if name and name not in components:
+            components.append(name)
+    if len(components) > 1:
+        component_text = f"{', '.join(components[:-1])} & {components[-1]}"
+    else:
+        component_text = components[0] if components else "My Kitchen"
+    method = candidate.get("cooking_method", candidate.get("strategy", "meal"))
+    endings = {
+        "skillet": "Skillet",
+        "casserole": "Casserole",
+        "soup": "Soup",
+        "handheld": "Wrap or Sandwich",
+    }
+    return f"{component_text} {endings.get(method, 'Meal')}"
+
+
+def _candidate_ingredients(candidate: dict) -> list[str]:
+    ingredients = []
+    for item in (
+        candidate.get("protein"),
+        *str(candidate.get("vegetable") or "").split(" & "),
+        candidate.get("foundation"),
+    ):
+        name = _clean(item)
+        if name and name not in ingredients:
+            ingredients.append(name)
+
+    method = candidate.get("cooking_method", candidate.get("strategy"))
+    support_terms = {
+        "soup": ("broth", "stock", "bouillon", "soup base", "consomme"),
+        "handheld": ("bread", "bun", "roll", "tortilla", "wrap", "pita", "naan"),
+    }.get(method, ())
+    for available in candidate.get("inventory_have") or []:
+        if support_terms and any(term in _key(available) for term in support_terms):
+            if available not in ingredients:
+                ingredients.append(available)
+            break
+    return ingredients
+
+
 def _candidate_view(candidate: dict) -> dict:
-    candidate_id = _clean(candidate.get("strategy")) or "candidate"
-    meal_shape = _MEAL_SHAPES.get(candidate_id, "plate")
+    method = _clean(candidate.get("cooking_method", candidate.get("strategy")))
+    candidate_id = _clean(candidate.get("candidate_id")) or method or "candidate"
+    meal_shape = _MEAL_SHAPES.get(method, "plate")
     return {
         "candidate_id": candidate_id,
         "id": candidate_id,
         "title": candidate.get("title") or candidate.get("label") or "Stock & Stir meal",
         "meal_shape": meal_shape,
-        "serving_temperature": "hot",
-        "preparation_mode": "cooked",
+        "serving_temperature": "cold" if method == "cold_meal" else "hot",
+        "preparation_mode": "assembled" if method in {"cold_meal", "handheld"} else "cooked",
         "servings": candidate.get("servings", 4),
         "energy": candidate.get("energy") or "Low",
         "total_minutes": candidate.get("minutes", 0),
@@ -308,13 +439,28 @@ def _raw_candidates(payload: dict, db_path: str | Path):
         engine_request["foundation_name"],
     )):
         return snapshot, resolved, pending, [], engine_request
-    return (
-        snapshot,
-        resolved,
-        pending,
-        generate_candidates(**engine_request),
-        engine_request,
-    )
+    candidates = []
+    used_methods = set()
+    max_results = int(engine_request.get("max_results") or 10)
+    for index, (concept_request, protein) in enumerate(
+        _concept_requests(engine_request, resolved)
+    ):
+        options = generate_candidates(**concept_request)
+        candidate = _choose_concept_candidate(options, protein, used_methods)
+        if not candidate:
+            continue
+        method = candidate.get("cooking_method", candidate.get("strategy", "meal"))
+        candidate["candidate_id"] = "-".join(filter(None, (
+            _slug(method),
+            _slug(candidate.get("protein", "pantry")),
+            str(index + 1),
+        )))
+        candidate["title"] = _concept_title(candidate)
+        used_methods.add(method)
+        candidates.append(candidate)
+        if len(candidates) >= max_results:
+            break
+    return snapshot, resolved, pending, candidates, engine_request
 
 
 def get_recipe_list(payload: dict, db_path: str | Path = DB_PATH) -> dict:
@@ -354,14 +500,14 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
     kitchen = payload.get("kitchen") if isinstance(payload.get("kitchen"), dict) else payload
     _snapshot, resolved, _pending, candidates, _request = _raw_candidates(kitchen, db_path)
     candidate = next(
-        (item for item in candidates if _clean(item.get("strategy")) == candidate_id),
+        (item for item in candidates if _clean(item.get("candidate_id")) == candidate_id),
         None,
     )
     if not candidate:
         raise APIContractError(f"Unknown or unavailable candidate_id: {candidate_id}")
     recipe = build_recipe_from_candidate(candidate)
     classification = _candidate_view(candidate)
-    ingredients = [item.name for item in resolved]
+    ingredients = _candidate_ingredients(candidate)
     return {
         "api_version": CONTRACT_VERSION,
         "candidate_id": candidate_id,
