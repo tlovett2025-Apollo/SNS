@@ -1,8 +1,10 @@
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from api_http import app
+from api_http import _cors_origins, app
 from test_api_service import kitchen_payload
 
 
@@ -47,7 +49,7 @@ class APIHTTPTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Unknown or unavailable candidate_id", response.json()["detail"])
 
-    def test_cors_preflight_allows_tester_site(self):
+    def test_default_cors_preflight_allows_tester_site(self):
         response = self.client.options(
             "/api/GetRecipeList",
             headers={
@@ -57,6 +59,28 @@ class APIHTTPTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["access-control-allow-origin"], "*")
+
+    def test_configured_cors_origins_are_parsed_for_fastapi(self):
+        configured = (
+            "https://sns-web-um3d.onrender.com,"
+            "https://stockandstir.co,"
+            "https://www.stockandstir.co"
+        )
+
+        with patch.dict("os.environ", {"SNS_CORS_ORIGINS": configured}):
+            self.assertEqual(
+                _cors_origins(),
+                [
+                    "https://sns-web-um3d.onrender.com",
+                    "https://stockandstir.co",
+                    "https://www.stockandstir.co",
+                ],
+            )
+
+    def test_render_blueprint_allows_the_live_custom_domain(self):
+        blueprint = (Path(__file__).parent / "render.yaml").read_text(encoding="utf-8")
+
+        self.assertIn("https://stockandstir.co", blueprint)
 
 
 if __name__ == "__main__":
