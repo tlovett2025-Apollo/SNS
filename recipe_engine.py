@@ -11,6 +11,7 @@ from cooking_planner import (
 from culinary_opportunities import discover_opportunities, serialize_opportunities
 from sauce_profiles import get_sauce_profile
 
+
 def _clean(value):
     return "" if value is None else str(value).strip()
 
@@ -35,6 +36,11 @@ def _join(items):
     if len(items) == 1:
         return items[0]
     return " & ".join(items)
+
+
+def _contains_any(items, terms):
+    keys = {_key(item) for item in items}
+    return any(any(term in item for term in terms) for item in keys)
 
 
 def _score_strategy(strategy, energy, budget, time_limit):
@@ -83,6 +89,64 @@ def _cuisine_requirements(cuisine):
     return []
 
 
+def _method_is_eligible(method, available, foundation, equipment):
+    """Reject cooking methods that the current kitchen cannot support.
+
+    This is intentionally conservative. A method must be valid before ranking;
+    scoring never rescues a meal form that should not have existed.
+    """
+    equipment_keys = {_key(item) for item in equipment}
+
+    if method == "skillet":
+        return True
+    if method == "soup":
+        return _contains_any(
+            available,
+            ("broth", "stock", "bouillon", "soup base", "cream of", "consomme"),
+        )
+    if method == "casserole":
+        return bool(foundation) or _contains_any(
+            available,
+            ("cream of", "sauce", "cheese", "egg", "breadcrumbs", "cracker"),
+        )
+    if method == "handheld":
+        return _contains_any(
+            available,
+            ("bread", "bun", "roll", "tortilla", "wrap", "pita", "naan", "flatbread"),
+        )
+    if method == "grill":
+        return any("grill" in item for item in equipment_keys)
+    if method == "cold_meal":
+        return _contains_any(
+            available,
+            ("cooked", "leftover", "canned", "bread", "tortilla", "lettuce", "greens", "cheese"),
+        )
+    return False
+
+
+def _serving_styles(method):
+    """Return presentation choices independently from cooking method."""
+    if method == "soup":
+        return ["bowl", "cup"]
+    if method == "handheld":
+        return ["handheld", "plate"]
+    if method == "cold_meal":
+        return ["plate", "bowl", "handheld"]
+    return ["plate", "bowl"]
+
+
+def _experience_overlays(cooking_for_kids=False, kid_theme=""):
+    if not cooking_for_kids:
+        return []
+    return [{
+        "type": "kid_adventure",
+        "theme": _clean(kid_theme) or "surprise_me",
+        "same_meal": True,
+        "include_fun_facts": True,
+        "include_conversation_prompts": True,
+    }]
+
+
 def generate_candidates(
     protein_name="",
     vegetable_name="",
@@ -98,6 +162,8 @@ def generate_candidates(
     available_items=None,
     requested_items=None,
     available_equipment=None,
+    cooking_for_kids=False,
+    kid_theme="",
 ):
     protein = _clean(protein_name)
     protein_state = _clean(protein_state) or "Fresh Raw"
@@ -106,13 +172,14 @@ def generate_candidates(
         vegetable = _join(vegetable_names)
     else:
         vegetable = _clean(vegetable_name)
-    
+
     foundation = _clean(foundation_name)
     cuisine = _clean(cuisine_name) or "Comfort Food"
     sauce = _sauce_for_cuisine(cuisine)
     sauce_profile = get_sauce_profile(sauce)
     selected_components = _unique([protein, *_clean(vegetable).split(" & "), foundation])
     available = _unique(list(available_items or []) + selected_components)
+    equipment = _unique(list(available_equipment or []))
     sauce_items = [item.name for item in sauce_profile.ingredients] if sauce_profile else _cuisine_requirements(cuisine)
     required = _unique(selected_components + sauce_items + list(requested_items or []))
     available_keys = {_key(item) for item in available}
@@ -127,25 +194,26 @@ def generate_candidates(
         servings = 4
 
     base = _join([protein, vegetable]) or protein or vegetable or "Pantry"
-    strategies = [
-        {"strategy": "quick_bowl", "label": "Quick Bowl", "title": f"{cuisine} {base} Bowl" if foundation else f"{cuisine} {base} Dinner Bowl", "minutes": 15, "energy": "Very Low", "energy_rank": 0, "budget": "Budget", "budget_rank": 1, "why": "fastest low-energy assembly"},
-        {"strategy": "skillet", "label": "Skillet", "title": f"{cuisine} {base} Skillet", "minutes": 25, "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "one pan, flexible texture"},
-        {"strategy": "casserole", "label": "Casserole", "title": f"{cuisine} {base} {foundation} Casserole" if foundation else f"{cuisine} {base} Casserole", "minutes": 40, "energy": "Medium", "energy_rank": 2, "budget": "Budget", "budget_rank": 1, "why": "family-style and good for leftovers"},
-        {"strategy": "soup", "label": "Soup", "title": f"{cuisine} {base} Soup", "minutes": 30, "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "soft, stretchable, and forgiving"},
-        {"strategy": "plate", "label": "Plate", "title": f"{cuisine} {base} Plate", "minutes": 20, "energy": "Low", "energy_rank": 1, "budget": "Moderate", "budget_rank": 2, "why": "simple meat/veg/foundation serving"},
-        {"strategy": "handheld", "label": "Handheld", "title": f"{cuisine} {base} Wrap or Sandwich", "minutes": 18, "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "good when standing/eating energy is limited"},
-        {"strategy": "kid_adventure", "label": "Kid Adventure", "title": f"{base} Adventure Plate", "minutes": 15, "energy": "Very Low", "energy_rank": 0, "budget": "Budget", "budget_rank": 1, "why": "playful plating and familiar components"},
+    methods = [
+        {"strategy": "skillet", "cooking_method": "skillet", "label": "Skillet", "title": f"{cuisine} {base} Skillet", "minutes": 25, "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "one pan, flexible texture"},
+        {"strategy": "casserole", "cooking_method": "casserole", "label": "Casserole", "title": f"{cuisine} {base} {foundation} Casserole" if foundation else f"{cuisine} {base} Casserole", "minutes": 40, "energy": "Medium", "energy_rank": 2, "budget": "Budget", "budget_rank": 1, "why": "family-style and good for leftovers"},
+        {"strategy": "soup", "cooking_method": "soup", "label": "Soup", "title": f"{cuisine} {base} Soup", "minutes": 30, "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "soft, stretchable, and forgiving"},
+        {"strategy": "handheld", "cooking_method": "handheld", "label": "Handheld", "title": f"{cuisine} {base} Wrap or Sandwich", "minutes": 18, "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "portable and easy to serve"},
+        {"strategy": "grill", "cooking_method": "grill", "label": "Grill", "title": f"Grilled {cuisine} {base}", "minutes": 25, "energy": "Medium", "energy_rank": 2, "budget": "Moderate", "budget_rank": 2, "why": "direct high-heat cooking with simple sides"},
+        {"strategy": "cold_meal", "cooking_method": "cold_meal", "label": "Cold Meal", "title": f"Cold {cuisine} {base} Meal", "minutes": 12, "energy": "Very Low", "energy_rank": 0, "budget": "Budget", "budget_rank": 1, "why": "no-cook or low-cook assembly"},
     ]
+    methods = [
+        method for method in methods
+        if _method_is_eligible(method["cooking_method"], available, foundation, equipment)
+    ]
+
     candidates = []
-    for s in strategies:
-        score = _score_strategy(s, energy_level, budget_level, time_limit)
-        if cuisine == "Kid Friendly" and s["strategy"] == "kid_adventure":
-            score += 18
-        if not foundation and s["strategy"] in ["quick_bowl", "casserole"]:
-            score -= 8
-
-        c = dict(s)
-
+    for method in methods:
+        score = _score_strategy(method, energy_level, budget_level, time_limit)
+        c = dict(method)
+        c["serving_styles"] = _serving_styles(method["cooking_method"])
+        c["serving_style"] = c["serving_styles"][0]
+        c["experience_overlays"] = _experience_overlays(cooking_for_kids, kid_theme)
 
         protein_profile = get_ingredient_profile(protein, "protein") if protein else None
         vegetable_profiles = [
@@ -156,47 +224,38 @@ def generate_candidates(
         foundation_profile = get_ingredient_profile(foundation, "foundation") if foundation else None
 
         active_minutes = 0
-
         if protein_profile:
             selected_state = protein_profile.get_state(protein_state)
             if selected_state:
                 active_minutes += selected_state.prep_minutes + selected_state.active_minutes
             else:
                 active_minutes += protein_profile.total_active_minutes
-
         for vegetable_profile in vegetable_profiles:
             active_minutes += vegetable_profile.total_active_minutes
-
         if foundation_profile:
             active_minutes += foundation_profile.total_active_minutes
 
         passive_minutes = 0
-
         if protein_profile:
             selected_state = protein_profile.get_state(protein_state)
             if selected_state:
                 passive_minutes = max(passive_minutes, selected_state.passive_minutes + protein_profile.rest_minutes)
             else:
                 passive_minutes = max(passive_minutes, protein_profile.total_passive_minutes)
-
         for vegetable_profile in vegetable_profiles:
             passive_minutes = max(passive_minutes, vegetable_profile.total_passive_minutes)
-
         if foundation_profile:
             passive_minutes = max(passive_minutes, foundation_profile.total_passive_minutes)
-            
-        attention_score = 0
 
+        attention_score = 0
         if protein_profile:
             selected_state = protein_profile.get_state(protein_state)
             attention_score = max(
                 attention_score,
                 selected_state.attention_score if selected_state else protein_profile.attention_score,
             )
-
         for vegetable_profile in vegetable_profiles:
             attention_score = max(attention_score, vegetable_profile.attention_score)
-
         if foundation_profile:
             attention_score = max(attention_score, foundation_profile.attention_score)
 
@@ -219,7 +278,7 @@ def generate_candidates(
             "max_time_minutes": time_limit,
             "inventory_have": available,
             "inventory_need": needed,
-            "available_equipment": list(available_equipment or []),
+            "available_equipment": equipment,
         })
 
         schedule = build_kitchen_lane_schedule(c)
@@ -247,9 +306,6 @@ def generate_candidates(
 
 
 def build_recipe_from_candidate(candidate):
-    protein = candidate.get("protein", "")
-    vegetable = candidate.get("vegetable", "")
-    foundation = candidate.get("foundation", "")
     instructions = generate_human_instruction_steps(candidate)
     activity_debug = summarize_cooking_activities(candidate)
     lane_debug = summarize_kitchen_lanes(candidate)
@@ -264,8 +320,12 @@ def build_recipe_from_candidate(candidate):
         "inventory_requirements": list(candidate.get("inventory_requirements") or []),
         "selected_rice_equipment": candidate.get("selected_rice_equipment", ""),
         "servings": candidate.get("servings", 4),
-        "summary": f"{candidate.get('label')} · {candidate.get('energy')} energy · {candidate.get('budget')} · {candidate.get('minutes')} min · serves {candidate.get('servings', 4)}"
+        "cooking_method": candidate.get("cooking_method", candidate.get("strategy", "")),
+        "serving_styles": list(candidate.get("serving_styles") or []),
+        "experience_overlays": list(candidate.get("experience_overlays") or []),
+        "summary": f"{candidate.get('label')} · {candidate.get('energy')} energy · {candidate.get('budget')} · {candidate.get('minutes')} min · serves {candidate.get('servings', 4)}",
     }
+
 
 def build_simple_meal(
     protein_name,
