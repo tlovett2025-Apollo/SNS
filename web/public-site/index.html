@@ -63,7 +63,7 @@
 
       <div class="header-actions">
         <a class="button button-outline" href="#" data-app-link="login">Log In</a>
-        <a class="button button-primary" href="#" data-app-link="signup">Start Free</a>
+        <a class="button button-primary" href="#" data-app-link="signup">Start Free Trial</a>
       </div>
     </div>
   </header>
@@ -88,7 +88,7 @@
 
           <div class="hero-actions">
             <a class="button button-primary button-large" href="#" data-app-link="signup">
-              Start With My Kitchen
+              Start 7-Day Free Trial
               <span aria-hidden="true">→</span>
             </a>
             <a class="text-link" href="#how-it-works">See how it works</a>
@@ -388,50 +388,55 @@
     <section id="pricing" class="section pricing-section">
       <div class="container">
         <div class="section-heading centered">
-          <p class="eyebrow">CHOOSE THE SUPPORT YOU NEED</p>
-          <h2>Start free. Add household memory when you are ready.</h2>
-          <p>Pricing shown here is editable before public launch.</p>
+          <p class="eyebrow">SIMPLE PRICING</p>
+          <h2>Try Stock &amp; Stir free for 7 days.</h2>
+          <p>Then choose the plan that fits your household.</p>
         </div>
 
         <div class="pricing-grid">
           <article class="price-card">
-            <p class="plan-name">Free</p>
-            <p class="price">$0</p>
-            <p class="price-note">A practical introduction</p>
+            <p class="plan-name">Monthly</p>
+            <p class="price">$10<span>/month</span></p>
+            <p class="price-note">About $0.33 per day</p>
             <ul>
-              <li>Starter ingredient catalog</li>
-              <li>Pantry 101 guidance</li>
-              <li>Limited meal directions</li>
-              <li>No saved household inventory</li>
+              <li>7-day free trial</li>
+              <li>Full My Kitchen household memory</li>
+              <li>Recipe choices shaped around your inventory</li>
+              <li>Cancel anytime</li>
             </ul>
-            <a class="button button-outline-dark" href="#" data-app-link="signup">Start Free</a>
+            <a class="button button-outline-dark" href="login.html?mode=signup&amp;plan=monthly">
+              Start 7-Day Free Trial
+            </a>
           </article>
 
           <article class="price-card featured">
-            <div class="featured-label">POPULAR</div>
-            <p class="plan-name">Basic</p>
-            <p class="price">$5<span>/month</span></p>
-            <p class="price-note">The full generic meal planner</p>
+            <div class="featured-label">BEST VALUE</div>
+            <p class="plan-name">Annual</p>
+            <p class="price">$100<span>/year</span></p>
+            <p class="price-note">Only about $0.27 per day</p>
             <ul>
-              <li>Expanded ingredient catalog</li>
-              <li>Time, energy, budget, and serving filters</li>
-              <li>Household exclusions</li>
-              <li>Generated meal instructions</li>
+              <li>7-day free trial</li>
+              <li>Everything in Monthly</li>
+              <li>Two months included</li>
+              <li>One simple annual payment</li>
             </ul>
-            <a class="button button-primary" href="#" data-app-link="signup-basic">Choose Basic</a>
+            <a class="button button-primary" href="login.html?mode=signup&amp;plan=annual">
+              Start 7-Day Free Trial
+            </a>
           </article>
 
           <article class="price-card">
-            <p class="plan-name">Premium</p>
-            <p class="price">$10<span>/month</span></p>
+            <p class="plan-name">One Complete Product</p>
             <p class="price-note">Your kitchen, remembered</p>
             <ul>
-              <li>Everything in Basic</li>
-              <li>Saved pantry, refrigerator, and freezer inventory</li>
-              <li>Household preferences and memory</li>
-              <li>Future inventory and planning enhancements</li>
+              <li>No stripped-down pantry tier</li>
+              <li>Secure billing through Stripe</li>
+              <li>Manage or cancel through your account</li>
+              <li>Household memory included</li>
             </ul>
-            <a class="button button-outline-dark" href="#" data-app-link="signup-premium">Choose Premium</a>
+            <a class="button button-outline-dark" href="login.html">
+              Already a member? Log In
+            </a>
           </article>
         </div>
       </div>
@@ -492,5 +497,22 @@
   </footer>
 
   <script src="script.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const routes = {
+        login: "login.html",
+        signup: "login.html?mode=signup",
+        "signup-basic": "login.html?mode=signup&plan=monthly",
+        "signup-premium": "login.html?mode=signup&plan=annual",
+        kitchen: "login.html",
+        demo: "#meal-examples"
+      };
+
+      document.querySelectorAll("[data-app-link]").forEach((link) => {
+        const route = routes[link.dataset.appLink];
+        if (route) link.href = route;
+      });
+    });
+  </script>
 </body>
 </html>

@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Log In or Start Your Trial | Stock & Stir</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .auth-page {
+      min-height: calc(100vh - 110px);
+      padding: 72px 0;
+      background:
+        radial-gradient(circle at 15% 15%, rgba(211,181,109,.24), transparent 30%),
+        linear-gradient(135deg, var(--cream, #f8efe3), #fffaf2);
+    }
+    .auth-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(340px, 480px);
+      gap: 64px;
+      align-items: center;
+    }
+    .auth-copy h1 {
+      font-family: "Playfair Display", Georgia, serif;
+      font-size: clamp(2.8rem, 6vw, 5.3rem);
+      line-height: .98;
+      margin: 0 0 24px;
+    }
+    .auth-copy h1 span { color: #c75a3a; }
+    .auth-copy > p {
+      max-width: 640px;
+      font-size: 1.18rem;
+      line-height: 1.65;
+      color: #51483f;
+    }
+    .auth-promises { display: grid; gap: 14px; margin-top: 30px; }
+    .auth-promises div { display: flex; gap: 12px; font-weight: 700; }
+    .auth-promises div::before {
+      content: "✓";
+      width: 24px; height: 24px; flex: 0 0 24px;
+      display: grid; place-items: center;
+      border-radius: 50%; color: white; background: #596326;
+    }
+    .auth-card {
+      background: #fffaf2;
+      border: 1px solid #d8c8b7;
+      border-radius: 22px;
+      padding: 34px;
+      box-shadow: 0 24px 70px rgba(44,35,26,.14);
+    }
+    .auth-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding: 6px;
+      border-radius: 12px;
+      background: #eee3d5;
+      margin-bottom: 24px;
+    }
+    .auth-tabs button {
+      border: 0;
+      border-radius: 9px;
+      padding: 12px;
+      background: transparent;
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .auth-tabs button.active { background: #101312; color: white; }
+    .trial-box {
+      padding: 14px 16px;
+      border-left: 4px solid #c75a3a;
+      border-radius: 8px;
+      background: #fff1df;
+      line-height: 1.45;
+      margin-bottom: 18px;
+    }
+    .selected-plan { color: #6f675d; font-weight: 700; margin-bottom: 8px; }
+    .auth-card label { display: block; font-weight: 800; margin: 16px 0 8px; }
+    .auth-card input {
+      width: 100%;
+      padding: 14px 15px;
+      border: 1px solid #d8c8b7;
+      border-radius: 10px;
+      background: white;
+      font: inherit;
+    }
+    .auth-submit { width: 100%; margin-top: 22px; }
+    .forgot {
+      display: block;
+      margin-top: 12px;
+      text-align: right;
+      color: #9e4029;
+      font-weight: 700;
+    }
+    .auth-fine {
+      margin-top: 16px;
+      color: #6f675d;
+      font-size: .82rem;
+      line-height: 1.5;
+      text-align: center;
+    }
+    @media (max-width: 860px) {
+      .auth-grid { grid-template-columns: 1fr; }
+      .auth-copy { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="Stock and Stir home">
+        <span class="brand-script">Stock &amp; Stir</span>
+        <span class="brand-subtitle">Cook what you have.</span>
+      </a>
+      <div class="header-actions">
+        <a class="button button-outline" href="index.html">Back to Home</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="auth-page">
+    <div class="container auth-grid">
+      <section class="auth-copy">
+        <p class="eyebrow eyebrow-dark">YOUR KITCHEN, REMEMBERED</p>
+        <h1>Your kitchen should <span>remember you.</span></h1>
+        <p>
+          Log in to return to your saved kitchen, or begin a 7-day free trial
+          and teach Stock &amp; Stir what lives in your pantry, fridge, freezer,
+          and fresh-food space.
+        </p>
+        <div class="auth-promises">
+          <div>Your inventory stays attached to your household.</div>
+          <div>Recipe choices are built from the food and capacity you have today.</div>
+          <div>After the trial: $10 monthly or $100 annually.</div>
+        </div>
+      </section>
+
+      <section class="auth-card">
+        <div class="auth-tabs">
+          <button id="login-tab" type="button">Log In</button>
+          <button id="signup-tab" type="button">Start Free Trial</button>
+        </div>
+
+        <div id="trial-box" class="trial-box">
+          <strong>7 days free.</strong>
+          Then choose $10/month or $100/year. The annual plan is about $0.27 a day.
+        </div>
+        <div id="selected-plan" class="selected-plan"></div>
+
+        <form id="auth-form">
+          <label for="email">Email address</label>
+          <input id="email" type="email" autocomplete="email" required />
+
+          <label for="password">Password</label>
+          <input id="password" type="password" minlength="8" autocomplete="current-password" required />
+
+          <label id="confirm-label" for="confirm">Confirm password</label>
+          <input id="confirm" type="password" minlength="8" autocomplete="new-password" />
+
+          <button id="auth-submit" class="button button-primary auth-submit" type="submit">
+            Continue
+          </button>
+          <a id="forgot" class="forgot" href="#">Forgot password?</a>
+        </form>
+
+        <p class="auth-fine">
+          First-step account shell. Real authentication, password recovery,
+          household ownership, and trial status will connect to a managed
+          authentication service before launch.
+        </p>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const selectedPlan = params.get("plan");
+    let mode = params.get("mode") === "signup" ? "signup" : "login";
+
+    const byId = (id) => document.getElementById(id);
+
+    function renderMode() {
+      const signingUp = mode === "signup";
+      byId("login-tab").classList.toggle("active", !signingUp);
+      byId("signup-tab").classList.toggle("active", signingUp);
+      byId("trial-box").hidden = !signingUp;
+      byId("confirm-label").hidden = !signingUp;
+      byId("confirm").hidden = !signingUp;
+      byId("confirm").required = signingUp;
+      byId("forgot").hidden = signingUp;
+      byId("auth-submit").textContent = signingUp
+        ? "Create Account & Open My Kitchen"
+        : "Log In to My Kitchen";
+
+      byId("selected-plan").textContent =
+        signingUp && selectedPlan
+          ? `Selected after trial: ${selectedPlan === "annual" ? "$100/year" : "$10/month"}`
+          : "";
+    }
+
+    byId("login-tab").addEventListener("click", () => {
+      mode = "login";
+      renderMode();
+    });
+
+    byId("signup-tab").addEventListener("click", () => {
+      mode = "signup";
+      renderMode();
+    });
+
+    byId("auth-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+
+      if (
+        mode === "signup" &&
+        byId("confirm").value !== byId("password").value
+      ) {
+        alert("The passwords do not match.");
+        return;
+      }
+
+      sessionStorage.setItem(
+        "snsAuthPrototype",
+        JSON.stringify({
+          mode,
+          email: byId("email").value,
+          selectedPlan,
+          trialDays: 7
+        })
+      );
+
+      location.href = "my-kitchen.html";
+    });
+
+    byId("forgot").addEventListener("click", (event) => {
+      event.preventDefault();
+      alert("Password reset will be connected with the managed authentication service.");
+    });
+
+    renderMode();
+  </script>
+</body>
+</html>
