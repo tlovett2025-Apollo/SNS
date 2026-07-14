@@ -1,116 +1,204 @@
-<!doctype html><html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>My Kitchen · Stock & Stir</title>
-<link rel="stylesheet" href="sns-flow.css"></head><body><header class="site-header">
-  <div class="brand">Stock <span>&amp;</span> Stir</div>
-  <a class="header-link" href="my-kitchen.html">My Kitchen</a>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#355f49">
+  <title>My Kitchen · Stock & Stir</title>
+  <link rel="stylesheet" href="sns-flow.css">
+</head>
+<body class="kitchen-page">
+<header class="site-header">
+  <a class="brand" href="index.html">Stock <span>&amp;</span> Stir</a>
+  <nav class="header-nav" aria-label="Account navigation">
+    <a class="header-link active" href="my-kitchen.html">My Kitchen</a>
+    <a class="header-link" href="login.html">Account</a>
+  </nav>
 </header>
 <main>
-  <section class="hero">
+  <section class="kitchen-hero">
     <div>
-      <div class="eyebrow">Phase 1 · Edit My Kitchen</div>
-      <h1>What is in your kitchen?</h1>
-      <p class="lede">Use broad amounts. None means you do not have it. A little means roughly one can, one package, or enough for one meal. Plenty means several meals are possible.</p>
+      <div class="eyebrow">My Kitchen</div>
+      <h1>Here’s what you have.</h1>
+      <p class="lede">Review your food at a glance. Tap an amount to update it; items you do not have stay tucked away until you need them.</p>
     </div>
-    <aside class="status-card"><strong><span data-selected-count>0</span> foods</strong>ready to send as a kitchen inventory snapshot.</aside>
+    <aside class="inventory-summary" aria-live="polite">
+      <span class="summary-number" data-selected-count>0</span>
+      <span class="summary-label">foods on hand</span>
+      <span class="summary-detail" data-storage-summary></span>
+    </aside>
   </section>
-  <div class="quadrants"><section class="quadrant">
-      <div class="quadrant-head"><div><h2>Pantry</h2><p>Shelf-stable food, cans, jars, boxes, dry goods, spices, and pouches.</p></div></div>
-      <div class="item-list"><div class="food-row" data-food="Canned chicken" data-storage="Pantry" data-form="Canned">
-      <div><div class="food-name">Canned chicken</div><div class="food-note">A little ≈ 1 can</div></div>
-      <div class="amount" aria-label="Canned chicken amount"><button type="button" class="" data-level="none">None</button><button type="button" class="active" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="White rice" data-storage="Pantry" data-form="Dry">
-      <div><div class="food-name">White rice</div><div class="food-note">A little ≈ enough for 1 meal</div></div>
-      <div class="amount" aria-label="White rice amount"><button type="button" class="" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="active" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="White beans" data-storage="Pantry" data-form="Canned">
-      <div><div class="food-name">White beans</div><div class="food-note">A little ≈ 1 can</div></div>
-      <div class="amount" aria-label="White beans amount"><button type="button" class="" data-level="none">None</button><button type="button" class="active" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Cream of chicken soup" data-storage="Pantry" data-form="Canned">
-      <div><div class="food-name">Cream of chicken soup</div><div class="food-note">Choose the specific soup you have</div></div>
-      <div class="amount" aria-label="Cream of chicken soup amount"><button type="button" class="active" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Spaghetti" data-storage="Pantry" data-form="Dry">
-      <div><div class="food-name">Spaghetti</div><div class="food-note">A little ≈ 1 meal</div></div>
-      <div class="amount" aria-label="Spaghetti amount"><button type="button" class="active" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Chicken broth" data-storage="Pantry" data-form="Shelf-stable">
-      <div><div class="food-name">Chicken broth</div><div class="food-note">A little ≈ 1 carton or several cups</div></div>
-      <div class="amount" aria-label="Chicken broth amount"><button type="button" class="" data-level="none">None</button><button type="button" class="active" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div></div>
-    </section><section class="quadrant">
-      <div class="quadrant-head"><div><h2>Fridge</h2><p>Refrigerated ingredients, dairy, eggs, raw proteins, and leftovers.</p></div></div>
-      <div class="item-list"><div class="food-row" data-food="Eggs" data-storage="Fridge" data-form="Fresh">
-      <div><div class="food-name">Eggs</div><div class="food-note">A little ≈ 2–4 eggs</div></div>
-      <div class="amount" aria-label="Eggs amount"><button type="button" class="" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="active" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Milk" data-storage="Fridge" data-form="Refrigerated">
-      <div><div class="food-name">Milk</div><div class="food-note">A little ≈ enough for one recipe</div></div>
-      <div class="amount" aria-label="Milk amount"><button type="button" class="" data-level="none">None</button><button type="button" class="active" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Cheese" data-storage="Fridge" data-form="Refrigerated">
-      <div><div class="food-name">Cheese</div><div class="food-note">A little ≈ 1 cup</div></div>
-      <div class="amount" aria-label="Cheese amount"><button type="button" class="" data-level="none">None</button><button type="button" class="active" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Cooked leftovers" data-storage="Fridge" data-form="Cooked">
-      <div><div class="food-name">Cooked leftovers</div><div class="food-note">Use-soon foods belong here</div></div>
-      <div class="amount" aria-label="Cooked leftovers amount"><button type="button" class="active" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Breakfast sausage" data-storage="Fridge" data-form="Fresh">
-      <div><div class="food-name">Breakfast sausage</div><div class="food-note">Supporting protein</div></div>
-      <div class="amount" aria-label="Breakfast sausage amount"><button type="button" class="active" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Bacon" data-storage="Fridge" data-form="Fresh">
-      <div><div class="food-name">Bacon</div><div class="food-note">Supporting protein and salty flavor</div></div>
-      <div class="amount" aria-label="Bacon amount"><button type="button" class="active" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div></div>
-    </section><section class="quadrant">
-      <div class="quadrant-head"><div><h2>Freezer</h2><p>Frozen proteins, vegetables, bread, and prepared foods.</p></div></div>
-      <div class="item-list"><div class="food-row" data-food="Chicken breast" data-storage="Freezer" data-form="Frozen Raw">
-      <div><div class="food-name">Chicken breast</div><div class="food-note">A little ≈ enough for 1 meal</div></div>
-      <div class="amount" aria-label="Chicken breast amount"><button type="button" class="" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="active" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Ground beef" data-storage="Freezer" data-form="Frozen Raw">
-      <div><div class="food-name">Ground beef</div><div class="food-note">A little ≈ 1 package</div></div>
-      <div class="amount" aria-label="Ground beef amount"><button type="button" class="" data-level="none">None</button><button type="button" class="active" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Frozen vegetables" data-storage="Freezer" data-form="Frozen">
-      <div><div class="food-name">Frozen vegetables</div><div class="food-note">A little ≈ 1 bag</div></div>
-      <div class="amount" aria-label="Frozen vegetables amount"><button type="button" class="" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="active" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Bread" data-storage="Freezer" data-form="Frozen">
-      <div><div class="food-name">Bread</div><div class="food-note">Loaf, buns, or tortillas</div></div>
-      <div class="amount" aria-label="Bread amount"><button type="button" class="active" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Fish" data-storage="Freezer" data-form="Frozen Raw">
-      <div><div class="food-name">Fish</div><div class="food-note">A little ≈ enough for 1 meal</div></div>
-      <div class="amount" aria-label="Fish amount"><button type="button" class="active" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Prepared meal" data-storage="Freezer" data-form="Frozen">
-      <div><div class="food-name">Prepared meal</div><div class="food-note">Casserole, soup, or leftovers</div></div>
-      <div class="amount" aria-label="Prepared meal amount"><button type="button" class="active" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div></div>
-    </section><section class="quadrant">
-      <div class="quadrant-head"><div><h2>Fresh</h2><p>Produce, herbs, fruit, bread, garden food, and counter items.</p></div></div>
-      <div class="item-list"><div class="food-row" data-food="Onions" data-storage="Fresh" data-form="Fresh">
-      <div><div class="food-name">Onions</div><div class="food-note">A little ≈ 1 onion</div></div>
-      <div class="amount" aria-label="Onions amount"><button type="button" class="" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="active" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Potatoes" data-storage="Fresh" data-form="Fresh">
-      <div><div class="food-name">Potatoes</div><div class="food-note">A little ≈ 2–3 potatoes</div></div>
-      <div class="amount" aria-label="Potatoes amount"><button type="button" class="" data-level="none">None</button><button type="button" class="active" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Carrots" data-storage="Fresh" data-form="Fresh">
-      <div><div class="food-name">Carrots</div><div class="food-note">A little ≈ 2–3 carrots</div></div>
-      <div class="amount" aria-label="Carrots amount"><button type="button" class="" data-level="none">None</button><button type="button" class="active" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Tomatoes" data-storage="Fresh" data-form="Fresh">
-      <div><div class="food-name">Tomatoes</div><div class="food-note">A little ≈ 1–2 tomatoes</div></div>
-      <div class="amount" aria-label="Tomatoes amount"><button type="button" class="active" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Mushrooms" data-storage="Fresh" data-form="Fresh">
-      <div><div class="food-name">Mushrooms</div><div class="food-note">A little ≈ 1 small package</div></div>
-      <div class="amount" aria-label="Mushrooms amount"><button type="button" class="active" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Spinach" data-storage="Fresh" data-form="Fresh Raw">
-      <div><div class="food-name">Spinach</div><div class="food-note">Tender green; cooks very quickly</div></div>
-      <div class="amount" aria-label="Spinach amount"><button type="button" class="active" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Kale" data-storage="Fresh" data-form="Fresh Raw">
-      <div><div class="food-name">Kale</div><div class="food-note">Sturdy green; needs its own handling</div></div>
-      <div class="amount" aria-label="Kale amount"><button type="button" class="active" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Swiss chard" data-storage="Fresh" data-form="Fresh Raw">
-      <div><div class="food-name">Swiss chard</div><div class="food-note">Stems and leaves cook differently</div></div>
-      <div class="amount" aria-label="Swiss chard amount"><button type="button" class="active" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div><div class="food-row" data-food="Romaine lettuce" data-storage="Fresh" data-form="Fresh Raw">
-      <div><div class="food-name">Romaine lettuce</div><div class="food-note">Crisp raw green; not a kale substitute</div></div>
-      <div class="amount" aria-label="Romaine lettuce amount"><button type="button" class="active" data-level="none">None</button><button type="button" class="" data-level="little">A little</button><button type="button" class="" data-level="plenty">Plenty</button></div>
-    </div></div>
-    </section></div>
-  <details class="dev-panel"><summary>Developer view · My Kitchen payload</summary><pre data-payload></pre></details>
-  <div class="action-bar">
-    <button class="btn btn-secondary" data-save-kitchen>Save My Kitchen</button>
-    <button class="btn btn-primary" data-get-recipes>Generate recipes</button>
+
+  <section class="kitchen-tools" aria-label="Inventory tools">
+    <label class="inventory-search">
+      <span aria-hidden="true">⌕</span>
+      <span class="sr-only">Search My Kitchen</span>
+      <input type="search" data-kitchen-search placeholder="Search all of My Kitchen" autocomplete="off">
+      <button type="button" data-clear-search aria-label="Clear search">×</button>
+    </label>
+    <div class="view-toggle" role="group" aria-label="Inventory display">
+      <button type="button" class="active" data-view="on-hand">On hand</button>
+      <button type="button" data-view="all">All items</button>
+    </div>
+  </section>
+
+  <div class="inventory-sections">
+    <section class="inventory-section" data-section="Pantry">
+      <button class="section-heading" type="button" aria-expanded="true">
+        <span class="section-icon" aria-hidden="true">▦</span>
+        <span class="section-title"><span>Pantry</span><small>Shelf-stable food, cans, jars, boxes, dry goods, spices, and pouches.</small></span>
+        <span class="section-count"><strong data-section-count>0</strong> on hand</span>
+        <span class="section-chevron" aria-hidden="true">⌄</span>
+      </button>
+      <div class="section-body">
+        <div class="item-list"><div class="food-row" data-food="Canned chicken" data-form="Canned" data-storage="Pantry">
+<div><div class="food-name">Canned chicken</div><div class="food-note">A little ≈ 1 can</div></div>
+<div aria-label="Canned chicken amount" class="amount"><button class="" data-level="none" type="button">None</button><button class="active" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="White rice" data-form="Dry" data-storage="Pantry">
+<div><div class="food-name">White rice</div><div class="food-note">A little ≈ enough for 1 meal</div></div>
+<div aria-label="White rice amount" class="amount"><button class="" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="active" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="White beans" data-form="Canned" data-storage="Pantry">
+<div><div class="food-name">White beans</div><div class="food-note">A little ≈ 1 can</div></div>
+<div aria-label="White beans amount" class="amount"><button class="" data-level="none" type="button">None</button><button class="active" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Cream of chicken soup" data-form="Canned" data-storage="Pantry">
+<div><div class="food-name">Cream of chicken soup</div><div class="food-note">Choose the specific soup you have</div></div>
+<div aria-label="Cream of chicken soup amount" class="amount"><button class="active" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Spaghetti" data-form="Dry" data-storage="Pantry">
+<div><div class="food-name">Spaghetti</div><div class="food-note">A little ≈ 1 meal</div></div>
+<div aria-label="Spaghetti amount" class="amount"><button class="active" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Chicken broth" data-form="Shelf-stable" data-storage="Pantry">
+<div><div class="food-name">Chicken broth</div><div class="food-note">A little ≈ 1 carton or several cups</div></div>
+<div aria-label="Chicken broth amount" class="amount"><button class="" data-level="none" type="button">None</button><button class="active" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div></div>
+        <button class="show-absent" type="button" data-show-absent>Show items not on hand</button>
+      </div>
+    </section><section class="inventory-section" data-section="Fridge">
+      <button class="section-heading" type="button" aria-expanded="true">
+        <span class="section-icon" aria-hidden="true">▤</span>
+        <span class="section-title"><span>Fridge</span><small>Refrigerated ingredients, dairy, eggs, raw proteins, and leftovers.</small></span>
+        <span class="section-count"><strong data-section-count>0</strong> on hand</span>
+        <span class="section-chevron" aria-hidden="true">⌄</span>
+      </button>
+      <div class="section-body">
+        <div class="item-list"><div class="food-row" data-food="Eggs" data-form="Fresh" data-storage="Fridge">
+<div><div class="food-name">Eggs</div><div class="food-note">A little ≈ 2–4 eggs</div></div>
+<div aria-label="Eggs amount" class="amount"><button class="" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="active" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Milk" data-form="Refrigerated" data-storage="Fridge">
+<div><div class="food-name">Milk</div><div class="food-note">A little ≈ enough for one recipe</div></div>
+<div aria-label="Milk amount" class="amount"><button class="" data-level="none" type="button">None</button><button class="active" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Cheese" data-form="Refrigerated" data-storage="Fridge">
+<div><div class="food-name">Cheese</div><div class="food-note">A little ≈ 1 cup</div></div>
+<div aria-label="Cheese amount" class="amount"><button class="" data-level="none" type="button">None</button><button class="active" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Cooked leftovers" data-form="Cooked" data-storage="Fridge">
+<div><div class="food-name">Cooked leftovers</div><div class="food-note">Use-soon foods belong here</div></div>
+<div aria-label="Cooked leftovers amount" class="amount"><button class="active" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Breakfast sausage" data-form="Fresh" data-storage="Fridge">
+<div><div class="food-name">Breakfast sausage</div><div class="food-note">Supporting protein</div></div>
+<div aria-label="Breakfast sausage amount" class="amount"><button class="active" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Bacon" data-form="Fresh" data-storage="Fridge">
+<div><div class="food-name">Bacon</div><div class="food-note">Supporting protein and salty flavor</div></div>
+<div aria-label="Bacon amount" class="amount"><button class="active" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div></div>
+        <button class="show-absent" type="button" data-show-absent>Show items not on hand</button>
+      </div>
+    </section><section class="inventory-section" data-section="Freezer">
+      <button class="section-heading" type="button" aria-expanded="true">
+        <span class="section-icon" aria-hidden="true">❄</span>
+        <span class="section-title"><span>Freezer</span><small>Frozen proteins, vegetables, bread, and prepared foods.</small></span>
+        <span class="section-count"><strong data-section-count>0</strong> on hand</span>
+        <span class="section-chevron" aria-hidden="true">⌄</span>
+      </button>
+      <div class="section-body">
+        <div class="item-list"><div class="food-row" data-food="Chicken breast" data-form="Frozen Raw" data-storage="Freezer">
+<div><div class="food-name">Chicken breast</div><div class="food-note">A little ≈ enough for 1 meal</div></div>
+<div aria-label="Chicken breast amount" class="amount"><button class="" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="active" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Ground beef" data-form="Frozen Raw" data-storage="Freezer">
+<div><div class="food-name">Ground beef</div><div class="food-note">A little ≈ 1 package</div></div>
+<div aria-label="Ground beef amount" class="amount"><button class="" data-level="none" type="button">None</button><button class="active" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Frozen vegetables" data-form="Frozen" data-storage="Freezer">
+<div><div class="food-name">Frozen vegetables</div><div class="food-note">A little ≈ 1 bag</div></div>
+<div aria-label="Frozen vegetables amount" class="amount"><button class="" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="active" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Bread" data-form="Frozen" data-storage="Freezer">
+<div><div class="food-name">Bread</div><div class="food-note">Loaf, buns, or tortillas</div></div>
+<div aria-label="Bread amount" class="amount"><button class="active" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Fish" data-form="Frozen Raw" data-storage="Freezer">
+<div><div class="food-name">Fish</div><div class="food-note">A little ≈ enough for 1 meal</div></div>
+<div aria-label="Fish amount" class="amount"><button class="active" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Prepared meal" data-form="Frozen" data-storage="Freezer">
+<div><div class="food-name">Prepared meal</div><div class="food-note">Casserole, soup, or leftovers</div></div>
+<div aria-label="Prepared meal amount" class="amount"><button class="active" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div></div>
+        <button class="show-absent" type="button" data-show-absent>Show items not on hand</button>
+      </div>
+    </section><section class="inventory-section" data-section="Fresh">
+      <button class="section-heading" type="button" aria-expanded="true">
+        <span class="section-icon" aria-hidden="true">✦</span>
+        <span class="section-title"><span>Fresh</span><small>Produce, herbs, fruit, bread, garden food, and counter items.</small></span>
+        <span class="section-count"><strong data-section-count>0</strong> on hand</span>
+        <span class="section-chevron" aria-hidden="true">⌄</span>
+      </button>
+      <div class="section-body">
+        <div class="item-list"><div class="food-row" data-food="Onions" data-form="Fresh" data-storage="Fresh">
+<div><div class="food-name">Onions</div><div class="food-note">A little ≈ 1 onion</div></div>
+<div aria-label="Onions amount" class="amount"><button class="" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="active" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Potatoes" data-form="Fresh" data-storage="Fresh">
+<div><div class="food-name">Potatoes</div><div class="food-note">A little ≈ 2–3 potatoes</div></div>
+<div aria-label="Potatoes amount" class="amount"><button class="" data-level="none" type="button">None</button><button class="active" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Carrots" data-form="Fresh" data-storage="Fresh">
+<div><div class="food-name">Carrots</div><div class="food-note">A little ≈ 2–3 carrots</div></div>
+<div aria-label="Carrots amount" class="amount"><button class="" data-level="none" type="button">None</button><button class="active" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Tomatoes" data-form="Fresh" data-storage="Fresh">
+<div><div class="food-name">Tomatoes</div><div class="food-note">A little ≈ 1–2 tomatoes</div></div>
+<div aria-label="Tomatoes amount" class="amount"><button class="active" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Mushrooms" data-form="Fresh" data-storage="Fresh">
+<div><div class="food-name">Mushrooms</div><div class="food-note">A little ≈ 1 small package</div></div>
+<div aria-label="Mushrooms amount" class="amount"><button class="active" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Spinach" data-form="Fresh Raw" data-storage="Fresh">
+<div><div class="food-name">Spinach</div><div class="food-note">Tender green; cooks very quickly</div></div>
+<div aria-label="Spinach amount" class="amount"><button class="active" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Kale" data-form="Fresh Raw" data-storage="Fresh">
+<div><div class="food-name">Kale</div><div class="food-note">Sturdy green; needs its own handling</div></div>
+<div aria-label="Kale amount" class="amount"><button class="active" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Swiss chard" data-form="Fresh Raw" data-storage="Fresh">
+<div><div class="food-name">Swiss chard</div><div class="food-note">Stems and leaves cook differently</div></div>
+<div aria-label="Swiss chard amount" class="amount"><button class="active" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div><div class="food-row" data-food="Romaine lettuce" data-form="Fresh Raw" data-storage="Fresh">
+<div><div class="food-name">Romaine lettuce</div><div class="food-note">Crisp raw green; not a kale substitute</div></div>
+<div aria-label="Romaine lettuce amount" class="amount"><button class="active" data-level="none" type="button">None</button><button class="" data-level="little" type="button">A little</button><button class="" data-level="plenty" type="button">Plenty</button></div>
+</div></div>
+        <button class="show-absent" type="button" data-show-absent>Show items not on hand</button>
+      </div>
+    </section>
+    <section class="inventory-section equipment-section" data-section="Equipment">
+      <button class="section-heading" type="button" aria-expanded="true">
+        <span class="section-icon" aria-hidden="true">⚙</span>
+        <span class="section-title"><span>Equipment</span><small>Tools the planner can use when it builds your cooking plan.</small></span>
+        <span class="section-count"><strong data-section-count>0</strong> available</span>
+        <span class="section-chevron" aria-hidden="true">⌄</span>
+      </button>
+      <div class="section-body">
+        <div class="equipment-grid">
+          <button type="button" class="equipment-item active" data-equipment="Stovetop" aria-pressed="true">Stovetop</button>
+          <button type="button" class="equipment-item active" data-equipment="Oven" aria-pressed="true">Oven</button>
+          <button type="button" class="equipment-item active" data-equipment="Microwave" aria-pressed="true">Microwave</button>
+          <button type="button" class="equipment-item" data-equipment="Rice cooker" aria-pressed="false">Rice cooker</button>
+          <button type="button" class="equipment-item" data-equipment="Pressure cooker" aria-pressed="false">Pressure cooker</button>
+          <button type="button" class="equipment-item" data-equipment="Slow cooker" aria-pressed="false">Slow cooker</button>
+          <button type="button" class="equipment-item" data-equipment="Air fryer" aria-pressed="false">Air fryer</button>
+          <button type="button" class="equipment-item" data-equipment="Blender" aria-pressed="false">Blender</button>
+        </div>
+      </div>
+    </section>
   </div>
-</main><script src="sns-flow.js"></script></body></html>
+
+  <p class="empty-search" data-empty-search hidden>No kitchen items match that search.</p>
+  <details class="dev-panel"><summary>Developer view · My Kitchen payload</summary><pre data-payload></pre></details>
+</main>
+<div class="action-bar" aria-label="My Kitchen actions">
+  <div class="save-status" data-save-status>Changes are stored in this browser.</div>
+  <button class="btn btn-secondary" data-save-kitchen>Save My Kitchen</button>
+  <button class="btn btn-primary" data-get-recipes>Make a Meal</button>
+</div>
+<script src="sns-flow.js"></script>
+</body>
+</html>

@@ -48,7 +48,10 @@ const SNS = (() => {
       servings: 4,
       energy: "Low",
       inventory: items,
-      equipment: [],
+      equipment: [...document.querySelectorAll("[data-equipment].active")].map(button => ({
+        name: button.dataset.equipment,
+        available: true
+      })),
       meal_preferences: {},
       cost_filter: null
     };
@@ -70,6 +73,7 @@ const SNS = (() => {
           group.querySelectorAll("button").forEach(b => b.classList.remove("active"));
           button.classList.add("active");
           updateCount();
+          markChanged();
         });
       });
     });
@@ -77,10 +81,92 @@ const SNS = (() => {
 
   function updateCount() {
     const payload = kitchenPayload();
+    document.querySelectorAll("[data-food]").forEach(row => {
+      const present = row.querySelector(".amount button.active")?.dataset.level !== "none";
+      row.classList.toggle("is-present", present);
+      row.classList.toggle("is-absent", !present);
+    });
+
     const target = document.querySelector("[data-selected-count]");
     if (target) target.textContent = payload.inventory.length;
+
+    const storageCounts = {};
+    payload.inventory.forEach(item => storageCounts[item.storage] = (storageCounts[item.storage] || 0) + 1);
+    const summary = document.querySelector("[data-storage-summary]");
+    if (summary) summary.textContent = Object.entries(storageCounts).map(([name, count]) => `${name} ${count}`).join(" · ");
+
+    document.querySelectorAll("[data-section]").forEach(section => {
+      const foodCount = section.querySelectorAll("[data-food].is-present").length;
+      const equipmentCount = section.querySelectorAll("[data-equipment].active").length;
+      const count = section.querySelector("[data-section-count]");
+      if (count) count.textContent = section.dataset.section === "Equipment" ? equipmentCount : foodCount;
+      const absent = section.querySelectorAll("[data-food].is-absent").length;
+      const showButton = section.querySelector("[data-show-absent]");
+      if (showButton) {
+        showButton.hidden = absent === 0;
+        showButton.textContent = section.classList.contains("show-all") ? "Hide items not on hand" : `Show ${absent} items not on hand`;
+      }
+    });
+
     const dev = document.querySelector("[data-payload]");
     if (dev) dev.textContent = JSON.stringify(payload, null, 2);
+  }
+
+  function markChanged() {
+    const status = document.querySelector("[data-save-status]");
+    if (status) status.textContent = "You have unsaved changes.";
+  }
+
+  function bindKitchenDashboard() {
+    const search = document.querySelector("[data-kitchen-search]");
+    const empty = document.querySelector("[data-empty-search]");
+
+    function applySearch() {
+      const query = (search?.value || "").trim().toLowerCase();
+      let matches = 0;
+      document.querySelectorAll("[data-food]").forEach(row => {
+        const match = !query || `${row.dataset.food} ${row.dataset.storage} ${row.dataset.form}`.toLowerCase().includes(query);
+        row.classList.toggle("search-match", Boolean(query && match));
+        row.hidden = Boolean(query && !match);
+        if (match && query) matches += 1;
+      });
+      document.querySelectorAll("[data-section]").forEach(section => {
+        if (!query || section.dataset.section === "Equipment") return section.hidden = false;
+        section.hidden = !section.querySelector("[data-food].search-match");
+      });
+      if (empty) empty.hidden = !query || matches > 0;
+    }
+
+    search?.addEventListener("input", applySearch);
+    document.querySelector("[data-clear-search]")?.addEventListener("click", () => {
+      search.value = "";
+      applySearch();
+      search.focus();
+    });
+
+    document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => {
+      document.querySelectorAll("[data-view]").forEach(item => item.classList.toggle("active", item === button));
+      document.querySelectorAll("[data-section]").forEach(section => section.classList.toggle("show-all", button.dataset.view === "all"));
+      updateCount();
+    }));
+
+    document.querySelectorAll("[data-show-absent]").forEach(button => button.addEventListener("click", () => {
+      button.closest("[data-section]").classList.toggle("show-all");
+      updateCount();
+    }));
+
+    document.querySelectorAll(".section-heading").forEach(button => button.addEventListener("click", () => {
+      const section = button.closest("[data-section]");
+      section.classList.toggle("collapsed");
+      button.setAttribute("aria-expanded", String(!section.classList.contains("collapsed")));
+    }));
+
+    document.querySelectorAll("[data-equipment]").forEach(button => button.addEventListener("click", () => {
+      button.classList.toggle("active");
+      button.setAttribute("aria-pressed", String(button.classList.contains("active")));
+      updateCount();
+      markChanged();
+    }));
   }
 
   function fallbackRecipes(payload) {
@@ -114,9 +200,11 @@ const SNS = (() => {
     sessionStorage.setItem("snsKitchenPayload", JSON.stringify(payload));
     try {
       await postJson(API.saveKitchen, payload);
-      alert("My Kitchen is saved.");
+      const status = document.querySelector("[data-save-status]");
+      if (status) status.textContent = "My Kitchen is saved.";
     } catch {
-      alert("My Kitchen is saved in this browser prototype. The API will receive the same payload when connected.");
+      const status = document.querySelector("[data-save-status]");
+      if (status) status.textContent = "Saved in this browser; API connection is pending.";
     }
   }
 
@@ -228,6 +316,7 @@ const SNS = (() => {
 
   function init() {
     bindAmounts();
+    bindKitchenDashboard();
     updateCount();
     renderRecipeChoices();
     renderRecipe();
