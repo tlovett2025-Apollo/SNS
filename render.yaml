@@ -9,4 +9,4 @@ services:
     autoDeployTrigger: commit
     envVars:
       - key: SNS_CORS_ORIGINS
-        value: "https://sns-web-um3d.onrender.com"
+        value: "https://sns-web-um3d.onrender.com,https://stockandstir.co,https://www.stockandstir.co,https://getstockandstir.co,https://www.getstockandstir.co"
