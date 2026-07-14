@@ -1,6 +1,6 @@
 const SNS = (() => {
   const runtime = window.SNS_CONFIG || {};
-  const apiBase = String(runtime.apiBaseUrl || "").replace(/\/$/, "");
+  const apiBase = String(runtime.apiBaseUrl || "https://sns-api-xsq4.onrender.com").replace(/\/$/, "");
   const endpoint = path => `${apiBase}${path}`;
   const API = {
     saveKitchen: endpoint("/api/SaveMyKitchen"),
