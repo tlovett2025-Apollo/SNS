@@ -587,6 +587,21 @@ const SNS = (() => {
       actionNumber += 1;
       return `<div class="plan-action"><span class="plan-action-number">${actionNumber}</span><p>${text}</p></div>`;
     }).join("");
+
+    const provenance = recipe.build_provenance;
+    const provenancePanel = document.querySelector("[data-build-provenance]");
+    if (provenancePanel && provenance?.build_id) {
+      const git = provenance.git || {};
+      provenancePanel.hidden = false;
+      document.querySelector("[data-build-summary]").textContent =
+        `Test provenance · ${provenance.build_id} · commit ${git.commit || "unavailable"}`;
+      document.querySelector("[data-build-configuration]").innerHTML = Object.entries(provenance.configuration || {})
+        .map(([key, value]) => `<div><dt>${escapeHtml(key.replaceAll("_", " "))}</dt><dd>${escapeHtml(Array.isArray(value) ? value.join(", ") : value)}</dd></div>`)
+        .join("");
+      document.querySelector("[data-build-files]").innerHTML = (provenance.files || [])
+        .map(file => `<li><span>${escapeHtml(file.path)}</span><code>${escapeHtml(file.sha256)}</code></li>`)
+        .join("");
+    }
   }
 
   async function checkout(plan) {

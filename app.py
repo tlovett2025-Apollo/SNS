@@ -4,6 +4,7 @@ from seed import seed
 from database import (insert_row, update_row, delete_row, fetch_df, fetch_options, table_count, row_exists,
                       safe_delete, ingredient_usage, ingredient_is_linked, usage_text)
 from recipe_engine import generate_candidates, build_recipe_from_candidate
+from build_provenance import collect_build_provenance
 
 st.set_page_config(page_title="Stock & Stir v5", layout="wide")
 create_schema()
@@ -154,7 +155,21 @@ with tabs[0]:
         candidate = st.session_state.candidates[option_labels.index(chosen)]
         st.caption(f"Why: {candidate['why']} | Sauce/seasoning direction: {candidate['sauce']}")
         if st.button("Generate Selected Recipe"):
-            st.session_state.generated_recipe = build_recipe_from_candidate(candidate)
+            generated = build_recipe_from_candidate(candidate)
+            generated["build_provenance"] = collect_build_provenance({
+                "budget": budget_level,
+                "candidate": candidate.get("label"),
+                "cuisine": cuisine_name,
+                "energy": energy_level,
+                "equipment": ["Rice cooker", "Pressure cooker"],
+                "foundation": foundation_name,
+                "protein": protein_name,
+                "protein_state": protein_state,
+                "servings": int(servings),
+                "time_limit_minutes": int(time_minutes),
+                "vegetables": vegetable_names,
+            })
+            st.session_state.generated_recipe = generated
     if "generated_recipe" in st.session_state:
         result = st.session_state.generated_recipe
         st.divider(); st.subheader(result["name"]); st.caption(result["summary"])
@@ -197,6 +212,17 @@ with tabs[0]:
             st.markdown("### Sauce Ingredients — Have / Need")
             for item in result["inventory_requirements"]:
                 st.write(f"- {item['quantity']} {item['name']} — **{item['status']}**")
+        if result.get("build_provenance"):
+            provenance = result["build_provenance"]
+            git = provenance.get("git", {})
+            st.caption(
+                f"Test provenance · {provenance.get('build_id')} · "
+                f"commit {git.get('commit')} · "
+                f"{'modified files' if git.get('dirty') else 'clean'} · "
+                f"generated {provenance.get('generated_at')}"
+            )
+            with st.expander("Exact build files and test configuration"):
+                st.json(provenance)
 
 with tabs[1]:
     st.header("Ingredients")

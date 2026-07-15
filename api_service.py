@@ -14,6 +14,7 @@ from pathlib import Path
 import sqlite3
 
 from config import DB_PATH
+from build_provenance import collect_build_provenance
 from household_inventory import replace_household_inventory, submit_pending_items
 from recipe_engine import build_recipe_from_candidate, generate_candidates
 
@@ -571,6 +572,16 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
     recipe = build_recipe_from_candidate(candidate)
     classification = _candidate_view(candidate)
     ingredients = _candidate_ingredient_lines(candidate, resolved)
+    provenance = collect_build_provenance({
+        "api_contract": CONTRACT_VERSION,
+        "candidate_id": candidate_id,
+        "cooking_method": candidate.get("cooking_method", candidate.get("strategy")),
+        "energy": _request.get("energy_level"),
+        "equipment": _request.get("available_equipment") or [],
+        "protein_state": _request.get("protein_state"),
+        "servings": _request.get("servings"),
+        "time_limit_minutes": _request.get("time_minutes"),
+    })
     return {
         "api_version": CONTRACT_VERSION,
         "candidate_id": candidate_id,
@@ -589,4 +600,5 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
         "capability_status": "supported",
         "grocery_list": list(recipe.get("grocery_list") or []),
         "inventory_requirements": list(recipe.get("inventory_requirements") or []),
+        "build_provenance": provenance,
     }

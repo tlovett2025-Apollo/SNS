@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from api_service import APIContractError, get_recipe, get_recipe_list, save_my_kitchen
+from build_provenance import collect_build_provenance
 from config import DB_PATH
 from household_inventory import (
     InventoryAccessError,
@@ -70,12 +71,17 @@ def api_information() -> dict:
         "api_version": "1.0",
         "status": "available",
         "docs": "/docs",
+        "build": collect_build_provenance(),
     }
 
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "sns-api"}
+    return {
+        "status": "ok",
+        "service": "sns-api",
+        "build_id": collect_build_provenance()["build_id"],
+    }
 
 
 @app.post("/api/SaveMyKitchen")
