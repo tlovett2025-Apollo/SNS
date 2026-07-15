@@ -677,7 +677,9 @@ def consolidate_skillet_vegetables(
         return activities
 
     vegetables = _split_joined_items(candidate.get("vegetable"))
-    if len(vegetables) < 2:
+    protein = _clean(candidate.get("protein"))
+    ground_meat = "ground" in protein.lower()
+    if not vegetables or (len(vegetables) < 2 and not ground_meat):
         return activities
 
     vegetable_activities = [
@@ -689,6 +691,57 @@ def consolidate_skillet_vegetables(
     ]
     if len(vegetable_activities) != len(vegetables):
         return activities
+
+    if ground_meat:
+        protein_cook = next((
+            activity for activity in activities
+            if activity.component == protein and activity.activity_type == "cook"
+        ), None)
+        if protein_cook is None:
+            return activities
+
+        old_activities = [protein_cook, *vegetable_activities]
+        old_ids = {_activity_id(activity) for activity in old_activities}
+        dependencies = []
+        for activity in old_activities:
+            for dependency in activity.depends_on:
+                if dependency not in old_ids and dependency not in dependencies:
+                    dependencies.append(dependency)
+
+        vegetable_names = _join([activity.component for activity in vegetable_activities])
+        shared = _planner_activity(
+            "cook skillet",
+            (
+                f"Heat the skillet, add {protein}, and break it into small crumbles. Cook for about 4 minutes, "
+                f"then add {vegetable_names} to the same skillet. Continue cooking and stirring everything "
+                "together until the vegetables are tender, no pink ground meat remains, and every crumble is "
+                "steaming hot. Keep stirring for about 30 seconds after the last pink disappears, then stop the "
+                "browning. Drain excess fat if needed."
+            ),
+            minutes=max(10, int(protein_cook.minutes or 0)),
+            human_busy=True,
+            stage="middle",
+            depends_on=dependencies,
+            equipment="burner",
+        )
+        shared.attention_load = max(
+            float(activity.attention_load or 0) for activity in old_activities
+        )
+        shared.activity_id = "cook skillet:meal"
+
+        rewritten = []
+        for activity in activities:
+            if activity in old_activities:
+                continue
+            new_dependencies = []
+            for dependency in activity.depends_on:
+                dependency = "cook skillet:meal" if dependency in old_ids else dependency
+                if dependency not in new_dependencies:
+                    new_dependencies.append(dependency)
+            activity.depends_on = new_dependencies
+            rewritten.append(activity)
+        rewritten.append(shared)
+        return rewritten
 
     sturdy_words = ("carrot", "potato", "parsnip", "turnip", "squash")
     vegetable_activities.sort(key=lambda activity: (
@@ -1356,6 +1409,7 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
     )
     finish_announced = False
     middle_announced = False
+    previous_action_end = None
     for item in schedule:
         activity = item.activity
         if activity.activity_type == "gather" or not activity.instruction or item.end_minute <= item.start_minute:
@@ -1389,13 +1443,27 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
         )
         if transition:
             message = f"{message} {transition}"
+        if (
+            activity.human_busy
+            and previous_action_end is not None
+            and item.start_minute > previous_action_end
+        ):
+            items.append({
+                "kind": "info",
+                "text": (
+                    f"Minutes {previous_action_end}–{item.start_minute}: Nothing needs your attention yet. "
+                    f"Begin the next step at minute {item.start_minute}."
+                ),
+            })
         items.append({
             "kind": "action" if activity.human_busy else "info",
             "text": f"{time_window}: {' '.join(message.split())}",
         })
+        if activity.human_busy:
+            previous_action_end = max(previous_action_end or 0, item.end_minute)
         previous_activity = activity
 
-    items.append({"kind": "action", "text": completion_message(candidate)})
+    items.append({"kind": "info", "text": completion_message(candidate)})
     return items
 
 
