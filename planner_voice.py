@@ -100,7 +100,10 @@ def activity_message(activity, duration: int, attention_minutes: int = 0) -> str
     if closing:
         message += f" {closing}"
 
-    return " ".join(message.split())
+    # Keep explicit substep breaks published by Knowledge Objects and the
+    # consolidator. Collapse incidental whitespace within each line only.
+    lines = [" ".join(line.split()) for line in message.splitlines()]
+    return "\n".join(lines).strip()
 
 
 def transition_message(previous_activity, next_activity) -> Optional[str]:

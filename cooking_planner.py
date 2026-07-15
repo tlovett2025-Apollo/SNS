@@ -923,7 +923,10 @@ def build_activity_graph(candidate: dict) -> Dict[str, KitchenActivity]:
     return graph
 
 
-def _just_in_time_starts(graph: Dict[str, KitchenActivity]) -> Dict[str, int]:
+def _just_in_time_starts(
+    graph: Dict[str, KitchenActivity],
+    candidate: Optional[dict] = None,
+) -> Dict[str, int]:
     """Return target starts that make independent branches converge at service.
 
     Foundations and other slow, mostly passive work establish the meal's earliest
@@ -970,10 +973,35 @@ def _just_in_time_starts(graph: Dict[str, KitchenActivity]) -> Dict[str, int]:
         if not any(dependency in ancestors for dependency in graph[activity_id].depends_on)
     ]
     meal_duration = max((remaining_minutes(activity_id) for activity_id in roots), default=0)
-    return {
+    targets = {
         activity_id: max(0, meal_duration - remaining_minutes(activity_id))
         for activity_id in ancestors
     }
+
+    # A low-attention state change such as microwave defrosting owns its
+    # appliance for the full duration but does not own the cook. Pull general
+    # prep into that released-attention window instead of placing it afterward.
+    prep_id = "prep:meal"
+    if prep_id in targets:
+        attention_multiplier = _energy_attention_multiplier(candidate or {})
+        for activity_id, activity in graph.items():
+            duration = max(0, int(activity.minutes or 0))
+            if (
+                activity.activity_type == "thaw"
+                and activity.human_busy
+                and duration
+                and 0 < float(activity.attention_load or 0) < 1
+                and activity_id in targets
+            ):
+                attention = min(
+                    duration,
+                    max(1, ceil(duration * float(activity.attention_load) * attention_multiplier)),
+                )
+                targets[prep_id] = min(
+                    targets[prep_id],
+                    targets[activity_id] + attention,
+                )
+    return targets
 
 
 def build_kitchen_lane_schedule(
@@ -990,7 +1018,7 @@ def build_kitchen_lane_schedule(
     burner_count = max(1, int(burner_count or 1))
     human_attention_lanes = max(1, int(human_attention_lanes or 1))
     attention_multiplier = _energy_attention_multiplier(candidate)
-    ideal_starts = _just_in_time_starts(graph)
+    ideal_starts = _just_in_time_starts(graph, candidate)
 
     def place_schedule(start_targets: Dict[str, int]) -> List[ScheduledActivity]:
         lane_free = {f"Burner {i}": 0 for i in range(1, burner_count + 1)}
@@ -1376,6 +1404,63 @@ def build_cooking_plan(candidate: dict) -> List[CookingStep]:
     return sorted(steps, key=lambda step: step.order)
 
 
+def _format_action_substeps(message: str) -> str:
+    """Preserve authored breaks and separate sentence-sized cooking actions."""
+    blocks = [" ".join(block.split()) for block in re.split(r"\n\s*\n", message) if block.strip()]
+    substeps = []
+    for block in blocks:
+        substeps.extend(
+            part.strip()
+            for part in re.split(r"(?<=[.!?])\s+(?=[A-Z])", block)
+            if part.strip()
+        )
+    return "\n\n".join(substeps)
+
+
+def _wait_explanation(
+    schedule: List[ScheduledActivity],
+    start_minute: int,
+    end_minute: int,
+    next_activity: KitchenActivity,
+) -> str:
+    """Explain deliberate slack instead of presenting it as unexplained idleness."""
+    ongoing = [
+        item for item in schedule
+        if not item.activity.human_busy
+        and item.start_minute < end_minute
+        and item.end_minute > start_minute
+    ]
+    progress = ""
+    if ongoing:
+        current = ongoing[0].activity
+        component = _clean(current.component)
+        activity_type = _clean(current.activity_type).lower()
+        if activity_type == "pressurize":
+            progress = f"The {component.lower()} is coming to pressure. "
+        elif activity_type == "pressure cook":
+            progress = f"The {component.lower()} is pressure-cooking. "
+        elif activity_type == "natural release":
+            progress = f"The {component.lower()} is completing its natural pressure release. "
+        elif component and component != "meal":
+            progress = f"The {component.lower()} continues cooking without your attention. "
+
+    if next_activity.activity_type == "thaw":
+        component = _clean(next_activity.component).lower() or "protein"
+        reason = (
+            f"We are timing the defrosting so the {component} can move directly from thawing "
+            "into prep and cooking instead of sitting while the other components catch up."
+        )
+    else:
+        reason = (
+            "This pause keeps the next component from finishing too early while the rest of "
+            "the meal catches up."
+        )
+    return (
+        f"Minutes {start_minute}–{end_minute}: {progress}{reason} "
+        f"Begin the next step at minute {end_minute}."
+    )
+
+
 def generate_human_plan_items(candidate: dict) -> List[dict]:
     """Render interleaved information and actions for the public cooking plan."""
 
@@ -1441,6 +1526,19 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
             duration=item.end_minute - item.start_minute,
             attention_minutes=item.attention_minutes,
         )
+        overlapping_thaw = next((
+            other for other in schedule
+            if other is not item
+            and other.activity.activity_type == "thaw"
+            and other.start_minute < item.start_minute < other.end_minute
+        ), None)
+        if activity.activity_type == "prep" and overlapping_thaw:
+            component = _clean(overlapping_thaw.activity.component).lower()
+            message = message.replace(
+                "Ingredient Prep:",
+                f"While the microwave finishes defrosting the {component}, finish the remaining prep:",
+                1,
+            )
         if transition:
             message = f"{message} {transition}"
         if (
@@ -1450,14 +1548,13 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
         ):
             items.append({
                 "kind": "info",
-                "text": (
-                    f"Minutes {previous_action_end}–{item.start_minute}: Nothing needs your attention yet. "
-                    f"Begin the next step at minute {item.start_minute}."
+                "text": _wait_explanation(
+                    schedule, previous_action_end, item.start_minute, activity
                 ),
             })
         items.append({
             "kind": "action" if activity.human_busy else "info",
-            "text": f"{time_window}: {' '.join(message.split())}",
+            "text": f"{time_window}: {(_format_action_substeps(message) if activity.human_busy else ' '.join(message.split()))}",
         })
         if activity.human_busy:
             previous_action_end = max(previous_action_end or 0, item.end_minute)

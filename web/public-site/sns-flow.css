@@ -115,6 +115,11 @@ h2 { margin: 0 0 8px; font-size: 1.35rem; }
 .cooking-plan-list { display: grid; gap: 18px; }
 .plan-action, .plan-info { display: grid; grid-template-columns: 2rem minmax(0,1fr); gap: 12px; align-items: start; }
 .plan-action p, .plan-info p { margin: 0; line-height: 1.55; }
+.plan-action p { white-space: pre-wrap; }
+.kitchen-check { margin-top: 22px; padding: 16px; border-radius: 14px; background: #fff5df; border: 1px solid #e8ce91; }
+.kitchen-check h3 { margin: 0 0 8px; font-size: 1rem; }
+.kitchen-check p { margin: 0 0 8px; color: var(--muted); font-size: .86rem; line-height: 1.45; }
+.kitchen-check ul { margin: 0; padding-left: 1.1rem; font-size: .9rem; }
 .plan-action-number {
   width: 2rem; height: 2rem; display: grid; place-items: center;
   border-radius: 999px; background: var(--sage); color: white; font-weight: 850;

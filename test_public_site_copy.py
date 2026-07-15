@@ -28,6 +28,19 @@ def test_my_kitchen_uses_real_quantities_and_units_for_countable_food():
     assert "data-dialog-quantity" in kitchen_page
     assert "data-dialog-unit" in kitchen_page
     assert 'data-food="Lasagna noodles"' in kitchen_page
-    assert '"lasagna noodles": { unit: "noodle"' in flow
+    assert '"lasagna noodles": { unit: "box"' in flow
+    assert "function quantityStepForUnit(unit)" in flow
+    assert "addQuantity.step = quantityStepForUnit(addUnit.value)" in flow
+    assert "data-kitchen-dialog-form novalidate" in kitchen_page
     assert "quantity," in flow
     assert "unit:" in flow
+
+
+def test_recipe_page_exposes_missing_inventory_and_preserves_substep_breaks():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    recipe_page = (PUBLIC_FLOW.parent / "recipe.html").read_text(encoding="utf-8")
+    css = (PUBLIC_FLOW.parent / "sns-flow.css").read_text(encoding="utf-8")
+
+    assert "data-kitchen-check" in recipe_page
+    assert "item?.status === \"Need\"" in flow
+    assert "white-space: pre-wrap" in css

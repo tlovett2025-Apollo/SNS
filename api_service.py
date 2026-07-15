@@ -582,6 +582,11 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
         "servings": _request.get("servings"),
         "time_limit_minutes": _request.get("time_minutes"),
     })
+    missing_items = [
+        item["name"]
+        for item in recipe.get("inventory_requirements") or []
+        if item.get("status") == "Need" and item.get("required", True)
+    ]
     return {
         "api_version": CONTRACT_VERSION,
         "candidate_id": candidate_id,
@@ -599,6 +604,7 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
         "cost_estimate": None,
         "capability_status": "supported",
         "grocery_list": list(recipe.get("grocery_list") or []),
+        "missing_items": missing_items,
         "inventory_requirements": list(recipe.get("inventory_requirements") or []),
         "build_provenance": provenance,
     }

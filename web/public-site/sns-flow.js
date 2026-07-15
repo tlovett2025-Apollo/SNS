@@ -12,7 +12,7 @@ const SNS = (() => {
 
   const inventoryUnits = [
     ["item", "items"], ["can", "cans"], ["jar", "jars"], ["box", "boxes"],
-    ["bag", "bags"], ["package", "packages"], ["noodle", "noodles"],
+    ["bag", "bags"], ["package", "packages"],
     ["egg", "eggs"], ["piece", "pieces"], ["lb", "pounds"], ["oz", "ounces"],
     ["cup", "cups"], ["carton", "cartons"], ["bottle", "bottles"],
     ["bunch", "bunches"], ["loaf", "loaves"], ["portion", "portions"],
@@ -22,7 +22,7 @@ const SNS = (() => {
     "canned chicken": { unit: "can", step: 1 },
     "white beans": { unit: "can", step: 1 },
     "cream of chicken soup": { unit: "can", step: 1 },
-    "lasagna noodles": { unit: "noodle", step: 1 },
+    "lasagna noodles": { unit: "box", step: 1 },
     "spaghetti": { unit: "box", step: 1 },
     "white rice": { unit: "cup", step: 0.25 },
     "chicken broth": { unit: "carton", step: 1 },
@@ -58,6 +58,10 @@ const SNS = (() => {
 
   function quantityProfile(name) {
     return quantityProfiles[String(name || "").toLowerCase()] || { unit: "item", step: 1 };
+  }
+
+  function quantityStepForUnit(unit) {
+    return ({ lb: 0.25, cup: 0.25 }[unit] || 1);
   }
 
   function legacyQuantity(level) {
@@ -150,7 +154,7 @@ const SNS = (() => {
       <button class="quantity-none" data-set-none type="button">None</button>
       <label class="quantity-value">
         <span class="sr-only">${escapeHtml(name)} quantity</span>
-        <input data-quantity type="number" min="0" step="${profile.step}" inputmode="decimal" value="${Number(quantity) || 0}">
+        <input data-quantity type="number" min="0" step="${quantityStepForUnit(selectedUnit)}" inputmode="decimal" value="${Number(quantity) || 0}">
       </label>
       <label class="quantity-unit">
         <span class="sr-only">${escapeHtml(name)} unit</span>
@@ -271,7 +275,10 @@ const SNS = (() => {
       updateCount();
       markChanged();
     });
-    group.querySelector("[data-unit]")?.addEventListener("change", markChanged);
+    group.querySelector("[data-unit]")?.addEventListener("change", event => {
+      group.querySelector("[data-quantity]").step = quantityStepForUnit(event.target.value);
+      markChanged();
+    });
   }
 
   function bindAmounts() {
@@ -381,7 +388,7 @@ const SNS = (() => {
     function updateDialogUnit() {
       const profile = quantityProfile(addName.value);
       addUnit.innerHTML = unitOptions(profile.unit);
-      addQuantity.step = profile.step;
+      addQuantity.step = quantityStepForUnit(profile.unit);
     }
 
     function openAddDialog(sectionName) {
@@ -400,6 +407,9 @@ const SNS = (() => {
     }
 
     addName?.addEventListener("change", updateDialogUnit);
+    addUnit?.addEventListener("change", () => {
+      addQuantity.step = quantityStepForUnit(addUnit.value);
+    });
 
     document.querySelectorAll("[data-section]").forEach(section => {
       const button = document.createElement("button");
@@ -575,6 +585,15 @@ const SNS = (() => {
     document.querySelector("[data-recipe-summary]").textContent = recipe.summary || "";
     document.querySelector("[data-recipe-time]").textContent = recipe.total_minutes ? `${recipe.total_minutes} minutes` : "Flexible timing";
     document.querySelector("[data-ingredients]").innerHTML = (recipe.ingredients || []).map(x => `<li>${escapeHtml(x)}</li>`).join("");
+    const missingItems = (recipe.inventory_requirements || [])
+      .filter(item => item?.status === "Need" && item.required !== false)
+      .map(item => item.name);
+    const kitchenCheck = document.querySelector("[data-kitchen-check]");
+    if (kitchenCheck && missingItems.length) {
+      kitchenCheck.hidden = false;
+      document.querySelector("[data-missing-items]").innerHTML = missingItems
+        .map(name => `<li>${escapeHtml(name)}</li>`).join("");
+    }
     const planItems = Array.isArray(recipe.plan_items) && recipe.plan_items.length
       ? recipe.plan_items
       : (recipe.steps || recipe.instructions || []).map(text => ({ kind: "action", text }));

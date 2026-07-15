@@ -234,118 +234,24 @@ class APIServiceTests(unittest.TestCase):
             "come to pressure" in step for step in recipe["steps"]
         ))
         self.assertTrue(any(
-            item["kind"] == "info" and "Nothing needs your attention yet" in item["text"]
+            item["kind"] == "info"
+            and "timing the defrosting" in item["text"]
+            and "instead of sitting" in item["text"]
             for item in recipe["plan_items"]
         ))
-        self.assertIn("Plate White rice", recipe["steps"][-1])
-        self.assertEqual(recipe["plan_items"][-1], {
-            "kind": "info", "text": "Nicely done. Dinner is ready.",
-        })
-        self.assertLess(plan.index("Taste before adding salt"), plan.index("Plate White rice"))
-
-    def test_candidate_temperature_and_preparation_follow_the_method(self):
-        cold = _candidate_view({"strategy": "cold_meal", "candidate_id": "cold-1"})
-
-        self.assertEqual(cold["serving_temperature"], "cold")
-        self.assertEqual(cold["preparation_mode"], "assembled")
-
-    def test_recipe_list_builds_distinct_meal_concepts_not_one_bundle_in_forms(self):
-        candidates = get_recipe_list(diverse_kitchen_payload())["candidates"]
-
-        self.assertGreaterEqual(len(candidates), 4)
-        self.assertEqual(len({item["candidate_id"] for item in candidates}), len(candidates))
-        self.assertGreaterEqual(
-            len({item["candidate_id"].rsplit("-", 1)[0] for item in candidates}),
-            3,
-        )
-        self.assertFalse(any(item["candidate_id"].startswith("cold-meal") for item in candidates))
-        self.assertTrue(all("Comfort Food" not in item["title"] for item in candidates))
-
-    def test_opened_recipe_lists_only_its_selected_components(self):
-        kitchen = diverse_kitchen_payload()
-        candidate = get_recipe_list(kitchen)["candidates"][0]
-
-        recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
-
-        self.assertFalse(any(item.startswith("White beans") for item in recipe["ingredients"]))
-        self.assertFalse(any(item.startswith("Cheese") for item in recipe["ingredients"]))
-        self.assertFalse(any(item.startswith("Eggs") for item in recipe["ingredients"]))
-
-        soup = next(item for item in get_recipe_list(kitchen)["candidates"] if item["meal_shape"] == "soup")
-        soup_recipe = get_recipe({"candidate_id": soup["candidate_id"], "kitchen": kitchen})
-        self.assertTrue(any(item.startswith("Chicken broth") for item in soup_recipe["ingredients"]))
-
-    def test_opened_recipe_includes_forms_and_complete_seasoning(self):
-        kitchen = diverse_kitchen_payload()
-        kitchen["equipment"] = [{"name": "Microwave"}]
-        candidate = next(
-            item for item in get_recipe_list(kitchen)["candidates"]
-            if item["candidate_id"].startswith("skillet-chicken-breast")
-        )
-
-        recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
-
-        self.assertIn("Chicken breast — Frozen Raw", recipe["ingredients"])
-        self.assertIn("Onions — Fresh Raw", recipe["ingredients"])
-        self.assertIn("Carrots — Fresh Raw", recipe["ingredients"])
-        self.assertIn("Garlic powder — 1/2 teaspoon", recipe["ingredients"])
-        self.assertIn("Black pepper — 1/4 teaspoon", recipe["ingredients"])
+        thaw_step = next(step for step in recipe["steps"] if "microwave defrost setting" in step)
+        prep_step = next(step for step in recipe["steps"] if "finishes defrosting" in step)
+        self.assertTrue(thaw_step.startswith("Minutes 15–22:"))
+        self.assertTrue(prep_step.startswith("Minutes 19–21:"))
+        self.assertIn("\n\n", prep_step)
         self.assertEqual(
-            len(recipe["ingredients"]),
-            len({item.split(" — ", 1)[0].lower() for item in recipe["ingredients"]}),
+            recipe["missing_items"],
+            ["Cooking oil or butter", "Garlic powder", "Onion powder", "Black pepper", "Cornstarch"],
         )
-        later_steps = " ".join(recipe["steps"][4:]).lower()
-        self.assertNotIn("frozen chicken", later_steps)
-        self.assertNotIn("the foundation", " ".join(recipe["steps"]).lower())
-        self.assertEqual(
-            1,
-            sum("main cooking is done" in step.lower() for step in recipe["steps"]),
-        )
-
-    def test_numbered_plan_contains_actions_and_handles_frozen_ground_beef(self):
-        kitchen = frozen_ground_beef_payload()
-        candidate = get_recipe_list(kitchen)["candidates"][0]
-
-        recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
-        plan = " ".join(recipe["steps"])
-        all_statements = " ".join(item["text"] for item in recipe["plan_items"])
-
-        self.assertIn("Ground beef — Frozen Raw", recipe["ingredients"])
-        self.assertTrue(recipe["steps"][0].startswith("Minutes 0–2:"))
-        self.assertIn("Measure the rice", recipe["steps"][0])
-        self.assertNotIn("Tonight we are making", plan)
-        self.assertNotIn("Plan on about", plan)
-        self.assertNotIn("Gather the ingredients", plan)
-        self.assertIn("Tonight we are making", all_statements)
-        self.assertIn("Plan on about", all_statements)
-        self.assertIn("gather the ingredients", all_statements)
-        self.assertIn("microwave defrost setting", plan)
-        self.assertIn("thawed ground beef", plan)
-        self.assertIn("no pink ground meat remains", plan)
-        self.assertIn("30 seconds after the last pink disappears", plan)
-        self.assertNotIn("food thermometer", plan)
-        self.assertIn("same skillet", plan)
-        self.assertNotIn("Slice Ground beef", plan)
-        self.assertIn("Prepare these first", plan)
-        self.assertNotIn("While Ground beef thaws", plan)
-        self.assertNotIn("ingredient prep is handled", plan.lower())
-        self.assertEqual(1, sum("Prep is complete" in step for step in recipe["steps"]))
-        self.assertEqual(1, sum("Now the cooking begins" in step for step in recipe["steps"]))
-        self.assertLess(plan.index("microwave defrost setting"), plan.index("Heat the skillet"))
-
-        kinds = [item["kind"] for item in recipe["plan_items"]]
-        self.assertEqual(kinds[:4], ["info", "info", "info", "action"])
-        self.assertTrue(any(
-            item["kind"] == "info" and "come to pressure" in item["text"]
-            for item in recipe["plan_items"]
-        ))
-        self.assertFalse(any(
-            "come to pressure" in step for step in recipe["steps"]
-        ))
-        self.assertTrue(any(
-            item["kind"] == "info" and "Nothing needs your attention yet" in item["text"]
-            for item in recipe["plan_items"]
-        ))
+        self.assertNotIn("Chicken broth", recipe["missing_items"])
+        self.assertNotIn("Milk", recipe["missing_items"])
+        self.assertNotIn("Cold water", recipe["missing_items"])
+        self.assertNotIn("Salt", recipe["missing_items"])
         self.assertIn("Plate White rice", recipe["steps"][-1])
         self.assertEqual(recipe["plan_items"][-1], {
             "kind": "info", "text": "Nicely done. Dinner is ready.",

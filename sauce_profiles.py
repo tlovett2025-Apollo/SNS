@@ -29,7 +29,7 @@ SIMPLE_STIR_FRY_SAUCE = SauceProfile(
         SauceIngredient("Garlic", "1–2 teaspoons minced"),
         SauceIngredient("Sugar or preferred sweetener", "1 teaspoon"),
         SauceIngredient("Cornstarch", "1 tablespoon"),
-        SauceIngredient("Cold water", "1 tablespoon"),
+        SauceIngredient("Cold water", "1 tablespoon", pantry_optional=True),
     ],
     prep_instruction=(
         "Prepare the simple stir-fry sauce: whisk the soy sauce, 1/2 cup water or broth, garlic, and sweetener together. "
@@ -53,7 +53,7 @@ SIMPLE_COMFORT_PAN_SAUCE = SauceProfile(
         SauceIngredient("Chicken broth", "1/2 cup"),
         SauceIngredient("Milk", "1/2 cup"),
         SauceIngredient("Cornstarch", "1 tablespoon"),
-        SauceIngredient("Cold water", "1 tablespoon"),
+        SauceIngredient("Cold water", "1 tablespoon", pantry_optional=True),
         SauceIngredient("Salt", "only after tasting, if needed", pantry_optional=True),
     ],
     prep_instruction=(

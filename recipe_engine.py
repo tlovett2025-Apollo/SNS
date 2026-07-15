@@ -183,7 +183,10 @@ def generate_candidates(
     selected_components = _unique([protein, *_clean(vegetable).split(" & "), foundation])
     available = _unique(list(available_items or []) + selected_components)
     equipment = _unique(list(available_equipment or []))
-    sauce_items = [item.name for item in sauce_profile.ingredients] if sauce_profile else _cuisine_requirements(cuisine)
+    sauce_items = (
+        [item.name for item in sauce_profile.ingredients if not item.pantry_optional]
+        if sauce_profile else _cuisine_requirements(cuisine)
+    )
     required = _unique(selected_components + sauce_items + list(requested_items or []))
     available_keys = {_key(item) for item in available}
     needed = [item for item in required if _key(item) not in available_keys]
@@ -294,6 +297,7 @@ def generate_candidates(
                 "name": item.name,
                 "quantity": item.quantity,
                 "status": "Have" if _key(item.name) in available_keys else "Need",
+                "required": not item.pantry_optional,
             }
             for item in (sauce_profile.ingredients if sauce_profile else [])
         ]
