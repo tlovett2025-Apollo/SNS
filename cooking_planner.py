@@ -567,10 +567,7 @@ def consolidate_kitchen_activities(
 
             if needs_cutting_allowance:
                 calculated_minutes += 1
-        if activity_type == "launch prep" and candidate and "frozen" in _clean(candidate.get("protein_state")).lower():
-            heading = f"While {_clean(candidate.get('protein')) or 'the protein'} thaws, prepare:"
-        else:
-            heading = "Prepare these first:" if activity_type == "launch prep" else "Ingredient Prep:"
+        heading = "Prepare these first:" if activity_type == "launch prep" else "Ingredient Prep:"
         formatted_instructions = "\n\n".join(
             f"- {instruction}." for instruction in instructions
         )
@@ -873,6 +870,59 @@ def build_activity_graph(candidate: dict) -> Dict[str, KitchenActivity]:
     return graph
 
 
+def _just_in_time_starts(graph: Dict[str, KitchenActivity]) -> Dict[str, int]:
+    """Return target starts that make independent branches converge at service.
+
+    Foundations and other slow, mostly passive work establish the meal's earliest
+    finish. Shorter branches are held back so vegetables, proteins, and sauces do
+    not spend their usable quality window sitting around before the meal is ready.
+    Equipment and human-attention constraints remain authoritative when the real
+    schedule is placed.
+    """
+    service_id = next((
+        activity_id for activity_id, activity in graph.items()
+        if activity.activity_type == "finish and serve"
+    ), None)
+    if not service_id:
+        return {}
+
+    ancestors = {service_id}
+    pending = [service_id]
+    while pending:
+        activity_id = pending.pop()
+        for dependency in graph[activity_id].depends_on:
+            if dependency not in ancestors:
+                ancestors.add(dependency)
+                pending.append(dependency)
+
+    children = {activity_id: [] for activity_id in ancestors}
+    for child_id in ancestors:
+        for dependency in graph[child_id].depends_on:
+            if dependency in ancestors:
+                children[dependency].append(child_id)
+
+    remaining_cache: Dict[str, int] = {}
+
+    def remaining_minutes(activity_id: str) -> int:
+        if activity_id not in remaining_cache:
+            downstream = max(
+                (remaining_minutes(child_id) for child_id in children[activity_id]),
+                default=0,
+            )
+            remaining_cache[activity_id] = max(0, int(graph[activity_id].minutes or 0)) + downstream
+        return remaining_cache[activity_id]
+
+    roots = [
+        activity_id for activity_id in ancestors
+        if not any(dependency in ancestors for dependency in graph[activity_id].depends_on)
+    ]
+    meal_duration = max((remaining_minutes(activity_id) for activity_id in roots), default=0)
+    return {
+        activity_id: max(0, meal_duration - remaining_minutes(activity_id))
+        for activity_id in ancestors
+    }
+
+
 def build_kitchen_lane_schedule(
     candidate: dict,
     burner_count: int = 2,
@@ -886,107 +936,128 @@ def build_kitchen_lane_schedule(
     graph = build_activity_graph(candidate)
     burner_count = max(1, int(burner_count or 1))
     human_attention_lanes = max(1, int(human_attention_lanes or 1))
-
-    lane_free = {f"Burner {i}": 0 for i in range(1, burner_count + 1)}
-    lane_free.update({"Oven": 0, "Counter": 0})
-    for activity in graph.values():
-        equipment = (activity.equipment or "counter").lower()
-        if equipment not in {"burner", "oven", "counter"}:
-            lane_free.setdefault(equipment.title(), 0)
-    human_free = [0] * human_attention_lanes
-    completed: Dict[str, ScheduledActivity] = {}
-    unscheduled = dict(graph)
-    scheduled: List[ScheduledActivity] = []
     attention_multiplier = _energy_attention_multiplier(candidate)
+    ideal_starts = _just_in_time_starts(graph)
 
-    while unscheduled:
-        ready = [
-            activity for activity in unscheduled.values()
-            if all(dep in completed for dep in activity.depends_on)
-        ]
-        if not ready:
-            raise ValueError("Activity graph contains a cycle or unresolved dependency.")
+    def place_schedule(start_targets: Dict[str, int]) -> List[ScheduledActivity]:
+        lane_free = {f"Burner {i}": 0 for i in range(1, burner_count + 1)}
+        lane_free.update({"Oven": 0, "Counter": 0})
+        for graph_activity in graph.values():
+            equipment = (graph_activity.equipment or "counter").lower()
+            if equipment not in {"burner", "oven", "counter"}:
+                lane_free.setdefault(equipment.title(), 0)
+        human_free = [0] * human_attention_lanes
+        completed: Dict[str, ScheduledActivity] = {}
+        unscheduled = dict(graph)
+        scheduled: List[ScheduledActivity] = []
 
-        def placement_for(activity):
-            dependency_end = max(
-                (completed[d].end_minute for d in activity.depends_on),
-                default=0,
-            )
+        while unscheduled:
+            ready = [
+                activity for activity in unscheduled.values()
+                if all(dep in completed for dep in activity.depends_on)
+            ]
+            if not ready:
+                raise ValueError("Activity graph contains a cycle or unresolved dependency.")
 
-            equipment = (activity.equipment or "counter").lower()
-            if equipment == "burner":
-                dependency_lanes = [
-                    completed[dependency].lane
+            def placement_for(activity):
+                dependency_end = max(
+                    (completed[d].end_minute for d in activity.depends_on),
+                    default=0,
+                )
+
+                equipment = (activity.equipment or "counter").lower()
+                if equipment == "burner":
+                    dependency_lanes = [
+                        completed[dependency].lane
+                        for dependency in activity.depends_on
+                        if completed[dependency].lane.startswith("Burner ")
+                        and completed[dependency].activity.component == activity.component
+                    ]
+                    lane = dependency_lanes[0] if dependency_lanes else min(
+                        (name for name in lane_free if name.startswith("Burner ")),
+                        key=lambda name: lane_free[name],
+                    )
+                elif equipment == "oven":
+                    lane = "Oven"
+                elif equipment not in {"counter", ""}:
+                    lane = equipment.title()
+                elif not activity.human_busy:
+                    lane = f"Holding ({activity.component})"
+                else:
+                    lane = "Counter"
+
+                lane_free.setdefault(lane, 0)
+                start = max(
+                    dependency_end,
+                    lane_free[lane],
+                    start_targets.get(_activity_id(activity), 0),
+                )
+                human_index = None
+                if activity.human_busy:
+                    human_index = min(
+                        range(len(human_free)),
+                        key=lambda i: human_free[i],
+                    )
+                    start = max(start, human_free[human_index])
+
+                continues_component = any(
+                    completed[dependency].activity.component == activity.component
                     for dependency in activity.depends_on
-                    if completed[dependency].lane.startswith("Burner ")
-                    and completed[dependency].activity.component == activity.component
-                ]
-                lane = dependency_lanes[0] if dependency_lanes else min(
-                    (name for name in lane_free if name.startswith("Burner ")),
-                    key=lambda name: lane_free[name],
                 )
-            elif equipment == "oven":
-                lane = "Oven"
-            elif equipment not in {"counter", ""}:
-                lane = equipment.title()
-            elif not activity.human_busy:
-                lane = f"Holding ({activity.component})"
-            else:
-                lane = "Counter"
+                return start, lane, human_index, continues_component
 
-            lane_free.setdefault(lane, 0)
+            stage_order = {"early": 0, "middle": 1, "late": 2, "finish": 3}
+            placements = [(*placement_for(activity), activity) for activity in ready]
+            start, lane, human_index, continues_component, activity = min(
+                placements,
+                key=lambda item: (
+                    item[0],
+                    ideal_starts.get(_activity_id(item[4]), 0),
+                    not item[3],
+                    stage_order.get(item[4].stage, 1),
+                    _activity_id(item[4]),
+                ),
+            )
 
-            start = max(dependency_end, lane_free[lane])
-            human_index = None
-            if activity.human_busy:
-                human_index = min(
-                    range(len(human_free)),
-                    key=lambda i: human_free[i],
+            duration = max(0, int(activity.minutes or 0))
+            attention_minutes = 0
+            if activity.human_busy and duration:
+                attention_minutes = min(
+                    duration,
+                    max(1, ceil(duration * float(activity.attention_load or 0) * attention_multiplier)),
                 )
-                start = max(start, human_free[human_index])
-
-            continues_component = any(
-                completed[dependency].activity.component == activity.component
-                for dependency in activity.depends_on
+            end = start + duration
+            item = ScheduledActivity(
+                activity=activity, lane=lane, start_minute=start, end_minute=end,
+                attention_minutes=attention_minutes,
             )
-            return start, lane, human_index, continues_component
+            scheduled.append(item)
+            completed[_activity_id(activity)] = item
+            lane_free[lane] = end
+            if human_index is not None:
+                human_free[human_index] = start + attention_minutes
+            del unscheduled[_activity_id(activity)]
 
-        stage_order = {"early": 0, "middle": 1, "late": 2, "finish": 3}
-        placements = [
-            (*placement_for(activity), activity)
-            for activity in ready
-        ]
-        start, lane, human_index, continues_component, activity = min(
-            placements,
-            key=lambda item: (
-                item[0],
-                item[4].activity_type != "thaw",
-                not item[3],
-                stage_order.get(item[4].stage, 1),
-                _activity_id(item[4]),
-            ),
-        )
+        return sorted(scheduled, key=lambda item: (item.start_minute, item.lane, item.end_minute))
 
-        duration = max(0, int(activity.minutes or 0))
-        attention_minutes = 0
-        if activity.human_busy and duration:
-            attention_minutes = min(
-                duration,
-                max(1, ceil(duration * float(activity.attention_load or 0) * attention_multiplier)),
-            )
-        end = start + duration
-        item = ScheduledActivity(
-            activity=activity, lane=lane, start_minute=start, end_minute=end,
-            attention_minutes=attention_minutes,
-        )
-        scheduled.append(item)
-        completed[_activity_id(activity)] = item
-        lane_free[lane] = end
-        if human_index is not None:
-            human_free[human_index] = start + attention_minutes
-        del unscheduled[_activity_id(activity)]
+    earliest_schedule = place_schedule({})
+    earliest_finish = max((item.end_minute for item in earliest_schedule), default=0)
+    if not ideal_starts:
+        return earliest_schedule
 
-    return sorted(scheduled, key=lambda item: (item.start_minute, item.lane, item.end_minute))
+    adjusted_targets = ideal_starts
+    aligned_schedule = place_schedule(adjusted_targets)
+    while max((item.end_minute for item in aligned_schedule), default=0) > earliest_finish:
+        overrun = max(item.end_minute for item in aligned_schedule) - earliest_finish
+        next_targets = {
+            activity_id: max(0, start - overrun)
+            for activity_id, start in adjusted_targets.items()
+        }
+        if next_targets == adjusted_targets:
+            return earliest_schedule
+        adjusted_targets = next_targets
+        aligned_schedule = place_schedule(adjusted_targets)
+    return aligned_schedule
 
 
 def summarize_kitchen_lanes(candidate: dict, burner_count: int = 2, human_attention_lanes: int = 1) -> List[str]:
