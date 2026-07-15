@@ -111,8 +111,16 @@ h2 { margin: 0 0 8px; font-size: 1.35rem; }
   background: white; border: 1px solid var(--line); border-radius: var(--radius); padding: 24px;
   box-shadow: var(--shadow);
 }
-.recipe-aside ul, .recipe-main ol { padding-left: 1.25rem; }
-.recipe-main li { margin: 0 0 18px; line-height: 1.55; }
+.recipe-aside ul { padding-left: 1.25rem; }
+.cooking-plan-list { display: grid; gap: 18px; }
+.plan-action, .plan-info { display: grid; grid-template-columns: 2rem minmax(0,1fr); gap: 12px; align-items: start; }
+.plan-action p, .plan-info p { margin: 0; line-height: 1.55; }
+.plan-action-number {
+  width: 2rem; height: 2rem; display: grid; place-items: center;
+  border-radius: 999px; background: var(--sage); color: white; font-weight: 850;
+}
+.plan-info { color: var(--muted); }
+.plan-info-marker { text-align: center; color: var(--gold); font-size: 1.35rem; line-height: 1.45; }
 .price-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 22px; margin-top: 32px; }
 .price-card {
   background: white; border: 1px solid var(--line); border-radius: var(--radius);

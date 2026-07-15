@@ -16,6 +16,8 @@ from sauce_profiles import get_sauce_profile
 from planner_voice import (
     activity_message,
     completion_message,
+    meal_introduction,
+    time_summary,
     transition_message,
 )
 
@@ -1250,11 +1252,31 @@ def build_cooking_plan(candidate: dict) -> List[CookingStep]:
     return sorted(steps, key=lambda step: step.order)
 
 
-def generate_human_instruction_steps(candidate: dict) -> List[str]:
-    """Render the scheduled activity graph in the Stock & Stir kitchen voice."""
+def generate_human_plan_items(candidate: dict) -> List[dict]:
+    """Render interleaved information and actions for the public cooking plan."""
 
     schedule = build_kitchen_lane_schedule(candidate)
-    lines = []
+    items = [
+        {"kind": "info", "text": meal_introduction(candidate)},
+    ]
+    summary = time_summary(
+        candidate.get("minutes"),
+        candidate.get("active_minutes"),
+        candidate.get("passive_minutes"),
+    )
+    if summary:
+        items.append({"kind": "info", "text": summary})
+
+    components = _join([
+        candidate.get("protein"),
+        *_split_joined_items(candidate.get("vegetable")),
+        candidate.get("foundation"),
+    ])
+    if components:
+        items.append({
+            "kind": "info",
+            "text": f"Before you begin, gather the ingredients and equipment for {components}.",
+        })
 
     previous_activity = None
     middle_cooking_end = max(
@@ -1265,7 +1287,7 @@ def generate_human_instruction_steps(candidate: dict) -> List[str]:
     middle_announced = False
     for item in schedule:
         activity = item.activity
-        if not activity.instruction or item.end_minute <= item.start_minute:
+        if activity.activity_type == "gather" or not activity.instruction or item.end_minute <= item.start_minute:
             continue
 
         transition = transition_message(previous_activity, activity)
@@ -1296,11 +1318,19 @@ def generate_human_instruction_steps(candidate: dict) -> List[str]:
         )
         if transition:
             message = f"{message} {transition}"
-        lines.append(f"{time_window}: {' '.join(message.split())}")
+        items.append({
+            "kind": "action" if activity.human_busy else "info",
+            "text": f"{time_window}: {' '.join(message.split())}",
+        })
         previous_activity = activity
 
-    lines.append(completion_message(candidate))
-    return lines
+    items.append({"kind": "action", "text": completion_message(candidate)})
+    return items
+
+
+def generate_human_instruction_steps(candidate: dict) -> List[str]:
+    """Return all public plan statements as plain text for compatibility."""
+    return [item["text"] for item in generate_human_plan_items(candidate)]
 
 def generate_human_instructions(candidate: dict) -> str:
     """Return recipe steps as plain text for exports and diagnostics."""

@@ -3,6 +3,7 @@ from cooking_planner import (
     assess_time_feasibility,
     build_kitchen_lane_schedule,
     calculate_effort_score,
+    generate_human_plan_items,
     generate_human_instruction_steps,
     generate_human_instructions,
     summarize_cooking_activities,
@@ -308,13 +309,17 @@ def generate_candidates(
 
 
 def build_recipe_from_candidate(candidate):
-    instructions = generate_human_instruction_steps(candidate)
+    plan_items = generate_human_plan_items(candidate)
+    instructions = [item["text"] for item in plan_items]
+    action_steps = [item["text"] for item in plan_items if item["kind"] == "action"]
     activity_debug = summarize_cooking_activities(candidate)
     lane_debug = summarize_kitchen_lanes(candidate)
 
     return {
         "name": candidate.get("title", "Generated Meal"),
         "instructions": instructions,
+        "action_steps": action_steps,
+        "plan_items": plan_items,
         "activity_debug": activity_debug,
         "lane_debug": lane_debug,
         "opportunities": list(candidate.get("opportunities") or []),
