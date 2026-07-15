@@ -43,8 +43,35 @@ SIMPLE_STIR_FRY_SAUCE = SauceProfile(
 )
 
 
+SIMPLE_COMFORT_PAN_SAUCE = SauceProfile(
+    name="simple comfort pan sauce",
+    ingredients=[
+        SauceIngredient("Cooking oil or butter", "1 tablespoon"),
+        SauceIngredient("Garlic powder", "1/2 teaspoon"),
+        SauceIngredient("Onion powder", "1/2 teaspoon"),
+        SauceIngredient("Black pepper", "1/4 teaspoon"),
+        SauceIngredient("Chicken broth", "1/2 cup"),
+        SauceIngredient("Milk", "1/2 cup"),
+        SauceIngredient("Cornstarch", "1 tablespoon"),
+        SauceIngredient("Cold water", "1 tablespoon"),
+        SauceIngredient("Salt", "only after tasting, if needed", pantry_optional=True),
+    ],
+    prep_instruction=(
+        "Measure the garlic powder, onion powder, and black pepper. Whisk the chicken broth and milk together. "
+        "In a small cup, stir the cornstarch with the cold water until smooth. Do not add salt yet; the broth may already contain enough."
+    ),
+    cook_instruction=(
+        "Add the broth-and-milk mixture to the skillet and scrape up the browned flavor. Bring it to a gentle simmer. "
+        "Stir the cornstarch mixture again, add it gradually, and stir until the sauce lightly coats the vegetables. "
+        "Taste before adding salt; finish with more black pepper only if needed."
+    ),
+)
+
+
 def get_sauce_profile(name: str):
     key = str(name or "").strip().lower()
     if key == "simple stir-fry sauce" or "stir-fry" in key:
         return SIMPLE_STIR_FRY_SAUCE
+    if key == "simple comfort pan sauce" or "gravy or cream" in key:
+        return SIMPLE_COMFORT_PAN_SAUCE
     return None
