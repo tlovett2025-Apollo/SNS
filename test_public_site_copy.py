@@ -19,3 +19,15 @@ def test_my_kitchen_supports_add_remove_equipment_and_browser_persistence():
     assert "+ Add equipment" in flow
     assert "data-remove-food" in flow
     assert "data-kitchen-dialog" in kitchen_page
+
+
+def test_my_kitchen_uses_real_quantities_and_units_for_countable_food():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
+
+    assert "data-dialog-quantity" in kitchen_page
+    assert "data-dialog-unit" in kitchen_page
+    assert 'data-food="Lasagna noodles"' in kitchen_page
+    assert '"lasagna noodles": { unit: "noodle"' in flow
+    assert "quantity," in flow
+    assert "unit:" in flow
