@@ -484,7 +484,18 @@ const SNS = (() => {
     document.querySelector("[data-recipe-summary]").textContent = recipe.summary || "";
     document.querySelector("[data-recipe-time]").textContent = recipe.total_minutes ? `${recipe.total_minutes} minutes` : "Flexible timing";
     document.querySelector("[data-ingredients]").innerHTML = (recipe.ingredients || []).map(x => `<li>${escapeHtml(x)}</li>`).join("");
-    document.querySelector("[data-steps]").innerHTML = (recipe.steps || recipe.instructions || []).map(x => `<li>${escapeHtml(x)}</li>`).join("");
+    const planItems = Array.isArray(recipe.plan_items) && recipe.plan_items.length
+      ? recipe.plan_items
+      : (recipe.steps || recipe.instructions || []).map(text => ({ kind: "action", text }));
+    let actionNumber = 0;
+    document.querySelector("[data-steps]").innerHTML = planItems.map(item => {
+      const text = escapeHtml(item.text || "");
+      if (item.kind === "info") {
+        return `<div class="plan-info"><span class="plan-info-marker" aria-hidden="true">•</span><p>${text}</p></div>`;
+      }
+      actionNumber += 1;
+      return `<div class="plan-action"><span class="plan-action-number">${actionNumber}</span><p>${text}</p></div>`;
+    }).join("");
   }
 
   async function checkout(plan) {
