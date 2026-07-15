@@ -194,12 +194,17 @@ class APIServiceTests(unittest.TestCase):
         self.assertIn("gather the ingredients", all_statements)
         self.assertIn("microwave defrost setting", plan)
         self.assertIn("thawed ground beef", plan)
-        self.assertIn("must reach 160°F", plan)
+        self.assertIn("no pink ground meat remains", plan)
+        self.assertIn("30 seconds after the last pink disappears", plan)
+        self.assertNotIn("food thermometer", plan)
+        self.assertIn("same skillet", plan)
         self.assertNotIn("Slice Ground beef", plan)
         self.assertIn("Prepare these first", plan)
         self.assertNotIn("While Ground beef thaws", plan)
+        self.assertNotIn("ingredient prep is handled", plan.lower())
+        self.assertEqual(1, sum("Prep is complete" in step for step in recipe["steps"]))
         self.assertEqual(1, sum("Now the cooking begins" in step for step in recipe["steps"]))
-        self.assertLess(plan.index("microwave defrost setting"), plan.index("Add the ground beef to the hot skillet"))
+        self.assertLess(plan.index("microwave defrost setting"), plan.index("Heat the skillet"))
 
         kinds = [item["kind"] for item in recipe["plan_items"]]
         self.assertEqual(kinds[:4], ["info", "info", "info", "action"])
@@ -210,6 +215,15 @@ class APIServiceTests(unittest.TestCase):
         self.assertFalse(any(
             "come to pressure" in step for step in recipe["steps"]
         ))
+        self.assertTrue(any(
+            item["kind"] == "info" and "Nothing needs your attention yet" in item["text"]
+            for item in recipe["plan_items"]
+        ))
+        self.assertIn("Plate White rice", recipe["steps"][-1])
+        self.assertEqual(recipe["plan_items"][-1], {
+            "kind": "info", "text": "Nicely done. Dinner is ready.",
+        })
+        self.assertLess(plan.index("Taste before adding salt"), plan.index("Plate White rice"))
 
     def test_candidate_temperature_and_preparation_follow_the_method(self):
         cold = _candidate_view({"strategy": "cold_meal", "candidate_id": "cold-1"})
