@@ -61,7 +61,7 @@ def _sauce_for_cuisine(cuisine):
     if "mexican" in k:
         return "Taco Sauce"
     if "comfort" in k or "american" in k:
-        return "Gravy or Cream Sauce"
+        return "simple comfort pan sauce"
     if "mediterranean" in k:
         return "Lemon Herb Sauce"
     if "bbq" in k:
