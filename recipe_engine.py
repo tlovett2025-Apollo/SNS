@@ -10,7 +10,7 @@ from cooking_planner import (
     summarize_kitchen_lanes,
 )
 from culinary_opportunities import discover_opportunities, serialize_opportunities
-from sauce_profiles import get_sauce_profile
+from sauce_profiles import SauceIngredient, get_sauce_profile
 
 
 def _clean(value):
@@ -88,6 +88,30 @@ def _cuisine_requirements(cuisine):
     if "mexican" in k:
         return ["Chili powder", "Cumin"]
     return []
+
+
+def _first_soup_liquid(available):
+    """Return the exact saved-kitchen name for the soup's cooking liquid."""
+    terms = ("broth", "stock", "bouillon", "soup base", "consomme")
+    return next(
+        (item for item in available if any(term in _key(item) for term in terms)),
+        "Broth or water",
+    )
+
+
+def _soup_ingredients(available):
+    """Minimal ingredients for a broth-based rustic soup.
+
+    Soup owns this list; it must not inherit a skillet sauce merely because the
+    two candidates share a cuisine label.
+    """
+    return [
+        SauceIngredient(_first_soup_liquid(available), "3 cups, plus more if needed"),
+        SauceIngredient("Garlic powder", "1/2 teaspoon"),
+        SauceIngredient("Onion powder", "1/2 teaspoon"),
+        SauceIngredient("Black pepper", "1/4 teaspoon"),
+        SauceIngredient("Salt", "only after tasting, if needed", pantry_optional=True),
+    ]
 
 
 def _method_is_eligible(method, available, foundation, equipment):
@@ -179,17 +203,10 @@ def generate_candidates(
     foundation = _clean(foundation_name)
     cuisine = _clean(cuisine_name) or "Comfort Food"
     sauce = _sauce_for_cuisine(cuisine)
-    sauce_profile = get_sauce_profile(sauce)
     selected_components = _unique([protein, *_clean(vegetable).split(" & "), foundation])
     available = _unique(list(available_items or []) + selected_components)
     equipment = _unique(list(available_equipment or []))
-    sauce_items = (
-        [item.name for item in sauce_profile.ingredients if not item.pantry_optional]
-        if sauce_profile else _cuisine_requirements(cuisine)
-    )
-    required = _unique(selected_components + sauce_items + list(requested_items or []))
     available_keys = {_key(item) for item in available}
-    needed = [item for item in required if _key(item) not in available_keys]
     try:
         time_limit = int(time_minutes)
     except Exception:
@@ -215,6 +232,24 @@ def generate_candidates(
 
     candidates = []
     for method in methods:
+        is_soup = method["cooking_method"] == "soup"
+        method_sauce = "rustic broth soup" if is_soup else sauce
+        method_ingredients = (
+            _soup_ingredients(available)
+            if is_soup
+            else (
+                get_sauce_profile(method_sauce).ingredients
+                if get_sauce_profile(method_sauce)
+                else []
+            )
+        )
+        method_items = (
+            [item.name for item in method_ingredients if not item.pantry_optional]
+            if method_ingredients
+            else _cuisine_requirements(cuisine)
+        )
+        required = _unique(selected_components + method_items + list(requested_items or []))
+        needed = [item for item in required if _key(item) not in available_keys]
         score = _score_strategy(method, energy_level, budget_level, time_limit)
         c = dict(method)
         c["serving_styles"] = _serving_styles(method["cooking_method"])
@@ -267,7 +302,7 @@ def generate_candidates(
 
         c.update({
             "score": score,
-            "sauce": sauce,
+            "sauce": method_sauce,
             "protein": protein,
             "protein_state": protein_state,
             "vegetable": vegetable,
@@ -286,6 +321,9 @@ def generate_candidates(
             "inventory_need": needed,
             "available_equipment": equipment,
         })
+        if is_soup:
+            c["soup_liquid"] = method_ingredients[0].name
+            c["soup_liquid_quantity"] = method_ingredients[0].quantity
 
         schedule = build_kitchen_lane_schedule(c)
         c["minutes"] = max((item.end_minute for item in schedule), default=0)
@@ -299,7 +337,7 @@ def generate_candidates(
                 "status": "Have" if _key(item.name) in available_keys else "Need",
                 "required": not item.pantry_optional,
             }
-            for item in (sauce_profile.ingredients if sauce_profile else [])
+            for item in method_ingredients
         ]
         feasibility = assess_time_feasibility(c, time_limit)
         c.update(feasibility)

@@ -86,6 +86,20 @@ def frozen_ground_beef_payload():
     }
 
 
+def cooked_bean_soup_payload(energy="Low", equipment=None):
+    return {
+        "household_id": "local-demo-household",
+        "servings": 4,
+        "energy": energy,
+        "equipment": [{"name": name} for name in (equipment or ["Stovetop"])],
+        "inventory": [
+            {"name": "White beans", "form": "Cooked", "amount": "plenty"},
+            {"name": "Carrots", "form": "Fresh Raw", "amount": "plenty"},
+            {"name": "Chicken broth", "form": "Shelf-stable", "amount": "plenty"},
+        ],
+    }
+
+
 class APIServiceTests(unittest.TestCase):
     def test_snapshot_normalizes_current_browser_payload(self):
         snapshot = normalize_kitchen_snapshot(kitchen_payload())
@@ -165,6 +179,41 @@ class APIServiceTests(unittest.TestCase):
         soup = next(item for item in get_recipe_list(kitchen)["candidates"] if item["meal_shape"] == "soup")
         soup_recipe = get_recipe({"candidate_id": soup["candidate_id"], "kitchen": kitchen})
         self.assertTrue(any(item.startswith("Chicken broth") for item in soup_recipe["ingredients"]))
+
+    def test_cooked_bean_soup_is_rustic_broth_soup_not_a_cream_pan_sauce(self):
+        kitchen = cooked_bean_soup_payload()
+        candidate = get_recipe_list(kitchen)["candidates"][0]
+        recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
+
+        ingredients = "\n".join(recipe["ingredients"])
+        plan = "\n".join(item["text"] for item in recipe["plan_items"])
+        first_action = recipe["steps"][0]
+
+        self.assertEqual(candidate["meal_shape"], "soup")
+        self.assertTrue(first_action.startswith("Minutes 0–2:"))
+        self.assertIn("Prep Carrots", first_action)
+        self.assertNotIn("Prep White beans", plan)
+        self.assertIn("medium heat", plan)
+        self.assertIn("3 cups of Chicken broth", plan)
+        self.assertNotIn("scrape up", plan)
+        self.assertIn("Garlic powder", plan)
+        self.assertIn("Onion powder", plan)
+        self.assertIn("Black pepper", plan)
+        self.assertIn("mash about one-third", plan)
+        self.assertNotIn("protein is safe", plan)
+        self.assertNotIn("Milk", ingredients)
+        self.assertNotIn("Cornstarch", ingredients)
+        self.assertNotIn("Cold water", ingredients)
+        self.assertNotIn("Cooking oil or butter", ingredients)
+
+    def test_cooked_bean_soup_can_use_blender_when_energy_and_equipment_allow(self):
+        kitchen = cooked_bean_soup_payload("Medium", ["Stovetop", "Immersion blender"])
+        candidate = get_recipe_list(kitchen)["candidates"][0]
+        recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
+        plan = "\n".join(item["text"] for item in recipe["plan_items"])
+
+        self.assertIn("For a smooth soup, blend until creamy", plan)
+        self.assertNotIn("mash about one-third", plan)
 
     def test_opened_recipe_includes_forms_and_complete_seasoning(self):
         kitchen = diverse_kitchen_payload()

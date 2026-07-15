@@ -288,7 +288,17 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         prep_activities = [
             activity for activity in ko_activities
             if activity.activity_type == "prep"
+            and not (
+                activity.component == protein
+                and "cooked" in protein_state.lower()
+            )
         ]
+        for activity in prep_activities:
+            if activity.component in vegetables:
+                activity.instruction = (
+                    f"Prep {activity.component}: wash, peel if needed, and chop into bite-size pieces."
+                )
+                activity.minutes = 2
         activities = [activities[0], *state_change_activities, *prep_activities]
         prep_ids = [_activity_id(activity) for activity in prep_activities]
         protein_prep = [
@@ -316,12 +326,38 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             previous = ["optional sear:meal", *[item for item in prep_ids if item not in protein_prep]]
 
         sturdy_components = _join([*vegetables, foundation])
+        soup_liquid = _clean(candidate.get("soup_liquid")) or "broth or water"
+        soup_liquid_quantity = _clean(candidate.get("soup_liquid_quantity")) or "enough to cover the ingredients"
+        soup_liquid_measure = soup_liquid_quantity.split(",", 1)[0]
+        seasoning_names = [
+            item.get("name")
+            for item in candidate.get("inventory_requirements") or []
+            if isinstance(item, dict)
+            and _clean(item.get("name")).lower() in {
+                "garlic powder", "onion powder", "black pepper"
+            }
+        ]
+        seasoning_text = _join(seasoning_names) if seasoning_names else "the seasonings"
+        if include_sear:
+            opening = (
+                f"Add {soup_liquid_measure} of {soup_liquid} to the same soup pot and "
+                "scrape up the browned bits. "
+            )
+        else:
+            opening = (
+                f"Set the soup pot over medium heat and add {soup_liquid_measure} of {soup_liquid}. "
+            )
         activities.append(_planner_activity(
             "build soup",
             (
-                "In the same soup pot, add broth or water and scrape up any browned bits. "
+                opening
                 + (f"Add {sturdy_components}. " if sturdy_components else "")
-                + (f"Keep {protein} in the pot. " if protein else "")
+                + (
+                    f"Add the cooked {protein}. "
+                    if protein and not raw_protein
+                    else (f"Keep {protein} in the pot. " if protein else "")
+                )
+                + f"Stir in {seasoning_text}. "
                 + "Bring everything to a gentle simmer."
             ),
             minutes=3,
@@ -352,6 +388,20 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
                 f"{_join(vegetables)}, and {foundation or 'the remaining ingredients'} "
                 "together until the protein is safe and tender and the vegetables are cooked through."
             )
+        elif not raw_protein and "bean" in protein_key:
+            simmer_minutes = 18
+            simmer_instruction = (
+                f"Partially cover the pot and gently simmer the cooked {protein or 'ingredients'} "
+                f"and {_join(vegetables)} until the vegetables are tender and the beans are hot, "
+                "about 15–20 minutes. Stir occasionally and add a little more broth or water if needed."
+            )
+        elif not raw_protein:
+            simmer_minutes = 18
+            simmer_instruction = (
+                f"Partially cover the pot and gently simmer the cooked {protein or 'ingredients'} "
+                f"and {_join(vegetables)} until the vegetables are tender and the {protein or 'cooked ingredients'} "
+                "are steaming hot. Stir occasionally and add a little more broth or water if needed."
+            )
         else:
             simmer_minutes = 25
             simmer_instruction = (
@@ -368,13 +418,40 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             depends_on=["build soup:meal"],
             equipment="burner",
         ))
+        finish_dependency = "shared simmer:meal"
+        if not raw_protein and "bean" in protein_key:
+            energy_allows_blending = energy not in {"low", "very low", "barely breathing"}
+            equipment = " ".join(candidate.get("available_equipment") or []).lower()
+            can_blend = "immersion blender" in equipment or "blender" in equipment
+            if energy_allows_blending and can_blend:
+                texture_instruction = (
+                    "For a smooth soup, blend until creamy. If using a countertop blender, work in small batches, "
+                    "vent the lid, cover it with a towel, and keep hands clear of hot steam; return the soup to the pot."
+                )
+                texture_minutes = 5
+            else:
+                texture_instruction = (
+                    f"For a naturally thicker rustic soup, mash about one-third of the {protein} against the side "
+                    "of the pot with a fork or sturdy spoon, then stir the mashed beans back into the soup."
+                )
+                texture_minutes = 2
+            activities.append(_planner_activity(
+                "texture soup",
+                texture_instruction,
+                minutes=texture_minutes,
+                human_busy=True,
+                stage="finish",
+                depends_on=[finish_dependency],
+                equipment="burner",
+            ))
+            finish_dependency = "texture soup:meal"
         activities.append(_planner_activity(
             "finish soup",
-            "Taste the soup. Adjust salt, pepper, richness, and acidity, then serve from the pot.",
+            "Taste the soup. Add salt only if needed, adjust the black pepper, then serve from the pot.",
             minutes=2,
             human_busy=True,
             stage="finish",
-            depends_on=["shared simmer:meal"],
+            depends_on=[finish_dependency],
             equipment="burner",
         ))
         stage_order = {"early": 0, "middle": 1, "late": 2, "finish": 3}
