@@ -96,6 +96,20 @@ class APIServiceTests(unittest.TestCase):
         )
         self.assertEqual(snapshot["inventory_lots"][0]["storage_location"], "Freezer")
 
+    def test_snapshot_preserves_exact_package_and_piece_counts_without_a_fuzzy_band(self):
+        snapshot = normalize_kitchen_snapshot({
+            "household_id": "local-demo-household",
+            "inventory": [
+                {"name": "White beans", "form": "Canned", "quantity": 3, "unit": "can"},
+                {"name": "Lasagna noodles", "form": "Dry", "quantity": 8, "unit": "noodle"},
+            ],
+        })
+
+        self.assertEqual(
+            [(item["quantity"], item["unit"], item["quantity_band"]) for item in snapshot["inventory_lots"]],
+            [(3.0, "can", None), (8.0, "noodle", None)],
+        )
+
     def test_recipe_list_exposes_additive_v1_fields(self):
         response = get_recipe_list(kitchen_payload())
         self.assertEqual(response["api_version"], "1.0")

@@ -101,7 +101,17 @@ def normalize_kitchen_snapshot(payload: dict) -> dict:
     inventory = []
     for item in _inventory_from(payload):
         band = _quantity_band(item)
-        if not band:
+        quantity = item.get("quantity")
+        if quantity not in (None, ""):
+            try:
+                quantity = float(quantity)
+            except (TypeError, ValueError) as exc:
+                raise APIContractError("quantity must be a number") from exc
+            if quantity < 0:
+                raise APIContractError("quantity cannot be negative")
+        else:
+            quantity = None
+        if not band and not quantity:
             continue
         inventory.append({
             "inventory_lot_id": item.get("inventory_lot_id"),
@@ -111,7 +121,7 @@ def normalize_kitchen_snapshot(payload: dict) -> dict:
             "storage_location": _clean(
                 item.get("storage_location", item.get("storage"))
             ) or None,
-            "quantity": item.get("quantity"),
+            "quantity": quantity,
             "unit": _clean(item.get("unit")) or None,
             "quantity_band": band,
             "origin": _clean(item.get("origin")) or "manual",
