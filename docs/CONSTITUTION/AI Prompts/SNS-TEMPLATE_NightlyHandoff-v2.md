@@ -1,260 +1,171 @@
-=== SNS DOCUMENTATION EXTRACTION ===
+# SNS Nightly Project Records and Engineering Handoff
 
-Treat this conversation as the official engineering record for today's Stock & Stir (SNS) development session.
+Use this workflow at the end of a Stock & Stir engineering session.
 
-You are the official Technical Writer and Historian for Stock & Stir.
+The objective is to maintain the project’s existing system of record and leave one concise handoff for the next session. Do not generate a bundle of documents for Tracy to sort, rename, merge, or store manually.
 
-Your responsibility is to update the project's permanent documentation.
+## Governing Rule
 
-Do NOT summarize the conversation.
+Document the project where the knowledge belongs, then create the handoff.
 
-Instead, determine what permanent documentation should change because of today's work.
+Do not summarize the entire conversation. Do not manufacture updates. Do not create a new permanent document when an existing canonical record owns the information.
 
-Ignore:
-- temporary debugging
-- Git commands
-- commits
-- pushes
-- implementation details
-- temporary workarounds
-- casual conversation
+## Step 1 — Establish the Verified Closing State
 
-Return the following sections IN THIS ORDER.
+Record only facts that can be verified from the repository, tests, deployment, or session evidence:
 
-==========================================================
-DOCUMENT 1
-COUNCIL MINUTES
-==========================================================
+- date and local time;
+- repository and branch;
+- current commit and commit message;
+- current deployed build ID and deployed commit, when available;
+- working-tree state;
+- tests actually executed and their results;
+- current Render service status, when relevant;
+- known uncommitted files and why they exist.
 
-Write today's Engineering Council Minutes.
+Never claim that tests passed unless they were run. Never claim that a deployment is live unless it was verified.
 
-Capture ONLY durable decisions and discoveries.
+## Step 2 — Update Project Records In Place
 
-Include:
+Review today’s work and update only the records that genuinely changed.
 
-• Mission
-• Product Philosophy
-• Architecture Decisions
-• Business Decisions
-• User Experience Decisions
-• Marketing Ideas
-• Knowledge Base Evolution
-• Future Features (approved concepts only)
-• Roadmap Decisions
-• Lessons Learned
-• Open Questions
-• Naming Decisions
-• Constitution Candidates
-• Chapter Summary
+### Case Study Evidence Log
 
-==========================================================
-DOCUMENT 2
-KNOWLEDGE BACKLOG
-==========================================================
+Canonical record:
 
-List all valuable ideas intentionally deferred.
+`docs/case-study/SNS-Human-AI-Development-CaseStudyLog.md`
 
-Organize by category.
+Add an entry when the day contains material evidence about the human–AI development model, including:
 
-Include enough detail that future engineers understand WHY the idea matters.
+- a consequential human observation or domain contribution;
+- an AI contribution that materially changed implementation or analysis;
+- a failure introduced, detected, or corrected;
+- a measurable improvement;
+- a significant workflow or collaboration decision;
+- a milestone supported by builds, commits, screenshots, tests, or deployment evidence.
 
-Do NOT include ideas already implemented.
+Each entry must distinguish Tracy’s contribution and authority from the AI contribution. Preserve failures and uncertainty, not merely success.
 
-==========================================================
-DOCUMENT 3
-VISION UPDATE
-==========================================================
+### Expense Ledger
 
-DO NOT rewrite VISION.md.
+Canonical record:
 
-Instead list ONLY the additions or edits that should be merged into VISION.md.
+`docs/finances/expenses.md`
 
-Reference the existing sections.
+Update only when a new expense, corrected amount, date, cadence, or financial commitment was identified. Recalculate the known totals. Never guess a missing amount.
 
-Examples:
+### Engineering Council Minutes
 
-Mission
+Update or create dated minutes only when the session produced durable decisions or discoveries that should still matter years from now.
 
-Architecture
+Appropriate subjects include:
 
-Roadmap
+- mission and product philosophy;
+- architecture ownership and system boundaries;
+- business or pricing decisions;
+- durable user-experience rules;
+- terminology;
+- roadmap decisions;
+- Culinary Knowledge Base evolution;
+- constitution candidates;
+- approved future features.
 
-Business
+Do not place routine debugging, Git commands, deployment mechanics, or transient implementation details in Council Minutes.
 
-User Experience
+### Decision Log, Vision, Architecture, Backlog, and Build Notes
 
-Product Philosophy
+Edit the existing canonical file only when its owned information changed:
 
-==========================================================
-DOCUMENT 4
-ARCHITECTURE UPDATE
-==========================================================
+- Decision Log — durable decisions and their reasoning
+- Vision — enduring mission or product direction
+- Architecture — lasting responsibilities, boundaries, terminology, or data flow
+- Knowledge Backlog — valuable ideas intentionally deferred
+- Build Notes — concise implementation milestone record
 
-Describe ONLY architecture changes that should be merged into Architecture.md.
+Do not produce “suggested additions” for Tracy to merge later. Make the correct in-place edit when authorized and possible.
+
+If a record did not change, leave it untouched. “No changes” belongs in the closeout report, not in the permanent file.
+
+## Step 3 — Create One Morning Engineering Handoff
+
+Create one dated handoff in the established handoff documentation area. The handoff should be compact enough to read at the start of the next session without reconstructing the prior day.
 
 Include:
 
-layer responsibilities
+### Session Identity
 
-new terminology
+- handoff date;
+- repository and branch;
+- current local commit;
+- deployed commit and build ID;
+- working-tree state;
+- active Horizon, program, or release heat.
 
-new data flow
+### Current Mission
 
-new engineering rules
+One paragraph explaining what the active work is intended to accomplish and why it is the next highest-value work.
 
-updated diagrams (ASCII if useful)
+### Completed Today
 
-==========================================================
-DOCUMENT 5
-BUILD NOTES
-==========================================================
+- capabilities completed;
+- defects corrected;
+- documentation or operational records updated;
+- tests actually run;
+- commits pushed and deployment status.
 
-Describe implementation changes suitable for BUILD_NOTES.md.
+### Proven but Not Yet Complete
 
-This is the only document that should mention implementation.
+State what works, what has only been locally validated, and what still requires live verification.
 
-Keep concise.
+### Active Risks and Known Defects
 
-==========================================================
-DOCUMENT 6
-HANDOFF
-==========================================================
+Include only current actionable risks. Identify whether each is blocking, non-blocking, or deferred.
 
-Prepare tomorrow's engineer.
+### Exact Restart Point
 
-Include:
+- the first recommended task;
+- exact files most likely to change;
+- required database or external service;
+- context documents the next engineer must read;
+- commands or verification steps that are genuinely required;
+- definition of done for the next heat.
 
-Current Horizon
+### Do Not Repeat
 
-Current status
+List resolved approaches, obsolete assumptions, or failed paths that the next session must not accidentally revisit.
 
-Today's discoveries
+## Step 4 — Close the Repository Deliberately
 
-Files most likely to change next
+Before declaring the session closed:
 
-Warnings
+1. Run the appropriate tests and record the actual result.
+2. Review `git status` and `git diff --check`.
+3. Separate unrelated user files from the intended commit.
+4. Commit and push only when Tracy has authorized that action.
+5. Verify the deployed build when deployment is part of the heat.
+6. Ensure the handoff matches the repository’s real final state.
 
-Next recommended engineering task
+Never use broad staging when unrelated or untracked files are present.
 
-Stopping point
+## Step 5 — Return a Short Closeout Report
 
-==========================================================
+Tell Tracy:
 
-GENERAL RULES
+- which permanent records were updated;
+- the path to the new handoff;
+- test, Git, and deployment status;
+- anything requiring her decision;
+- whether the session is safely closed.
 
-Do not duplicate information between documents.
+Do not return a ZIP unless Tracy needs changed files transferred between workspaces or devices. When a ZIP is needed, include only changed files and preserve repository-relative paths.
 
-Council Minutes record history.
+## Nightly Completion Standard
 
-Knowledge Backlog records deferred ideas.
+The nightly closeout is complete when:
 
-VISION records enduring philosophy.
-
-Architecture records system structure.
-
-BUILD_NOTES records implementation.
-
-Handoff records today's stopping point.
-
-If nothing belongs in a document, explicitly state:
-
-"No changes."
-
-Always optimize for long-term maintainability.
-
-Assume these documents will still be read five years from now.
-
-Please return the results in a zipped file called SNS-NightlyHO-YYYYMMDD-HHMM.zip
-
-and remember, the Chief is the one that leads our people to safety.  You
-are documenting everything we need to keep our knowledge base for 
-our project complete.  Our provenance and our constitution relies on you!
-and I think you're swell!
-
-====================================================================
-CHIEF ENGINEER ADDITIONS (Permanent Workflow)
-====================================================================
-
-Before generating documentation, determine WHICH permanent documents
-actually changed today.
-
-If a document has no durable changes, explicitly write:
-
-No changes.
-
-Do not manufacture updates.
-
---------------------------------------------------
-Required output order
---------------------------------------------------
-
-1. Council Minutes
-2. Knowledge Backlog
-3. VISION additions only
-4. Architecture additions only
-5. BUILD_NOTES additions only
-6. Morning Handoff
-
---------------------------------------------------
-Morning Handoff Requirements
---------------------------------------------------
-
-Include:
-
-- Current Horizon / Program
-- Current Heat / Mission
-- One-paragraph mission statement
-- What was completed
-- Today's durable discoveries
-- Primary risks
-- Engineering guardrails
-- Expected engineering surface:
-    * Planner files
-    * KO files
-    * UI files
-    * Database files
-- EXACT Python files expected next session
-- Whether the SQLite database is required
-- Which documentation files Future Chad should request
-- Recommended first engineering task
-- Definition of Done for tomorrow
-
---------------------------------------------------
-Context Requirements
---------------------------------------------------
-
-Tell Future Chad exactly which context files are required.
-
-Example:
-
-Council Minutes: YES
-Knowledge Backlog: YES
-Architecture: NO
-VISION: NO
-BUILD_NOTES: NO
-
---------------------------------------------------
-Documentation Rule
---------------------------------------------------
-
-Never create a new documentation artifact if the information belongs in:
-
-- Council Minutes
-- Knowledge Backlog
-- VISION
-- Architecture
-- BUILD_NOTES
-- Morning Handoff
-
-These six documents are the permanent documentation architecture.
-
---------------------------------------------------
-Zip Naming Rule
---------------------------------------------------
-
-Return one ZIP using:
-
-SNS-NightlyHO-YYYYMMDD-HHMM.zip
-
-All generated documents belong inside that ZIP.
-
+- durable knowledge is stored in its canonical record;
+- case-study evidence is preserved when warranted;
+- expenses are current when spending occurred;
+- one concise handoff identifies the exact restart point;
+- tests, Git state, and deployment state are reported truthfully;
+- Tracy has no manual documentation-sorting task waiting for her.

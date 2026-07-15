@@ -585,14 +585,26 @@ const SNS = (() => {
     document.querySelector("[data-recipe-summary]").textContent = recipe.summary || "";
     document.querySelector("[data-recipe-time]").textContent = recipe.total_minutes ? `${recipe.total_minutes} minutes` : "Flexible timing";
     document.querySelector("[data-ingredients]").innerHTML = (recipe.ingredients || []).map(x => `<li>${escapeHtml(x)}</li>`).join("");
-    const missingItems = (recipe.inventory_requirements || [])
-      .filter(item => item?.status === "Need" && item.required !== false)
-      .map(item => item.name);
+    const kitchenItems = (recipe.inventory_requirements || [])
+      .filter(item => ["Need", "Substitute", "Omit"].includes(item?.status))
+      .filter(item => item.status !== "Omit" || item.omission_consequence)
+      .map(item => {
+        if (item.status === "Substitute") {
+          return `${item.name} — use ${item.resolved_name}.`;
+        }
+        if (item.status === "Omit") {
+          return `${item.name} — omit it. ${item.omission_consequence || "The meal remains valid without it."}`;
+        }
+        const options = (item.substitutions || []).length
+          ? ` Possible substitutes: ${item.substitutions.join(", ")}.`
+          : "";
+        return `${item.name} — not listed in My Kitchen.${options}`;
+      });
     const kitchenCheck = document.querySelector("[data-kitchen-check]");
-    if (kitchenCheck && missingItems.length) {
+    if (kitchenCheck && kitchenItems.length) {
       kitchenCheck.hidden = false;
-      document.querySelector("[data-missing-items]").innerHTML = missingItems
-        .map(name => `<li>${escapeHtml(name)}</li>`).join("");
+      document.querySelector("[data-missing-items]").innerHTML = kitchenItems
+        .map(item => `<li>${escapeHtml(item)}</li>`).join("");
     }
     const planItems = Array.isArray(recipe.plan_items) && recipe.plan_items.length
       ? recipe.plan_items

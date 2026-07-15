@@ -1,7 +1,7 @@
 """Sauce Knowledge Objects for SNS."""
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Tuple
 
 
 @dataclass(frozen=True)
@@ -9,6 +9,9 @@ class SauceIngredient:
     name: str
     quantity: str
     pantry_optional: bool = False
+    substitutes: Tuple[str, ...] = ()
+    omission_consequence: str = ""
+    can_omit: bool = False
 
 
 @dataclass(frozen=True)
@@ -46,13 +49,40 @@ SIMPLE_STIR_FRY_SAUCE = SauceProfile(
 SIMPLE_COMFORT_PAN_SAUCE = SauceProfile(
     name="simple comfort pan sauce",
     ingredients=[
-        SauceIngredient("Cooking oil or butter", "1 tablespoon"),
-        SauceIngredient("Garlic powder", "1/2 teaspoon"),
-        SauceIngredient("Onion powder", "1/2 teaspoon"),
-        SauceIngredient("Black pepper", "1/4 teaspoon"),
-        SauceIngredient("Chicken broth", "1/2 cup"),
-        SauceIngredient("Milk", "1/2 cup"),
-        SauceIngredient("Cornstarch", "1 tablespoon"),
+        SauceIngredient(
+            "Cooking oil or butter", "1 tablespoon",
+            substitutes=("Cooking oil", "Butter"),
+            omission_consequence="Use rendered ground-beef fat when available; otherwise the pan may brown less evenly.",
+        ),
+        SauceIngredient(
+            "Garlic powder", "1/2 teaspoon", pantry_optional=True,
+            substitutes=("Fresh garlic",),
+            omission_consequence="The finished skillet will have less garlic flavor.",
+        ),
+        SauceIngredient(
+            "Onion powder", "1/2 teaspoon", pantry_optional=True,
+            substitutes=("Onions",),
+            omission_consequence="Fresh onion can provide the onion flavor instead.",
+        ),
+        SauceIngredient(
+            "Black pepper", "1/4 teaspoon", pantry_optional=True,
+            omission_consequence="The sauce will be milder, but it will still work.",
+        ),
+        SauceIngredient(
+            "Chicken broth", "1/2 cup",
+            substitutes=("Chicken stock", "Beef broth", "Beef stock", "Vegetable broth", "Bouillon"),
+        ),
+        SauceIngredient(
+            "Milk", "1/2 cup",
+            substitutes=("Evaporated milk", "Cream", "Unsweetened non-dairy milk", "Chicken broth"),
+            omission_consequence="Use extra broth for a savory, less-creamy pan sauce.",
+            can_omit=True,
+        ),
+        SauceIngredient(
+            "Cornstarch", "1 tablespoon", pantry_optional=True,
+            substitutes=("All-purpose flour", "Arrowroot", "Potato starch"),
+            omission_consequence="The sauce will remain thinner and spoonable instead of lightly thickened.",
+        ),
         SauceIngredient("Cold water", "1 tablespoon", pantry_optional=True),
         SauceIngredient("Salt", "only after tasting, if needed", pantry_optional=True),
     ],

@@ -250,8 +250,7 @@ class IngredientProfile:
                     component=self.name,
                     activity_type="prep",
                     instruction=(
-                        "Transfer the thawed ground beef to a clean plate, keep it separate from ready-to-eat foods, "
-                        "and season it lightly with garlic powder, onion powder, and black pepper."
+                        "Transfer the thawed ground beef to a clean plate and keep it separate from ready-to-eat foods."
                     ),
                     minutes=2,
                     human_busy=True,

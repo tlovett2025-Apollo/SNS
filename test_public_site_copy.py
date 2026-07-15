@@ -36,11 +36,13 @@ def test_my_kitchen_uses_real_quantities_and_units_for_countable_food():
     assert "unit:" in flow
 
 
-def test_recipe_page_exposes_missing_inventory_and_preserves_substep_breaks():
+def test_recipe_page_exposes_inventory_resolutions_and_preserves_substep_breaks():
     flow = PUBLIC_FLOW.read_text(encoding="utf-8")
     recipe_page = (PUBLIC_FLOW.parent / "recipe.html").read_text(encoding="utf-8")
     css = (PUBLIC_FLOW.parent / "sns-flow.css").read_text(encoding="utf-8")
 
     assert "data-kitchen-check" in recipe_page
-    assert "item?.status === \"Need\"" in flow
+    assert '["Need", "Substitute", "Omit"].includes(item?.status)' in flow
+    assert "item.omission_consequence" in flow
+    assert "item.resolved_name" in flow
     assert "white-space: pre-wrap" in css

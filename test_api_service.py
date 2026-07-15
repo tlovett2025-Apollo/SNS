@@ -14,6 +14,7 @@ from api_service import (
     save_my_kitchen,
 )
 from household_inventory import bootstrap_local_household, get_household_inventory
+from recipe_engine import build_recipe_from_candidate, generate_candidates
 
 
 def kitchen_payload():
@@ -228,8 +229,11 @@ class APIServiceTests(unittest.TestCase):
         self.assertIn("Chicken breast — Frozen Raw", recipe["ingredients"])
         self.assertIn("Onions — Fresh Raw", recipe["ingredients"])
         self.assertIn("Carrots — Fresh Raw", recipe["ingredients"])
-        self.assertIn("Garlic powder — 1/2 teaspoon", recipe["ingredients"])
-        self.assertIn("Black pepper — 1/4 teaspoon", recipe["ingredients"])
+        self.assertNotIn("Garlic powder — 1/2 teaspoon", recipe["ingredients"])
+        self.assertNotIn("Black pepper — 1/4 teaspoon", recipe["ingredients"])
+        adjustments = {item["name"]: item for item in recipe["ingredient_adjustments"]}
+        self.assertEqual(adjustments["Garlic powder"]["status"], "Omit")
+        self.assertEqual(adjustments["Black pepper"]["status"], "Omit")
         self.assertEqual(
             len(recipe["ingredients"]),
             len({item.split(" — ", 1)[0].lower() for item in recipe["ingredients"]}),
@@ -290,22 +294,63 @@ class APIServiceTests(unittest.TestCase):
         ))
         thaw_step = next(step for step in recipe["steps"] if "microwave defrost setting" in step)
         prep_step = next(step for step in recipe["steps"] if "finishes defrosting" in step)
-        self.assertTrue(thaw_step.startswith("Minutes 15–22:"))
-        self.assertTrue(prep_step.startswith("Minutes 19–21:"))
+        self.assertTrue(thaw_step.startswith("Minutes 14–21:"))
+        self.assertTrue(prep_step.startswith("Minutes 18–20:"))
         self.assertIn("\n\n", prep_step)
+        self.assertEqual(recipe["missing_items"], [])
+        adjustments = {item["name"]: item for item in recipe["ingredient_adjustments"]}
         self.assertEqual(
-            recipe["missing_items"],
-            ["Cooking oil or butter", "Garlic powder", "Onion powder", "Black pepper", "Cornstarch"],
+            adjustments["Cooking oil or butter"]["resolved_name"],
+            "Rendered fat from the ground beef",
         )
+        self.assertEqual(adjustments["Onion powder"]["resolved_name"], "Onions")
+        self.assertEqual(adjustments["Cornstarch"]["status"], "Omit")
         self.assertNotIn("Chicken broth", recipe["missing_items"])
         self.assertNotIn("Milk", recipe["missing_items"])
         self.assertNotIn("Cold water", recipe["missing_items"])
         self.assertNotIn("Salt", recipe["missing_items"])
-        self.assertIn("Plate White rice", recipe["steps"][-1])
+        self.assertIn("Divide White rice among plates", recipe["steps"][-1])
         self.assertEqual(recipe["plan_items"][-1], {
             "kind": "info", "text": "Nicely done. Dinner is ready.",
         })
-        self.assertLess(plan.index("Taste before adding salt"), plan.index("Plate White rice"))
+        self.assertLess(plan.index("Taste the sauce"), plan.index("Divide White rice among plates"))
+
+    def test_ground_beef_carrot_skillet_is_one_pan_and_uses_honest_timing(self):
+        candidate = generate_candidates(
+            "Ground beef", "Onions & Carrots", "", "Comfort Food",
+            "Low", "Budget", 60, 4, 1,
+            vegetable_names=["Onions", "Carrots"],
+            protein_state="Fresh Raw",
+            available_items=[
+                "Ground beef", "Onions", "Carrots", "Chicken broth", "Milk",
+                "Garlic powder", "Onion powder", "Black pepper",
+            ],
+        )[0]
+        recipe = build_recipe_from_candidate(candidate)
+        plan = "\n".join(recipe["action_steps"])
+
+        self.assertEqual(candidate["minutes"], 22)
+        self.assertIn("1/4-inch dice", plan)
+        self.assertIn("1/2-inch dice", plan)
+        self.assertIn("Cook for about 4 minutes", plan)
+        self.assertIn("bloom in the hot fat for about 30 seconds", plan)
+        self.assertIn("8–10 minutes", plan)
+        self.assertIn("carrots are fork-tender", plan)
+        self.assertIn("onions are soft and beginning to color", plan)
+        self.assertIn("Spoon everything in the skillet", plan)
+        self.assertNotIn("Add Ground beef to the plates", plan)
+        self.assertIn("Good job—the main cooking is done", plan)
+
+    def test_excluded_component_is_rejected_before_ranking(self):
+        candidates = generate_candidates(
+            "Ground beef", "Onions", "", "Comfort Food",
+            "Low", "Budget", 60, 4, 10,
+            vegetable_names=["Onions"],
+            available_items=["Ground beef", "Onions", "Chicken broth", "Milk"],
+            excluded_items=["Ground beef"],
+        )
+
+        self.assertEqual(candidates, [])
 
     def test_candidate_temperature_and_preparation_follow_the_method(self):
         cold = _candidate_view({"strategy": "cold_meal", "candidate_id": "cold-1"})

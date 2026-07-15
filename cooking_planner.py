@@ -82,6 +82,81 @@ def _split_joined_items(value: str) -> list:
         if item.strip()
     ]
 
+
+def _requirement(candidate: dict, name: str) -> dict:
+    wanted = _clean(name).lower()
+    return next((
+        item for item in candidate.get("inventory_requirements") or []
+        if isinstance(item, dict) and _clean(item.get("name")).lower() == wanted
+    ), {})
+
+
+def _resolved_requirement_name(candidate: dict, name: str) -> str:
+    requirement = _requirement(candidate, name)
+    if requirement.get("status") in {"Have", "Need"}:
+        return _clean(requirement.get("name"))
+    if requirement.get("status") == "Substitute":
+        return _clean(requirement.get("resolved_name"))
+    return ""
+
+
+def _comfort_sauce_prep(candidate: dict, fallback: str) -> str:
+    """Prepare only ingredients that survived the kitchen eligibility gate."""
+    if not candidate.get("inventory_requirements"):
+        return fallback
+
+    instructions = []
+    seasonings = []
+    vegetables = {item.lower() for item in _split_joined_items(candidate.get("vegetable"))}
+    for name in ("Garlic powder", "Onion powder", "Black pepper"):
+        resolved = _resolved_requirement_name(candidate, name)
+        if resolved and resolved.lower() not in vegetables:
+            seasonings.append(resolved)
+    if seasonings:
+        instructions.append(f"Measure {_join(seasonings)}.")
+
+    broth = _resolved_requirement_name(candidate, "Chicken broth")
+    milk = _resolved_requirement_name(candidate, "Milk")
+    if broth and milk and broth.lower() != milk.lower():
+        instructions.append(f"Whisk the {broth} and {milk} together.")
+    elif broth and milk:
+        instructions.append(f"Measure 1 cup {broth} for the pan sauce.")
+    elif broth or milk:
+        instructions.append(f"Measure {(broth or milk)} for the pan sauce.")
+
+    thickener = _resolved_requirement_name(candidate, "Cornstarch")
+    if thickener:
+        instructions.append(
+            f"In a small cup, stir the {thickener} with 1 tablespoon cold water until smooth."
+        )
+    return " ".join(instructions)
+
+
+def _comfort_sauce_finish(candidate: dict, fallback: str) -> str:
+    """Finish the sauce without instructing the cook to use rejected items."""
+    if not candidate.get("inventory_requirements"):
+        return fallback
+
+    broth = _resolved_requirement_name(candidate, "Chicken broth")
+    milk = _resolved_requirement_name(candidate, "Milk")
+    liquids = _join([broth, milk])
+    parts = [
+        f"Add {liquids or 'the prepared liquid'} to the skillet and scrape up the browned flavor.",
+        "Bring it to a gentle simmer.",
+    ]
+    thickener = _resolved_requirement_name(candidate, "Cornstarch")
+    if thickener:
+        parts.append(
+            f"Stir the {thickener} mixture again, add it gradually, and stir until the sauce lightly coats everything in the skillet."
+        )
+    else:
+        parts.append("Stir until everything is hot and coated with the loose, spoonable pan sauce.")
+    if _resolved_requirement_name(candidate, "Salt"):
+        parts.append("Taste before adding salt; add only what is needed.")
+    else:
+        parts.append("Taste the sauce; the broth may already provide enough seasoning.")
+    return " ".join(parts)
+
 def _vegetable_guidance_steps(vegetable: str, strategy: str) -> List[CookingStep]:
     vegetables = _split_joined_items(vegetable)
     steps = []
@@ -510,14 +585,23 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         sauce_dependencies = terminal_ids(vegetables)
         if protein_gate and protein_gate not in sauce_dependencies:
             sauce_dependencies.append(protein_gate)
+        finish_instruction = (
+            _comfort_sauce_finish(candidate, sauce_profile.cook_instruction)
+            if sauce_profile and sauce_profile.name == "simple comfort pan sauce"
+            else sauce_profile.cook_instruction if sauce_profile
+            else f"Taste, adjust seasoning, and finish {sauce}; use the browned pan flavor when available."
+        )
         activities.append(_planner_activity(
             "finish sauce",
-            sauce_profile.cook_instruction if sauce_profile else f"Taste, adjust seasoning, and finish {sauce}; use the browned pan flavor when available.",
+            finish_instruction,
             minutes=sauce_profile.finish_minutes if sauce_profile else 3,
             stage="finish",
             depends_on=mushroom_finish or sauce_dependencies,
             equipment="burner",
         ))
+        one_pan_ground_meat = (
+            strategy == "skillet" and "ground" in protein.lower() and bool(vegetables)
+        )
         plated_components = _join([foundation, *vegetables]) or "the cooked components"
         protein_has_slice = any(
             activity.component == protein and activity.activity_type == "slice"
@@ -531,12 +615,19 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             protein_service = f"Add {protein} to the plates and serve immediately."
         else:
             protein_service = "Serve immediately."
+        if one_pan_ground_meat:
+            service_instruction = (
+                f"Divide {foundation} among plates or shallow bowls, then spoon everything in the skillet over it and serve immediately."
+                if foundation else
+                "Spoon everything in the skillet onto plates or into shallow bowls and serve immediately."
+            )
+        else:
+            service_instruction = (
+                f"Plate {plated_components} with the finished sauce. {protein_service}"
+            )
         activities.append(_planner_activity(
             "finish and serve",
-            (
-                f"Plate {plated_components} with the finished sauce. "
-                f"{protein_service}"
-            ),
+            service_instruction,
             minutes=2,
             stage="finish",
             depends_on=(
@@ -615,7 +706,20 @@ def consolidate_kitchen_activities(
                 launch_starts.append(dependent_id)
 
     def consolidated_prep(activity_type, selected, depends_on, extra_instruction="", extra_minutes=0):
-        instructions = [activity.instruction.rstrip(".") for activity in selected]
+        instructions = []
+        ground_meat_skillet = (
+            _clean((candidate or {}).get("strategy")) == "skillet"
+            and "ground" in _clean((candidate or {}).get("protein")).lower()
+        )
+        for activity in selected:
+            component = _clean(getattr(activity, "component", "")).lower()
+            if ground_meat_skillet and component == "carrots":
+                instruction = "Prep Carrots: peel if desired and cut into about 1/4-inch dice"
+            elif ground_meat_skillet and component == "onions":
+                instruction = "Prep Onions: peel and cut into about 1/2-inch dice"
+            else:
+                instruction = activity.instruction.rstrip(".")
+            instructions.append(instruction)
         if extra_instruction:
             instructions.append(extra_instruction.rstrip("."))
         calculated_minutes = sum(max(0, int(activity.minutes or 0)) for activity in selected)
@@ -670,6 +774,8 @@ def consolidate_kitchen_activities(
     sauce_profile = get_sauce_profile(sauce)
     sauce_instruction = (
         "" if strategy == "soup"
+        else _comfort_sauce_prep(candidate or {}, sauce_profile.prep_instruction)
+        if sauce_profile and sauce_profile.name == "simple comfort pan sauce"
         else sauce_profile.prep_instruction if sauce_profile
         else (f"measure and mix {sauce}" if sauce else "")
     )
@@ -786,16 +892,46 @@ def consolidate_skillet_vegetables(
                     dependencies.append(dependency)
 
         vegetable_names = _join([activity.component for activity in vegetable_activities])
+        vegetable_keys = {activity.component.lower() for activity in vegetable_activities}
+        seasoning_names = []
+        for name in ("Garlic powder", "Onion powder", "Black pepper"):
+            resolved = _resolved_requirement_name(candidate, name)
+            if resolved and resolved.lower() not in vegetable_keys:
+                seasoning_names.append(resolved)
+        bloom_instruction = (
+            f"Stir in {_join(seasoning_names)} and let the seasonings bloom in the hot fat for about 30 seconds. "
+            if seasoning_names else ""
+        )
+        has_sturdy_vegetable = any(
+            word in name for name in vegetable_keys
+            for word in ("carrot", "parsnip", "turnip", "potato")
+        )
+        vegetable_minutes = "8–10" if has_sturdy_vegetable else "5–7"
+        texture_targets = []
+        if any("carrot" in name for name in vegetable_keys):
+            texture_targets.append("the carrots are fork-tender")
+        if any("onion" in name for name in vegetable_keys):
+            texture_targets.append("the onions are soft and beginning to color")
+        other_vegetables = [
+            name for name in vegetable_keys
+            if "carrot" not in name and "onion" not in name
+        ]
+        if other_vegetables:
+            texture_targets.append("the remaining vegetables are tender")
+        texture_text = " and ".join(texture_targets) or "the vegetables are tender"
         shared = _planner_activity(
             "cook skillet",
             (
-                f"Heat the skillet, add {protein}, and break it into small crumbles. Cook for about 4 minutes, "
-                f"then add {vegetable_names} to the same skillet. Continue cooking and stirring everything "
-                "together until the vegetables are tender, no pink ground meat remains, and every crumble is "
-                "steaming hot. Keep stirring for about 30 seconds after the last pink disappears, then stop the "
-                "browning. Drain excess fat if needed."
+                f"Heat the skillet, add {protein}, and break it into small crumbles. Cook for about 4 minutes. "
+                + bloom_instruction
+                + f"Add {vegetable_names} to the same skillet and cook for about {vegetable_minutes} minutes, "
+                "stirring often enough to cook evenly but allowing brief contact with the pan for flavor. "
+                f"Continue until {texture_text}, no pink "
+                "ground meat remains, and every crumble is steaming hot. Keep stirring for about 30 seconds after "
+                "the last pink disappears. If there is more than about 1 tablespoon of fat, drain only the excess "
+                "and leave a light coating in the skillet for the sauce."
             ),
-            minutes=max(10, int(protein_cook.minutes or 0)),
+            minutes=max(14 if has_sturdy_vegetable else 11, int(protein_cook.minutes or 0)),
             human_busy=True,
             stage="middle",
             depends_on=dependencies,
@@ -1587,7 +1723,7 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
             if item.start_minute < middle_cooking_end or finish_announced:
                 transition = None
             else:
-                transition = "Good. The main cooking is done, and we are moving into the finish."
+                transition = "Good job—the main cooking is done, and we are moving into the finish."
                 finish_announced = True
 
         if (
@@ -1617,7 +1753,10 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
                 1,
             )
         if transition:
-            message = f"{message} {transition}"
+            if activity.stage == "middle":
+                message = f"{transition} {message}"
+            else:
+                message = f"{message} {transition}"
         if (
             activity.human_busy
             and previous_action_end is not None

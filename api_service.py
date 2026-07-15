@@ -265,6 +265,15 @@ def _engine_request(payload: dict, db_path: str | Path):
                 foundations.append(item)
 
     preferences = snapshot["meal_preferences"]
+    excluded_items = []
+    for field in ("excluded_items", "exclusions", "ingredient_exclusions"):
+        values = preferences.get(field) or []
+        if isinstance(values, str):
+            values = [values]
+        for value in values:
+            name = _clean(value.get("name")) if isinstance(value, dict) else _clean(value)
+            if name and name not in excluded_items:
+                excluded_items.append(name)
     names = [item.name for item in resolved]
     equipment = [
         _clean(item.get("display_name", item.get("name"))) if isinstance(item, dict) else _clean(item)
@@ -286,6 +295,7 @@ def _engine_request(payload: dict, db_path: str | Path):
         "protein_state": _protein_state(protein),
         "available_items": names,
         "available_equipment": [name for name in equipment if name],
+        "excluded_items": excluded_items,
     }
 
 
@@ -422,7 +432,19 @@ def _candidate_ingredients(candidate: dict) -> list[str]:
             break
 
     for requirement in candidate.get("inventory_requirements") or []:
-        name = _clean(requirement.get("name") if isinstance(requirement, dict) else requirement)
+        if isinstance(requirement, dict):
+            status = requirement.get("status")
+            if status == "Omit":
+                continue
+            name = _clean(
+                requirement.get("resolved_name")
+                if status == "Substitute"
+                else requirement.get("name")
+            )
+            if name.lower().startswith("rendered fat from"):
+                continue
+        else:
+            name = _clean(requirement)
         if name and not any(_key(existing) == _key(name) for existing in ingredients):
             ingredients.append(name)
     return ingredients
@@ -490,6 +512,10 @@ def _candidate_view(candidate: dict) -> dict:
         "match": _match_text(int(candidate.get("score", 0))),
         "summary": candidate.get("why") or "A practical meal built from My Kitchen.",
         "missing_items": list(candidate.get("inventory_need") or []),
+        "ingredient_adjustments": [
+            item for item in candidate.get("inventory_requirements") or []
+            if item.get("status") in {"Substitute", "Omit"}
+        ],
         "cost_estimate": None,
         "capability_status": "supported",
     }
@@ -606,5 +632,11 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
         "grocery_list": list(recipe.get("grocery_list") or []),
         "missing_items": missing_items,
         "inventory_requirements": list(recipe.get("inventory_requirements") or []),
+        "ingredient_adjustments": [
+            item for item in recipe.get("inventory_requirements") or []
+            if item.get("status") in {"Substitute", "Omit"}
+        ],
+        "serving_styles": list(recipe.get("serving_styles") or []),
+        "serving_style": candidate.get("serving_style"),
         "build_provenance": provenance,
     }

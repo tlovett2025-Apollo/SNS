@@ -44,6 +44,66 @@ def _contains_any(items, terms):
     return any(any(term in item for term in terms) for item in keys)
 
 
+def _ingredient_check(item, available, excluded, protein=""):
+    """Resolve one requirement before a candidate is allowed into ranking."""
+    available_by_key = {_key(name): name for name in available}
+    excluded_keys = {_key(name) for name in excluded}
+    name_key = _key(item.name)
+
+    if name_key in available_by_key and name_key not in excluded_keys:
+        status = "Have"
+        resolved_name = available_by_key[name_key]
+    else:
+        resolved_name = next((
+            available_by_key[_key(substitute)]
+            for substitute in item.substitutes
+            if _key(substitute) in available_by_key
+            and _key(substitute) not in excluded_keys
+        ), "")
+        if resolved_name:
+            status = "Substitute"
+        elif name_key == _key("Cooking oil or butter") and "ground" in _key(protein):
+            status = "Substitute"
+            resolved_name = "Rendered fat from the ground beef"
+        elif item.pantry_optional or item.can_omit:
+            status = "Omit"
+        elif name_key in excluded_keys:
+            status = "Excluded"
+        else:
+            status = "Need"
+
+    return {
+        "name": item.name,
+        "quantity": item.quantity,
+        "status": status,
+        "required": not (item.pantry_optional or item.can_omit),
+        "resolved_name": resolved_name or None,
+        "substitutions": list(item.substitutes),
+        "omission_consequence": item.omission_consequence or None,
+    }
+
+
+def _component_check(name, available, excluded):
+    name_key = _key(name)
+    available_keys = {_key(item) for item in available}
+    excluded_keys = {_key(item) for item in excluded}
+    if name_key in excluded_keys:
+        status = "Excluded"
+    elif name_key in available_keys:
+        status = "Have"
+    else:
+        status = "Need"
+    return {
+        "name": name,
+        "quantity": "",
+        "status": status,
+        "required": True,
+        "resolved_name": name if status == "Have" else None,
+        "substitutions": [],
+        "omission_consequence": None,
+    }
+
+
 def _score_strategy(strategy, energy, budget, time_limit):
     score = 100
     energy_order = {"Very Low": 0, "Low": 1, "Medium": 2, "High": 3, "": 2}
@@ -189,6 +249,7 @@ def generate_candidates(
     available_items=None,
     requested_items=None,
     available_equipment=None,
+    excluded_items=None,
     cooking_for_kids=False,
     kid_theme="",
 ):
@@ -206,7 +267,7 @@ def generate_candidates(
     selected_components = _unique([protein, *_clean(vegetable).split(" & "), foundation])
     available = _unique(list(available_items or []) + selected_components)
     equipment = _unique(list(available_equipment or []))
-    available_keys = {_key(item) for item in available}
+    excluded = _unique(list(excluded_items or []))
     try:
         time_limit = int(time_minutes)
     except Exception:
@@ -243,13 +304,39 @@ def generate_candidates(
                 else []
             )
         )
-        method_items = (
-            [item.name for item in method_ingredients if not item.pantry_optional]
-            if method_ingredients
-            else _cuisine_requirements(cuisine)
+        fallback_requirements = (
+            _cuisine_requirements(cuisine) if not method_ingredients else []
         )
-        required = _unique(selected_components + method_items + list(requested_items or []))
-        needed = [item for item in required if _key(item) not in available_keys]
+        requested_names = [*fallback_requirements, *(requested_items or [])]
+        known_requirement_keys = {_key(item.name) for item in method_ingredients}
+        requested_requirements = [
+            SauceIngredient(_clean(name), "")
+            for name in requested_names
+            if _clean(name) and _key(name) not in known_requirement_keys
+        ]
+        component_checks = [
+            _component_check(item, available, excluded)
+            for item in selected_components
+        ]
+        requirement_checks = [
+            _ingredient_check(item, available, excluded, protein)
+            for item in [*method_ingredients, *requested_requirements]
+        ]
+        ingredient_checks = component_checks + requirement_checks
+
+        # Culinary validity and household safety are gates, not score penalties.
+        # Excluded ingredients must never reach ranking. Missing ingredients
+        # remain explicit Needs so the UI can offer trained substitutes or a
+        # short shopping resolution instead of silently assuming possession.
+        if any(item["status"] == "Excluded" for item in component_checks):
+            continue
+        if any(item["status"] == "Excluded" for item in requirement_checks):
+            continue
+
+        needed = [
+            item["name"] for item in ingredient_checks
+            if item["status"] == "Need" and item["required"]
+        ]
         score = _score_strategy(method, energy_level, budget_level, time_limit)
         c = dict(method)
         c["serving_styles"] = _serving_styles(method["cooking_method"])
@@ -319,6 +406,7 @@ def generate_candidates(
             "max_time_minutes": time_limit,
             "inventory_have": available,
             "inventory_need": needed,
+            "inventory_requirements": ingredient_checks,
             "available_equipment": equipment,
         })
         if is_soup:
@@ -330,15 +418,6 @@ def generate_candidates(
         c["active_minutes"] = sum(item.attention_minutes for item in schedule)
         c["passive_minutes"] = max(0, c["minutes"] - c["active_minutes"])
         c["effort_score"] = calculate_effort_score(c, schedule)
-        c["inventory_requirements"] = [
-            {
-                "name": item.name,
-                "quantity": item.quantity,
-                "status": "Have" if _key(item.name) in available_keys else "Need",
-                "required": not item.pantry_optional,
-            }
-            for item in method_ingredients
-        ]
         feasibility = assess_time_feasibility(c, time_limit)
         c.update(feasibility)
         if not c["time_feasible"]:
