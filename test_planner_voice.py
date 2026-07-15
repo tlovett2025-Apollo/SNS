@@ -66,6 +66,15 @@ class PlannerVoiceTests(unittest.TestCase):
             "Good. The main cooking is done, and we are moving into the finish.",
         )
 
+    def test_cooking_transition_does_not_claim_prep_is_underway(self):
+        previous = SimpleNamespace(stage="early")
+        next_activity = SimpleNamespace(stage="middle")
+
+        result = transition_message(previous, next_activity)
+
+        self.assertEqual(result, "Prep is complete. Now the cooking begins.")
+        self.assertNotIn("meal is underway", result.lower())
+
     def test_completion_is_useful(self):
         result = completion_message({"sauce": "simple stir-fry sauce"})
         self.assertIn("Give everything a taste", result)

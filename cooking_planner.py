@@ -281,11 +281,15 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         # Soup is shared-vessel orchestration. Ingredient KOs still own prep
         # knowledge, but their separate skillet/pot cooking activities must not
         # survive into a one-pot meal.
+        state_change_activities = [
+            activity for activity in ko_activities
+            if activity.activity_type == "thaw"
+        ]
         prep_activities = [
             activity for activity in ko_activities
             if activity.activity_type == "prep"
         ]
-        activities = [activities[0], *prep_activities]
+        activities = [activities[0], *state_change_activities, *prep_activities]
         prep_ids = [_activity_id(activity) for activity in prep_activities]
         protein_prep = [
             _activity_id(activity) for activity in prep_activities
@@ -430,10 +434,11 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             depends_on=mushroom_finish or chicken_cook,
             equipment="burner",
         ))
+        plated_components = _join([foundation, *vegetables]) or "the cooked components"
         activities.append(_planner_activity(
             "finish and serve",
             (
-                f"Plate {foundation or 'the foundation'} and {_join(vegetables)} with the finished sauce. "
+                f"Plate {plated_components} with the finished sauce. "
                 f"Slice {protein or 'the protein'} after its full rest, add it to the plates, and serve immediately."
             ),
             minutes=2,
@@ -470,6 +475,10 @@ def consolidate_kitchen_activities(
         and activity.activity_type == "prep"
         and activity.human_busy
         and (activity.equipment or "counter").lower() == "counter"
+        # A prep activity that follows an explicit state change (for example,
+        # patting chicken dry after thawing) must remain visible and keep that
+        # dependency instead of being folded into the general prep block.
+        and not activity.depends_on
     ]
     if len(prep_activities) < 2:
         return activities
@@ -555,7 +564,7 @@ def consolidate_kitchen_activities(
             human_busy=True,
             equipment="counter",
             depends_on=list(depends_on),
-            stage="early" if activity_type == "launch prep" else "middle",
+            stage="early",
             parallel_ok=False,
             source="consolidator",
             activity_id="prep:launch" if activity_type == "launch prep" else "prep:meal",
@@ -639,6 +648,99 @@ def consolidate_final_service(activities: List[KitchenActivity]) -> List[Kitchen
     return [activity for activity in activities if activity not in slice_activities]
 
 
+def consolidate_skillet_vegetables(
+    activities: List[KitchenActivity],
+    candidate: dict,
+) -> List[KitchenActivity]:
+    """Interlace compatible vegetables in the skillet instead of serializing them.
+
+    Generic vegetable KOs may each publish a complete burner window. For a
+    skillet meal, compatible vegetables belong in one pan with a short head
+    start for the sturdier ingredient, not in consecutive isolated recipes.
+    """
+    if _clean(candidate.get("strategy")) != "skillet":
+        return activities
+
+    vegetables = _split_joined_items(candidate.get("vegetable"))
+    if len(vegetables) < 2:
+        return activities
+
+    vegetable_activities = [
+        activity for activity in activities
+        if activity.source == "ko"
+        and activity.component in vegetables
+        and activity.activity_type == "cook"
+        and (activity.equipment or "").lower() == "burner"
+    ]
+    if len(vegetable_activities) != len(vegetables):
+        return activities
+
+    sturdy_words = ("carrot", "potato", "parsnip", "turnip", "squash")
+    vegetable_activities.sort(key=lambda activity: (
+        not any(word in activity.component.lower() for word in sturdy_words),
+        vegetables.index(activity.component),
+    ))
+    first, *later = vegetable_activities
+    total_minutes = max(int(activity.minutes or 0) for activity in vegetable_activities)
+    total_minutes = max(2, total_minutes)
+    head_start = min(3, max(1, total_minutes // 3))
+    together_minutes = max(1, total_minutes - head_start)
+
+    dependencies = []
+    old_ids = {_activity_id(activity) for activity in vegetable_activities}
+    for activity in vegetable_activities:
+        for dependency in activity.depends_on:
+            if dependency not in old_ids and dependency not in dependencies:
+                dependencies.append(dependency)
+    protein_gate = next(
+        (_activity_id(activity) for activity in activities
+         if activity.component == _clean(candidate.get("protein"))
+         and activity.activity_type == "verify"),
+        None,
+    ) or next(
+        (_activity_id(activity) for activity in activities
+         if activity.component == _clean(candidate.get("protein"))
+         and activity.activity_type in {"cook", "reheat"}),
+        None,
+    )
+    if protein_gate and protein_gate not in dependencies:
+        dependencies.append(protein_gate)
+
+    shared = _planner_activity(
+        "cook vegetables",
+        (
+            f"After moving the chicken to a plate, add {first.component} to the same skillet and "
+            f"cook for {head_start} minutes. Add {_join([item.component for item in later])}, then "
+            f"cook everything together for about {together_minutes} more minutes, stirring as needed, "
+            "until the vegetables are tender and ready for the sauce."
+        ),
+        minutes=total_minutes,
+        human_busy=True,
+        stage="middle",
+        depends_on=dependencies,
+        equipment="burner",
+    )
+    shared.attention_load = max(
+        float(activity.attention_load or 0) for activity in vegetable_activities
+    )
+
+    rewritten = []
+    for activity in activities:
+        if activity in vegetable_activities:
+            continue
+        new_dependencies = []
+        for dependency in activity.depends_on:
+            dependency = "cook vegetables:meal" if dependency in old_ids else dependency
+            if dependency not in new_dependencies:
+                new_dependencies.append(dependency)
+        activity.depends_on = new_dependencies
+        if _activity_id(activity) == "finish sauce:meal":
+            activity.depends_on = ["cook vegetables:meal"]
+        rewritten.append(activity)
+    rewritten.append(shared)
+    return rewritten
+
+
 
 @dataclass
 class ScheduledActivity:
@@ -671,6 +773,33 @@ def assign_available_equipment(activities: List[KitchenActivity], candidate: dic
     if isinstance(value, str):
         value = [item.strip() for item in value.split(",")]
     available = {_clean(item).lower() for item in value if _clean(item)}
+
+    for activity in activities:
+        if _activity_id(activity) != "thaw:Chicken breast":
+            continue
+        activity.depends_on = ["gather:meal"]
+        if "microwave" in available:
+            activity.equipment = "microwave"
+            activity.minutes = 7
+            activity.human_busy = True
+            activity.attention_load = 0.35
+            activity.instruction = (
+                "Remove all packaging and place the chicken breast on a microwave-safe plate. "
+                "Use the microwave defrost setting for about 7 minutes per pound as a starting point, "
+                "turning and separating pieces halfway through. If the center is still icy, continue in "
+                "1-minute defrost intervals. Cook it immediately after thawing."
+            )
+        else:
+            activity.equipment = "counter"
+            activity.minutes = 30
+            activity.human_busy = True
+            activity.attention_load = 0.1
+            activity.instruction = (
+                "Keep the chicken breast in a leak-proof bag and submerge it in cold tap water. "
+                "Allow about 30 minutes per pound, changing the water every 30 minutes; thicker packages "
+                "may need longer. Cook it immediately after thawing."
+            )
+
     foundation_name = _clean(candidate.get("foundation"))
     rice_device = choose_rice_equipment(available)
     candidate["selected_rice_equipment"] = rice_device
@@ -694,6 +823,17 @@ def build_activity_graph(candidate: dict) -> Dict[str, KitchenActivity]:
     activities = build_cooking_activities(candidate)
     activities = assign_available_equipment(activities, candidate)
     activities = consolidate_kitchen_activities(activities, candidate)
+    if _clean(candidate.get("strategy")) == "skillet":
+        prep_id = "prep:meal"
+        if any(_activity_id(activity) == prep_id for activity in activities):
+            for activity in activities:
+                if (
+                    activity.component == _clean(candidate.get("protein"))
+                    and activity.activity_type in {"cook", "reheat"}
+                    and prep_id not in activity.depends_on
+                ):
+                    activity.depends_on.append(prep_id)
+    activities = consolidate_skillet_vegetables(activities, candidate)
     activities = consolidate_final_service(activities)
     for activity in activities:
         activity.activity_id = _activity_id(activity)
@@ -799,6 +939,7 @@ def build_kitchen_lane_schedule(
             placements,
             key=lambda item: (
                 item[0],
+                item[4].activity_type != "thaw",
                 not item[3],
                 stage_order.get(item[4].stage, 1),
                 _activity_id(item[4]),
@@ -1105,12 +1246,23 @@ def generate_human_instruction_steps(candidate: dict) -> List[str]:
         lines.append(summary)
 
     previous_activity = None
+    middle_cooking_end = max(
+        (item.end_minute for item in schedule if item.activity.stage == "middle"),
+        default=0,
+    )
+    finish_announced = False
     for item in schedule:
         activity = item.activity
         if not activity.instruction or item.end_minute <= item.start_minute:
             continue
 
         transition = transition_message(previous_activity, activity)
+        if activity.stage == "finish":
+            if item.start_minute < middle_cooking_end or finish_announced:
+                transition = None
+            else:
+                transition = "Good. The main cooking is done, and we are moving into the finish."
+                finish_announced = True
 
         if (
             activity.activity_type == "shared simmer"

@@ -123,8 +123,10 @@ def test_frozen_raw_chicken_publishes_verify_and_longer_path():
     activities = build_cooking_activities(state_candidate("Frozen Raw"))
     chicken = [a for a in activities if a.component == "Chicken breast"]
     kinds = [a.activity_type for a in chicken]
-    assert kinds == ["prep", "cook", "wait", "verify", "rest", "slice"]
+    assert kinds == ["thaw", "prep", "cook", "verify", "rest", "slice"]
     assert sum(a.minutes or 0 for a in chicken) > 30
+    assert "thawed chicken" in chicken[1].instruction.lower()
+    assert all("frozen chicken" not in activity.instruction.lower() for activity in chicken[1:])
 
 
 def test_cooked_chicken_reheats_without_raw_cooking_cycle():
@@ -145,6 +147,50 @@ def test_state_changes_lane_schedule_duration():
     frozen_end = max(item.end_minute for item in frozen)
     cooked_end = max(item.end_minute for item in cooked)
     assert frozen_end > fresh_end > cooked_end
+
+
+def test_microwave_thaw_launches_first_and_prep_overlaps_it():
+    from cooking_planner import build_kitchen_lane_schedule
+
+    candidate = generate_candidates(
+        "Chicken breast", "Onions & Carrots", "", "Comfort Food",
+        "Low", "Budget", 60, 4, 1,
+        vegetable_names=["Onions", "Carrots"],
+        protein_state="Frozen Raw",
+        available_equipment=["Microwave"],
+    )[0]
+    schedule = build_kitchen_lane_schedule(candidate)
+    by_id = {item.activity.activity_id: item for item in schedule}
+
+    thaw = by_id["thaw:Chicken breast"]
+    general_prep = by_id["prep:meal"]
+    chicken_prep = by_id["prep:Chicken breast"]
+    assert thaw.lane == "Microwave"
+    assert thaw.end_minute - thaw.start_minute == 7
+    assert general_prep.start_minute < thaw.end_minute
+    assert general_prep.end_minute > thaw.start_minute
+    assert chicken_prep.start_minute >= thaw.end_minute
+
+
+def test_skillet_vegetables_share_one_pan_after_chicken_is_verified():
+    from cooking_planner import build_activity_graph
+
+    candidate = generate_candidates(
+        "Chicken breast", "Onions & Carrots", "", "Comfort Food",
+        "Low", "Budget", 60, 4, 1,
+        vegetable_names=["Onions", "Carrots"],
+        protein_state="Frozen Raw",
+        available_equipment=["Microwave"],
+    )[0]
+    graph = build_activity_graph(candidate)
+
+    assert "cook vegetables:meal" in graph
+    assert "cook:Onions" not in graph
+    assert "cook:Carrots" not in graph
+    shared = graph["cook vegetables:meal"]
+    assert "verify:Chicken breast" in shared.depends_on
+    assert "Carrots" in shared.instruction
+    assert "Onions" in shared.instruction
 
 
 def parallel_regression_candidate():

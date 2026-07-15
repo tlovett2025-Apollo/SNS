@@ -119,7 +119,7 @@ def transition_message(previous_activity, next_activity) -> Optional[str]:
     if next_stage == "late":
         return "Looking good. We are in the final cooking stage now."
     if previous_stage == "early" and next_stage == "middle":
-        return "Nice. The setup is complete, and the meal is underway."
+        return "Prep is complete. Now the cooking begins."
     return None
 
 
