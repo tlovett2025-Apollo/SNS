@@ -20,6 +20,10 @@ class APIHTTPTests(unittest.TestCase):
         self.assertEqual(response.json()["service"], "sns-api")
         self.assertRegex(response.json()["build_id"], r"^SNS-[0-9a-f]{12}$")
 
+    def test_head_probes_are_accepted(self):
+        self.assertEqual(self.client.head("/").status_code, 200)
+        self.assertEqual(self.client.head("/health").status_code, 200)
+
     def test_service_information_points_to_openapi_docs(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)

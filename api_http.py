@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from api_service import APIContractError, get_recipe, get_recipe_list, save_my_kitchen
@@ -56,6 +56,11 @@ app.add_middleware(
 )
 
 
+# Build identity is constant for the lifetime of a deployed process. Compute
+# it once so readiness probes never repeat filesystem and Git inspection.
+_BUILD_PROVENANCE = collect_build_provenance()
+
+
 def _domain_error(exc: Exception) -> HTTPException:
     if isinstance(exc, InventoryAccessError):
         return HTTPException(status_code=403, detail=str(exc))
@@ -71,8 +76,14 @@ def api_information() -> dict:
         "api_version": "1.0",
         "status": "available",
         "docs": "/docs",
-        "build": collect_build_provenance(),
+        "build": _BUILD_PROVENANCE,
     }
+
+
+@app.head("/", status_code=200)
+def api_head() -> Response:
+    """Allow Render's initial port probe to confirm the API is responsive."""
+    return Response(status_code=200)
 
 
 @app.get("/health")
@@ -80,8 +91,14 @@ def health() -> dict:
     return {
         "status": "ok",
         "service": "sns-api",
-        "build_id": collect_build_provenance()["build_id"],
+        "build_id": _BUILD_PROVENANCE["build_id"],
     }
+
+
+@app.head("/health", status_code=200)
+def health_head() -> Response:
+    """Return a body-free success response for infrastructure health probes."""
+    return Response(status_code=200)
 
 
 @app.post("/api/SaveMyKitchen")
