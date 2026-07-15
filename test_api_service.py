@@ -66,6 +66,26 @@ def diverse_kitchen_payload():
     }
 
 
+def frozen_ground_beef_payload():
+    return {
+        "household_id": "local-demo-household",
+        "servings": 4,
+        "energy": "Low",
+        "equipment": [
+            {"name": "Microwave"},
+            {"name": "Pressure cooker"},
+            {"name": "Skillet"},
+        ],
+        "inventory": [
+            {"name": "Ground beef", "form": "Frozen Raw", "amount": "plenty"},
+            {"name": "Onions", "form": "Fresh", "amount": "plenty"},
+            {"name": "White rice", "form": "Dry", "amount": "plenty"},
+            {"name": "Chicken broth", "form": "Shelf-stable", "amount": "little"},
+            {"name": "Milk", "form": "Refrigerated", "amount": "little"},
+        ],
+    }
+
+
 class APIServiceTests(unittest.TestCase):
     def test_snapshot_normalizes_current_browser_payload(self):
         snapshot = normalize_kitchen_snapshot(kitchen_payload())
@@ -154,6 +174,26 @@ class APIServiceTests(unittest.TestCase):
             1,
             sum("main cooking is done" in step.lower() for step in recipe["steps"]),
         )
+
+    def test_numbered_plan_contains_actions_and_handles_frozen_ground_beef(self):
+        kitchen = frozen_ground_beef_payload()
+        candidate = get_recipe_list(kitchen)["candidates"][0]
+
+        recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
+        plan = " ".join(recipe["steps"])
+
+        self.assertIn("Ground beef — Frozen Raw", recipe["ingredients"])
+        self.assertTrue(recipe["steps"][0].startswith("Minutes 0–7:"))
+        self.assertNotIn("Tonight we are making", plan)
+        self.assertNotIn("Plan on about", plan)
+        self.assertNotIn("Gather the ingredients", plan)
+        self.assertIn("microwave defrost setting", plan)
+        self.assertIn("thawed ground beef", plan)
+        self.assertIn("must reach 160°F", plan)
+        self.assertNotIn("Slice Ground beef", plan)
+        self.assertIn("While Ground beef thaws, prepare", plan)
+        self.assertEqual(1, sum("Now the cooking begins" in step for step in recipe["steps"]))
+        self.assertLess(plan.index("microwave defrost setting"), plan.index("Add the ground beef to the hot skillet"))
 
     def test_candidate_temperature_and_preparation_follow_the_method(self):
         cold = _candidate_view({"strategy": "cold_meal", "candidate_id": "cold-1"})

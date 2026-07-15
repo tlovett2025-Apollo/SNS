@@ -226,6 +226,74 @@ class IngredientProfile:
         if not self.name:
             return []
 
+        selected_state_name = _clean(state_name) or self.default_state
+        if self.role == "protein" and _key(self.name) == "ground beef" and selected_state_name != "Cooked":
+            thaw_id = f"thaw:{self.name}"
+            prep_id = f"prep:{self.name}"
+            cook_id = f"cook:{self.name}"
+            activities = []
+            if selected_state_name == "Frozen Raw":
+                activities.append(KitchenActivity(
+                    component=self.name,
+                    activity_type="thaw",
+                    instruction="Thaw the ground beef safely before skillet cooking.",
+                    minutes=30,
+                    human_busy=True,
+                    attention_load=0.1,
+                    stage="early",
+                    parallel_ok=True,
+                    equipment="counter",
+                    activity_id=thaw_id,
+                ))
+            activities.extend([
+                KitchenActivity(
+                    component=self.name,
+                    activity_type="prep",
+                    instruction=(
+                        "Transfer the thawed ground beef to a clean plate, keep it separate from ready-to-eat foods, "
+                        "and season it lightly with garlic powder, onion powder, and black pepper."
+                    ),
+                    minutes=2,
+                    human_busy=True,
+                    stage="early",
+                    parallel_ok=True,
+                    depends_on=[thaw_id] if selected_state_name == "Frozen Raw" else [],
+                    equipment="counter",
+                    activity_id=prep_id,
+                ),
+                KitchenActivity(
+                    component=self.name,
+                    activity_type="cook",
+                    instruction=(
+                        "Add the ground beef to the hot skillet. Break it into small crumbles and cook, stirring and "
+                        "turning the crumbles, until evenly browned. Drain excess fat if needed."
+                    ),
+                    minutes=8,
+                    human_busy=True,
+                    attention_load=0.65,
+                    stage="middle",
+                    parallel_ok=False,
+                    depends_on=[prep_id],
+                    equipment="burner",
+                    activity_id=cook_id,
+                ),
+                KitchenActivity(
+                    component=self.name,
+                    activity_type="verify",
+                    instruction=(
+                        "Check the ground beef with a food thermometer; the center of the largest crumbles must reach 160°F."
+                    ),
+                    minutes=1,
+                    human_busy=True,
+                    stage="middle",
+                    parallel_ok=False,
+                    depends_on=[cook_id],
+                    equipment="counter",
+                    activity_id=f"verify:{self.name}",
+                ),
+            ])
+            return activities
+
         state = self.get_state(state_name)
         prep_minutes = state.prep_minutes if state else self.prep_minutes
         cook_minutes = state.cook_minutes if state else self.cook_minutes

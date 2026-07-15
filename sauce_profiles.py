@@ -62,7 +62,7 @@ SIMPLE_COMFORT_PAN_SAUCE = SauceProfile(
     ),
     cook_instruction=(
         "Add the broth-and-milk mixture to the skillet and scrape up the browned flavor. Bring it to a gentle simmer. "
-        "Stir the cornstarch mixture again, add it gradually, and stir until the sauce lightly coats the vegetables. "
+        "Stir the cornstarch mixture again, add it gradually, and stir until the sauce lightly coats everything in the skillet. "
         "Taste before adding salt; finish with more black pepper only if needed."
     ),
 )

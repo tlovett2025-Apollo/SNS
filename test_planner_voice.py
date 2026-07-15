@@ -55,7 +55,7 @@ class PlannerVoiceTests(unittest.TestCase):
 
         result = activity_message(activity, duration=2, attention_minutes=2)
 
-        self.assertIn("first part cooking while you finish the prep", result)
+        self.assertIn("Now it is ready to start", result)
         self.assertNotIn("long-lead", result.lower())
 
     def test_finish_transition_is_brief(self):
