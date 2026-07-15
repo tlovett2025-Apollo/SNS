@@ -10,10 +10,43 @@ const SNS = (() => {
     billingPortal: endpoint("/api/CreateBillingPortalSession")
   };
 
-  const levelMeaning = {
-    none: { label: "None", quantity_band: 0 },
-    little: { label: "A little", quantity_band: 1 },
-    plenty: { label: "Plenty", quantity_band: 3 }
+  const inventoryUnits = [
+    ["item", "items"], ["can", "cans"], ["jar", "jars"], ["box", "boxes"],
+    ["bag", "bags"], ["package", "packages"], ["noodle", "noodles"],
+    ["egg", "eggs"], ["piece", "pieces"], ["lb", "pounds"], ["oz", "ounces"],
+    ["cup", "cups"], ["carton", "cartons"], ["bottle", "bottles"],
+    ["bunch", "bunches"], ["loaf", "loaves"], ["portion", "portions"],
+    ["meal", "meals"]
+  ];
+  const quantityProfiles = {
+    "canned chicken": { unit: "can", step: 1 },
+    "white beans": { unit: "can", step: 1 },
+    "cream of chicken soup": { unit: "can", step: 1 },
+    "lasagna noodles": { unit: "noodle", step: 1 },
+    "spaghetti": { unit: "box", step: 1 },
+    "white rice": { unit: "cup", step: 0.25 },
+    "chicken broth": { unit: "carton", step: 1 },
+    "eggs": { unit: "egg", step: 1 },
+    "milk": { unit: "cup", step: 0.25 },
+    "cheese": { unit: "cup", step: 0.25 },
+    "chicken breast": { unit: "piece", step: 1 },
+    "ground beef": { unit: "lb", step: 0.25 },
+    "frozen vegetables": { unit: "bag", step: 1 },
+    "bread": { unit: "loaf", step: 1 },
+    "fish": { unit: "piece", step: 1 },
+    "prepared meal": { unit: "meal", step: 1 },
+    "cooked leftovers": { unit: "portion", step: 1 },
+    "onions": { unit: "piece", step: 1 },
+    "potatoes": { unit: "piece", step: 1 },
+    "carrots": { unit: "piece", step: 1 },
+    "tomatoes": { unit: "piece", step: 1 },
+    "mushrooms": { unit: "package", step: 1 },
+    "spinach": { unit: "bunch", step: 1 },
+    "kale": { unit: "bunch", step: 1 },
+    "swiss chard": { unit: "bunch", step: 1 },
+    "romaine lettuce": { unit: "bunch", step: 1 },
+    "breakfast sausage": { unit: "lb", step: 0.25 },
+    "bacon": { unit: "package", step: 1 }
   };
   const kitchenStorageKey = "snsKitchenStateV1";
   const defaultForms = {
@@ -22,6 +55,22 @@ const SNS = (() => {
     Freezer: "Frozen",
     Fresh: "Fresh"
   };
+
+  function quantityProfile(name) {
+    return quantityProfiles[String(name || "").toLowerCase()] || { unit: "item", step: 1 };
+  }
+
+  function legacyQuantity(level) {
+    if (level === "plenty") return 3;
+    if (level === "little") return 1;
+    return 0;
+  }
+
+  function unitOptions(selected) {
+    return inventoryUnits.map(([value, label]) =>
+      `<option value="${value}"${value === selected ? " selected" : ""}>${label}</option>`
+    ).join("");
+  }
 
   function postJson(url, payload) {
     return fetch(url, {
@@ -36,16 +85,15 @@ const SNS = (() => {
 
   function kitchenPayload() {
     const items = [...document.querySelectorAll("[data-food]")].map(row => {
-      const active = row.querySelector(".amount button.active");
-      const level = active?.dataset.level || "none";
+      const quantity = Number(row.querySelector("[data-quantity]")?.value || 0);
       return {
         name: row.dataset.food,
         storage: row.dataset.storage,
         form: row.dataset.form || "On hand",
-        amount: level,
-        quantity_band: levelMeaning[level].quantity_band
+        quantity,
+        unit: row.querySelector("[data-unit]")?.value || quantityProfile(row.dataset.food).unit
       };
-    }).filter(item => item.amount !== "none");
+    }).filter(item => item.quantity > 0);
 
     return {
       api_version: "1.0",
@@ -79,7 +127,8 @@ const SNS = (() => {
         name: row.dataset.food,
         storage: row.dataset.storage,
         form: row.dataset.form || "On hand",
-        level: row.querySelector(".amount button.active")?.dataset.level || "none",
+        quantity: Number(row.querySelector("[data-quantity]")?.value || 0),
+        unit: row.querySelector("[data-unit]")?.value || quantityProfile(row.dataset.food).unit,
         custom: row.dataset.custom === "true"
       })),
       equipment: [...document.querySelectorAll("[data-equipment]")].map(button => ({
@@ -94,22 +143,32 @@ const SNS = (() => {
     localStorage.setItem(kitchenStorageKey, JSON.stringify(browserKitchenState()));
   }
 
-  function amountButtons(activeLevel) {
-    return Object.entries(levelMeaning).map(([level, meaning]) =>
-      `<button class="${level === activeLevel ? "active" : ""}" data-level="${level}" type="button">${meaning.label}</button>`
-    ).join("");
+  function quantityEditor(name, quantity = 1, unit = "") {
+    const profile = quantityProfile(name);
+    const selectedUnit = unit || profile.unit;
+    return `
+      <button class="quantity-none" data-set-none type="button">None</button>
+      <label class="quantity-value">
+        <span class="sr-only">${escapeHtml(name)} quantity</span>
+        <input data-quantity type="number" min="0" step="${profile.step}" inputmode="decimal" value="${Number(quantity) || 0}">
+      </label>
+      <label class="quantity-unit">
+        <span class="sr-only">${escapeHtml(name)} unit</span>
+        <select data-unit>${unitOptions(selectedUnit)}</select>
+      </label>`;
   }
 
-  function createFoodRow({ name, storage, form, level = "little", custom = true }) {
+  function createFoodRow({ name, storage, form, quantity, unit = "", level = "little", custom = true }) {
     const row = document.createElement("div");
     row.className = "food-row";
     row.dataset.food = name;
     row.dataset.storage = storage;
     row.dataset.form = form || defaultForms[storage] || "On hand";
     row.dataset.custom = String(Boolean(custom));
+    const startingQuantity = quantity ?? legacyQuantity(level);
     row.innerHTML = `
       <div><div class="food-name">${escapeHtml(name)}</div><div class="food-note">${escapeHtml(row.dataset.form)}</div></div>
-      <div class="amount" aria-label="${escapeHtml(name)} amount">${amountButtons(level)}</div>`;
+      <div class="amount quantity-editor" aria-label="${escapeHtml(name)} quantity">${quantityEditor(name, startingQuantity, unit)}</div>`;
     return row;
   }
 
@@ -131,6 +190,27 @@ const SNS = (() => {
     );
   }
 
+  function setRowQuantity(row, quantity, unit) {
+    const input = row.querySelector("[data-quantity]");
+    const select = row.querySelector("[data-unit]");
+    if (input) input.value = Number(quantity) || 0;
+    if (select && unit && [...select.options].some(option => option.value === unit)) {
+      select.value = unit;
+    }
+  }
+
+  function upgradeQuantityEditors() {
+    document.querySelectorAll("[data-food]").forEach(row => {
+      const holder = row.querySelector(".amount");
+      if (!holder || holder.querySelector("[data-quantity]")) return;
+      const level = holder.querySelector("button.active")?.dataset.level || "none";
+      const profile = quantityProfile(row.dataset.food);
+      holder.classList.add("quantity-editor");
+      holder.setAttribute("aria-label", `${row.dataset.food} quantity`);
+      holder.innerHTML = quantityEditor(row.dataset.food, legacyQuantity(level), profile.unit);
+    });
+  }
+
   function restoreBrowserKitchen() {
     let state;
     try { state = JSON.parse(localStorage.getItem(kitchenStorageKey) || "null"); }
@@ -145,9 +225,8 @@ const SNS = (() => {
         list?.append(row);
       }
       if (row) {
-        row.querySelectorAll(".amount button").forEach(button =>
-          button.classList.toggle("active", button.dataset.level === food.level)
-        );
+        const quantity = food.quantity ?? legacyQuantity(food.level);
+        setRowQuantity(row, quantity, food.unit || quantityProfile(food.name).unit);
       }
     });
 
@@ -173,37 +252,38 @@ const SNS = (() => {
     actions.innerHTML = '<button class="remove-kitchen-item" data-remove-food type="button">Remove</button>';
     actions.querySelector("button").addEventListener("click", () => {
       if (row.dataset.custom === "true") row.remove();
-      else row.querySelectorAll(".amount button").forEach(button =>
-        button.classList.toggle("active", button.dataset.level === "none")
-      );
+      else setRowQuantity(row, 0);
       updateCount();
       markChanged();
     });
     row.append(actions);
   }
 
-  function bindAmountGroup(group) {
+  function bindQuantityEditor(group) {
     if (group.dataset.bound === "true") return;
     group.dataset.bound = "true";
-    group.querySelectorAll("button").forEach(button => {
-      button.addEventListener("click", () => {
-        group.querySelectorAll("button").forEach(b => b.classList.remove("active"));
-        button.classList.add("active");
-        updateCount();
-        markChanged();
-      });
+    group.querySelector("[data-set-none]")?.addEventListener("click", () => {
+      group.querySelector("[data-quantity]").value = 0;
+      updateCount();
+      markChanged();
     });
+    group.querySelector("[data-quantity]")?.addEventListener("input", () => {
+      updateCount();
+      markChanged();
+    });
+    group.querySelector("[data-unit]")?.addEventListener("change", markChanged);
   }
 
   function bindAmounts() {
-    document.querySelectorAll(".amount").forEach(bindAmountGroup);
+    upgradeQuantityEditors();
+    document.querySelectorAll(".amount").forEach(bindQuantityEditor);
     document.querySelectorAll("[data-food]").forEach(ensureRemoveControl);
   }
 
   function updateCount() {
     const payload = kitchenPayload();
     document.querySelectorAll("[data-food]").forEach(row => {
-      const present = row.querySelector(".amount button.active")?.dataset.level !== "none";
+      const present = Number(row.querySelector("[data-quantity]")?.value || 0) > 0;
       row.classList.toggle("is-present", present);
       row.classList.toggle("is-absent", !present);
     });
@@ -294,8 +374,15 @@ const SNS = (() => {
     const dialogForm = document.querySelector("[data-kitchen-dialog-form]");
     const addName = document.querySelector("[data-dialog-name]");
     const addForm = document.querySelector("[data-dialog-form]");
-    const addAmount = document.querySelector("[data-dialog-amount]");
+    const addQuantity = document.querySelector("[data-dialog-quantity]");
+    const addUnit = document.querySelector("[data-dialog-unit]");
     let addSection = "";
+
+    function updateDialogUnit() {
+      const profile = quantityProfile(addName.value);
+      addUnit.innerHTML = unitOptions(profile.unit);
+      addQuantity.step = profile.step;
+    }
 
     function openAddDialog(sectionName) {
       addSection = sectionName;
@@ -306,10 +393,13 @@ const SNS = (() => {
       document.querySelector("[data-dialog-amount-field]").hidden = equipmentMode;
       addName.value = "";
       addForm.value = defaultForms[sectionName] || "";
-      addAmount.value = "little";
+      addQuantity.value = 1;
+      updateDialogUnit();
       dialog.showModal();
       setTimeout(() => addName.focus(), 0);
     }
+
+    addName?.addEventListener("change", updateDialogUnit);
 
     document.querySelectorAll("[data-section]").forEach(section => {
       const button = document.createElement("button");
@@ -347,14 +437,15 @@ const SNS = (() => {
       } else {
         let row = findFoodRow(name, addSection);
         if (!row) {
-          row = createFoodRow({ name, storage: addSection, form: addForm.value.trim(), level: addAmount.value });
+          row = createFoodRow({
+            name, storage: addSection, form: addForm.value.trim(),
+            quantity: Number(addQuantity.value), unit: addUnit.value
+          });
           document.querySelector(`[data-section="${addSection}"] .item-list`)?.append(row);
-          bindAmountGroup(row.querySelector(".amount"));
+          bindQuantityEditor(row.querySelector(".amount"));
           ensureRemoveControl(row);
         } else {
-          row.querySelectorAll(".amount button").forEach(button =>
-            button.classList.toggle("active", button.dataset.level === addAmount.value)
-          );
+          setRowQuantity(row, Number(addQuantity.value), addUnit.value);
         }
       }
       dialog.close();
@@ -463,7 +554,7 @@ const SNS = (() => {
         id: recipeId,
         title: choice.title || "Stock & Stir Recipe",
         summary: choice.summary || "A practical meal built from My Kitchen.",
-        ingredients: (kitchen.inventory || []).slice(0, 8).map(item => `${item.name} — ${item.amount}`),
+        ingredients: (kitchen.inventory || []).slice(0, 8).map(item => `${item.name} — ${item.quantity} ${item.unit}`),
         steps: [
           "Gather the selected ingredients and the equipment you need.",
           "Prep the protein and vegetables before the main cooking begins.",
@@ -521,6 +612,7 @@ const SNS = (() => {
   }
 
   function init() {
+    upgradeQuantityEditors();
     restoreBrowserKitchen();
     bindAmounts();
     bindKitchenDashboard();
