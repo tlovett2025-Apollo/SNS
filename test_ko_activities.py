@@ -392,6 +392,45 @@ def test_rice_cooker_moves_rice_off_burner_lane():
     assert not any(item.lane.startswith("Burner ") for item in rice)
 
 
+def test_rice_cooker_remains_the_low_energy_choice_even_when_time_is_not_shortest():
+    from cooking_planner import build_kitchen_lane_schedule
+
+    candidate = parallel_regression_candidate()
+    candidate["foundation"] = "Basmati rice"
+    candidate["available_equipment"] = ["Rice cooker"]
+    candidate["user_energy"] = "Very Low"
+
+    build_kitchen_lane_schedule(candidate)
+
+    assert candidate["selected_rice_equipment"] == "rice cooker"
+
+
+def test_slowest_branch_starts_first_and_shorter_branches_converge_at_service():
+    from cooking_planner import build_kitchen_lane_schedule
+
+    candidate = generate_candidates(
+        "Chicken breast", "Mushrooms & Swiss chard & Asparagus", "Basmati rice", "Chinese",
+        "Normal", "Budget", 60, 4, 1,
+        vegetable_names=["Mushrooms", "Swiss chard", "Asparagus"],
+        protein_state="Frozen Raw",
+        available_equipment=["Pressure cooker", "Microwave"],
+    )[0]
+    schedule = build_kitchen_lane_schedule(candidate)
+    by_id = {item.activity.activity_id: item for item in schedule}
+
+    assert by_id["prep:launch"].start_minute == 0
+    assert by_id["thaw:Chicken breast"].start_minute > 0
+    rice_ready = by_id["natural release:Basmati rice"].end_minute
+    service = by_id["finish and serve:meal"]
+    chard = next(
+        item for item in schedule
+        if item.activity.component == "Swiss chard"
+        and item.activity.activity_type in {"cook", "saute"}
+    )
+    assert service.start_minute >= rice_ready
+    assert service.start_minute - chard.end_minute <= 3
+
+
 def test_three_vegetable_meal_uses_five_minute_prep_rule():
     from cooking_planner import build_activity_graph
 
