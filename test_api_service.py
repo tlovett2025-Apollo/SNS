@@ -184,7 +184,8 @@ class APIServiceTests(unittest.TestCase):
         all_statements = " ".join(item["text"] for item in recipe["plan_items"])
 
         self.assertIn("Ground beef — Frozen Raw", recipe["ingredients"])
-        self.assertTrue(recipe["steps"][0].startswith("Minutes 0–7:"))
+        self.assertTrue(recipe["steps"][0].startswith("Minutes 0–2:"))
+        self.assertIn("Measure the rice", recipe["steps"][0])
         self.assertNotIn("Tonight we are making", plan)
         self.assertNotIn("Plan on about", plan)
         self.assertNotIn("Gather the ingredients", plan)
@@ -195,7 +196,8 @@ class APIServiceTests(unittest.TestCase):
         self.assertIn("thawed ground beef", plan)
         self.assertIn("must reach 160°F", plan)
         self.assertNotIn("Slice Ground beef", plan)
-        self.assertIn("While Ground beef thaws, prepare", plan)
+        self.assertIn("Prepare these first", plan)
+        self.assertNotIn("While Ground beef thaws", plan)
         self.assertEqual(1, sum("Now the cooking begins" in step for step in recipe["steps"]))
         self.assertLess(plan.index("microwave defrost setting"), plan.index("Add the ground beef to the hot skillet"))
 
