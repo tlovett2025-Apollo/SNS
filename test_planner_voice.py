@@ -77,8 +77,7 @@ class PlannerVoiceTests(unittest.TestCase):
 
     def test_completion_is_useful(self):
         result = completion_message({"sauce": "simple stir-fry sauce"})
-        self.assertIn("Give everything a taste", result)
-        self.assertIn("simple stir-fry sauce", result)
+        self.assertEqual(result, "Nicely done. Dinner is ready.")
 
     def test_time_summary_distinguishes_attention_and_waiting(self):
         result = time_summary(30, 12, 18)
@@ -90,8 +89,7 @@ class PlannerVoiceTests(unittest.TestCase):
             "strategy": "soup",
             "sauce": "Gravy or Cream Sauce",
         })
-        self.assertIn("Taste the soup", result)
-        self.assertNotIn("Gravy or Cream Sauce", result)
+        self.assertEqual(result, "Nicely done. Dinner is ready.")
 
 
 if __name__ == "__main__":

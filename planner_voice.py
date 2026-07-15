@@ -56,7 +56,6 @@ def _friendly_closing(activity_type: str) -> str:
     closings = {
         "gather": "Now everything is within reach.",
         "launch prep": "Now it is ready to start.",
-        "prep": "Nice. The ingredient prep is handled.",
         "optional sear": "This step is optional.",
         "build soup": "Good. The soup is built.",
         "shared simmer": "Everything can cook together now.",
@@ -124,18 +123,5 @@ def transition_message(previous_activity, next_activity) -> Optional[str]:
 
 
 def completion_message(candidate: dict) -> str:
-    """Close the plan with a useful final check appropriate to the meal shape."""
-    strategy = _clean(candidate.get("strategy")).lower()
-    if strategy == "soup":
-        return (
-            "Nicely done. Taste the soup before serving and adjust the salt, "
-            "pepper, richness, or brightness only if it needs it."
-        )
-
-    sauce = _clean(candidate.get("sauce"))
-    if sauce:
-        return (
-            f"Nicely done. Give everything a taste before serving. "
-            f"Adjust the {sauce} only if it needs a little salt, pepper, or brightness."
-        )
-    return "Nicely done. Give everything a taste before serving and make any final seasoning adjustment."
+    """Confirm completion without asking for work after the meal is plated."""
+    return "Nicely done. Dinner is ready."

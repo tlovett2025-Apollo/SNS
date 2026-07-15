@@ -193,7 +193,7 @@ def test_skillet_vegetables_share_one_pan_after_chicken_is_verified():
     assert "Onions" in shared.instruction
 
 
-def test_frozen_ground_beef_publishes_thaw_cook_and_160_degree_check():
+def test_frozen_ground_beef_uses_one_pan_and_a_feasible_doneness_check():
     from cooking_planner import build_activity_graph
 
     candidate = generate_candidates(
@@ -208,9 +208,31 @@ def test_frozen_ground_beef_publishes_thaw_cook_and_160_degree_check():
     assert graph["thaw:Ground beef"].minutes == 7
     assert graph["thaw:Ground beef"].equipment == "microwave"
     assert graph["prep:Ground beef"].depends_on == ["thaw:Ground beef"]
-    assert graph["cook:Ground beef"].depends_on == ["prep:Ground beef"]
-    assert graph["verify:Ground beef"].depends_on == ["cook:Ground beef"]
-    assert "160°F" in graph["verify:Ground beef"].instruction
+    assert "cook:Ground beef" not in graph
+    assert "verify:Ground beef" not in graph
+    skillet = graph["cook skillet:meal"]
+    assert "prep:Ground beef" in skillet.depends_on
+    assert "same skillet" in skillet.instruction
+    assert "no pink ground meat remains" in skillet.instruction
+    assert "30 seconds after the last pink disappears" in skillet.instruction
+
+
+def test_ground_beef_skilletting_and_sauce_stay_on_one_burner_lane():
+    from cooking_planner import build_kitchen_lane_schedule
+
+    candidate = generate_candidates(
+        "Ground beef", "Onions", "", "Comfort Food",
+        "Low", "Budget", 60, 4, 1,
+        vegetable_names=["Onions"],
+        protein_state="Frozen Raw",
+        available_equipment=["Microwave"],
+    )[0]
+    by_id = {
+        item.activity.activity_id: item
+        for item in build_kitchen_lane_schedule(candidate)
+    }
+
+    assert by_id["cook skillet:meal"].lane == by_id["finish sauce:meal"].lane
 
 
 def parallel_regression_candidate():
