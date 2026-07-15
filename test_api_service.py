@@ -99,7 +99,7 @@ class APIServiceTests(unittest.TestCase):
         })
         self.assertEqual(recipe["candidate_id"], candidates[0]["candidate_id"])
         self.assertTrue(recipe["steps"])
-        self.assertIn("Chicken breast", recipe["ingredients"])
+        self.assertIn("Chicken breast — Frozen Raw", recipe["ingredients"])
         self.assertEqual(recipe["capability_status"], "supported")
 
     def test_recipe_list_builds_distinct_meal_concepts_not_one_bundle_in_forms(self):
@@ -120,12 +120,40 @@ class APIServiceTests(unittest.TestCase):
 
         recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
 
-        self.assertLess(len(recipe["ingredients"]), len(kitchen["inventory"]))
-        self.assertNotIn("Milk", recipe["ingredients"])
+        self.assertFalse(any(item.startswith("White beans") for item in recipe["ingredients"]))
+        self.assertFalse(any(item.startswith("Cheese") for item in recipe["ingredients"]))
+        self.assertFalse(any(item.startswith("Eggs") for item in recipe["ingredients"]))
 
         soup = next(item for item in get_recipe_list(kitchen)["candidates"] if item["meal_shape"] == "soup")
         soup_recipe = get_recipe({"candidate_id": soup["candidate_id"], "kitchen": kitchen})
-        self.assertIn("Chicken broth", soup_recipe["ingredients"])
+        self.assertTrue(any(item.startswith("Chicken broth") for item in soup_recipe["ingredients"]))
+
+    def test_opened_recipe_includes_forms_and_complete_seasoning(self):
+        kitchen = diverse_kitchen_payload()
+        kitchen["equipment"] = [{"name": "Microwave"}]
+        candidate = next(
+            item for item in get_recipe_list(kitchen)["candidates"]
+            if item["candidate_id"].startswith("skillet-chicken-breast")
+        )
+
+        recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
+
+        self.assertIn("Chicken breast — Frozen Raw", recipe["ingredients"])
+        self.assertIn("Onions — Fresh Raw", recipe["ingredients"])
+        self.assertIn("Carrots — Fresh Raw", recipe["ingredients"])
+        self.assertIn("Garlic powder — 1/2 teaspoon", recipe["ingredients"])
+        self.assertIn("Black pepper — 1/4 teaspoon", recipe["ingredients"])
+        self.assertEqual(
+            len(recipe["ingredients"]),
+            len({item.split(" — ", 1)[0].lower() for item in recipe["ingredients"]}),
+        )
+        later_steps = " ".join(recipe["steps"][4:]).lower()
+        self.assertNotIn("frozen chicken", later_steps)
+        self.assertNotIn("the foundation", " ".join(recipe["steps"]).lower())
+        self.assertEqual(
+            1,
+            sum("main cooking is done" in step.lower() for step in recipe["steps"]),
+        )
 
     def test_candidate_temperature_and_preparation_follow_the_method(self):
         cold = _candidate_view({"strategy": "cold_meal", "candidate_id": "cold-1"})
