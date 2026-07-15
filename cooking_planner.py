@@ -16,8 +16,6 @@ from sauce_profiles import get_sauce_profile
 from planner_voice import (
     activity_message,
     completion_message,
-    meal_introduction,
-    time_summary,
     transition_message,
 )
 
@@ -236,8 +234,8 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         _planner_activity(
             "gather",
             f"Gather the ingredients and equipment for {_join(components)}.",
-            minutes=2,
-            human_busy=True,
+            minutes=0,
+            human_busy=False,
             stage="early",
             equipment="counter",
         )
@@ -421,25 +419,44 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         ))
     else:
         mushroom_finish = terminal_ids(["Mushrooms"])
-        chicken_cook = [
+        protein_gate = next((
+            _activity_id(activity)
+            for activity in ko_activities
+            if activity.component == protein and activity.activity_type == "verify"
+        ), None) or next((
             _activity_id(activity)
             for activity in ko_activities
             if activity.component == protein and activity.activity_type in {"cook", "reheat"}
-        ]
+        ), None)
+        sauce_dependencies = terminal_ids(vegetables)
+        if protein_gate and protein_gate not in sauce_dependencies:
+            sauce_dependencies.append(protein_gate)
         activities.append(_planner_activity(
             "finish sauce",
             sauce_profile.cook_instruction if sauce_profile else f"Taste, adjust seasoning, and finish {sauce}; use the browned pan flavor when available.",
             minutes=sauce_profile.finish_minutes if sauce_profile else 3,
             stage="finish",
-            depends_on=mushroom_finish or chicken_cook,
+            depends_on=mushroom_finish or sauce_dependencies,
             equipment="burner",
         ))
         plated_components = _join([foundation, *vegetables]) or "the cooked components"
+        protein_has_slice = any(
+            activity.component == protein and activity.activity_type == "slice"
+            for activity in ko_activities
+        )
+        if protein_has_slice:
+            protein_service = (
+                f"Slice {protein or 'the protein'} after its full rest, add it to the plates, and serve immediately."
+            )
+        elif protein:
+            protein_service = f"Add {protein} to the plates and serve immediately."
+        else:
+            protein_service = "Serve immediately."
         activities.append(_planner_activity(
             "finish and serve",
             (
                 f"Plate {plated_components} with the finished sauce. "
-                f"Slice {protein or 'the protein'} after its full rest, add it to the plates, and serve immediately."
+                f"{protein_service}"
             ),
             minutes=2,
             stage="finish",
@@ -548,11 +565,10 @@ def consolidate_kitchen_activities(
 
             if needs_cutting_allowance:
                 calculated_minutes += 1
-        heading = (
-            "Start these first:"
-            if activity_type == "launch prep"
-            else "Ingredient Prep:"
-        )
+        if activity_type == "launch prep" and candidate and "frozen" in _clean(candidate.get("protein_state")).lower():
+            heading = f"While {_clean(candidate.get('protein')) or 'the protein'} thaws, prepare:"
+        else:
+            heading = "Prepare these first:" if activity_type == "launch prep" else "Ingredient Prep:"
         formatted_instructions = "\n\n".join(
             f"- {instruction}." for instruction in instructions
         )
@@ -775,18 +791,21 @@ def assign_available_equipment(activities: List[KitchenActivity], candidate: dic
     available = {_clean(item).lower() for item in value if _clean(item)}
 
     for activity in activities:
-        if _activity_id(activity) != "thaw:Chicken breast":
+        if activity.activity_type != "thaw":
             continue
         activity.depends_on = ["gather:meal"]
+        component = activity.component
+        ground_meat = "ground" in component.lower()
         if "microwave" in available:
             activity.equipment = "microwave"
             activity.minutes = 7
             activity.human_busy = True
             activity.attention_load = 0.35
             activity.instruction = (
-                "Remove all packaging and place the chicken breast on a microwave-safe plate. "
+                f"Remove all packaging and place the {component.lower()} on a microwave-safe plate. "
                 "Use the microwave defrost setting for about 7 minutes per pound as a starting point, "
-                "turning and separating pieces halfway through. If the center is still icy, continue in "
+                + ("turning it and scraping away softened portions as they thaw. " if ground_meat else "turning and separating pieces halfway through. ")
+                + "If the center is still icy, continue in "
                 "1-minute defrost intervals. Cook it immediately after thawing."
             )
         else:
@@ -795,7 +814,7 @@ def assign_available_equipment(activities: List[KitchenActivity], candidate: dic
             activity.human_busy = True
             activity.attention_load = 0.1
             activity.instruction = (
-                "Keep the chicken breast in a leak-proof bag and submerge it in cold tap water. "
+                f"Keep the {component.lower()} in a leak-proof bag and submerge it in cold tap water. "
                 "Allow about 30 minutes per pound, changing the water every 30 minutes; thicker packages "
                 "may need longer. Cook it immediately after thawing."
             )
@@ -1235,15 +1254,7 @@ def generate_human_instruction_steps(candidate: dict) -> List[str]:
     """Render the scheduled activity graph in the Stock & Stir kitchen voice."""
 
     schedule = build_kitchen_lane_schedule(candidate)
-    lines = [meal_introduction(candidate)]
-
-    summary = time_summary(
-        candidate.get("minutes"),
-        candidate.get("active_minutes"),
-        candidate.get("passive_minutes"),
-    )
-    if summary:
-        lines.append(summary)
+    lines = []
 
     previous_activity = None
     middle_cooking_end = max(
@@ -1251,12 +1262,18 @@ def generate_human_instruction_steps(candidate: dict) -> List[str]:
         default=0,
     )
     finish_announced = False
+    middle_announced = False
     for item in schedule:
         activity = item.activity
         if not activity.instruction or item.end_minute <= item.start_minute:
             continue
 
         transition = transition_message(previous_activity, activity)
+        if activity.stage == "middle":
+            if middle_announced:
+                transition = None
+            elif transition:
+                middle_announced = True
         if activity.stage == "finish":
             if item.start_minute < middle_cooking_end or finish_announced:
                 transition = None
