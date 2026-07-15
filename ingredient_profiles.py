@@ -371,10 +371,10 @@ CHICKEN_BREAST = IngredientProfile(
             timing_note="Fresh raw chicken breast cooks quickly but needs attention.",
         ),
         "Frozen Raw": IngredientState(
-            name="Frozen Raw", prep_minutes=2, cook_minutes=20, active_minutes=8,
-            passive_minutes=15, attention_score=5, holdability="fair",
-            handling_note="cook from frozen only with a covered or moist method, or thaw first when possible.",
-            timing_note="Frozen raw chicken breast needs extra passive time.",
+            name="Frozen Raw", prep_minutes=3, cook_minutes=12, active_minutes=10,
+            passive_minutes=0, attention_score=5, holdability="fair",
+            handling_note="thaw safely, pat dry without rinsing, and season both sides before skillet cooking.",
+            timing_note="Frozen raw chicken breast must be thawed before this skillet method.",
         ),
         "Cooked": IngredientState(
             name="Cooked", prep_minutes=2, cook_minutes=5, active_minutes=5,
@@ -518,30 +518,38 @@ def _chicken_activities(self, strategy="", state_name=""):
     if state_name == "Frozen Raw":
         return [
             KitchenActivity(
+                component=self.name, activity_type="thaw",
+                instruction="Thaw the chicken breast safely before skillet cooking.",
+                minutes=30, human_busy=True, attention_load=0.1,
+                stage="early", parallel_ok=True,
+                equipment="counter", activity_id="thaw:Chicken breast",
+            ),
+            KitchenActivity(
                 component=self.name, activity_type="prep",
-                instruction="Remove packaging and season the frozen chicken breast. Use a covered or moist method unless thawed first.",
-                minutes=2, human_busy=True, stage="early", parallel_ok=True,
+                instruction=(
+                    "Pat the thawed chicken breast dry; do not rinse it. Make the thickness even if needed, "
+                    "then season both sides."
+                ),
+                minutes=3, human_busy=True, stage="early", parallel_ok=True,
+                depends_on=["thaw:Chicken breast"],
                 equipment="counter", activity_id="prep:Chicken breast",
             ),
             KitchenActivity(
                 component=self.name, activity_type="cook",
-                instruction="Begin cooking the frozen chicken breast with a covered or moist method.",
-                minutes=8, human_busy=True, stage="early", parallel_ok=False,
+                instruction=(
+                    "Heat a lightly oiled skillet over medium to medium-high heat. Add the chicken breast, "
+                    "brown the first side, then turn and continue cooking."
+                ),
+                minutes=12, human_busy=True, attention_load=0.25,
+                stage="middle", parallel_ok=False,
                 depends_on=["prep:Chicken breast"], equipment="burner",
                 activity_id="cook:Chicken breast",
             ),
             KitchenActivity(
-                component=self.name, activity_type="wait",
-                instruction="Let the frozen chicken continue cooking through without constant attention.",
-                minutes=15, human_busy=False, stage="middle", parallel_ok=True,
-                depends_on=["cook:Chicken breast"], equipment="burner",
-                activity_id="wait:Chicken breast",
-            ),
-            KitchenActivity(
                 component=self.name, activity_type="verify",
-                instruction="Verify that the thickest part of the chicken breast is safely cooked through.",
+                instruction="Verify that the thickest part of the chicken breast has reached 165°F.",
                 minutes=2, human_busy=True, stage="finish", parallel_ok=False,
-                depends_on=["wait:Chicken breast"], equipment="counter",
+                depends_on=["cook:Chicken breast"], equipment="counter",
                 activity_id="verify:Chicken breast",
             ),
             KitchenActivity(
@@ -643,6 +651,19 @@ def get_ingredient_profile(name, role="ingredient"):
         return IngredientProfile(name=cleaned_name, role=role)
     ckb_profile = _ckb_profile(cleaned_name, role)
     if ckb_profile is not None:
+        # The verified CKB still contains the older cook-from-frozen activity
+        # sequence. Preserve every other verified CKB sequence, but use the
+        # state-aware safety graph for Frozen Raw until that seed is migrated.
+        if k == "chicken breast":
+            publish_from_ckb = ckb_profile.publish_activities
+
+            def publish_chicken(self, strategy="", state_name=""):
+                selected_state = _clean(state_name) or self.default_state
+                if selected_state == "Frozen Raw":
+                    return _chicken_activities(self, strategy, selected_state)
+                return publish_from_ckb(strategy, state_name)
+
+            ckb_profile.publish_activities = publish_chicken.__get__(ckb_profile, IngredientProfile)
         return ckb_profile
     if k == "swiss chard":
         return SWISS_CHARD
