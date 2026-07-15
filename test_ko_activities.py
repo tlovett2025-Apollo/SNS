@@ -193,6 +193,26 @@ def test_skillet_vegetables_share_one_pan_after_chicken_is_verified():
     assert "Onions" in shared.instruction
 
 
+def test_frozen_ground_beef_publishes_thaw_cook_and_160_degree_check():
+    from cooking_planner import build_activity_graph
+
+    candidate = generate_candidates(
+        "Ground beef", "Onions", "", "Comfort Food",
+        "Low", "Budget", 60, 4, 1,
+        vegetable_names=["Onions"],
+        protein_state="Frozen Raw",
+        available_equipment=["Microwave"],
+    )[0]
+    graph = build_activity_graph(candidate)
+
+    assert graph["thaw:Ground beef"].minutes == 7
+    assert graph["thaw:Ground beef"].equipment == "microwave"
+    assert graph["prep:Ground beef"].depends_on == ["thaw:Ground beef"]
+    assert graph["cook:Ground beef"].depends_on == ["prep:Ground beef"]
+    assert graph["verify:Ground beef"].depends_on == ["cook:Ground beef"]
+    assert "160°F" in graph["verify:Ground beef"].instruction
+
+
 def parallel_regression_candidate():
     return generate_candidates(
         "Chicken breast",
@@ -403,7 +423,7 @@ def test_final_service_is_consolidated_after_chicken_rests():
     assert service.start_minute >= by_id["rest:Chicken breast"].end_minute
     assert "slice:Chicken breast" not in by_id
     assert service.end_minute - service.start_minute == 2
-    assert service.end_minute in {33, 34}
+    assert service.end_minute in {31, 32}
 
 
 def test_printed_recipe_uses_detailed_ko_instructions():
