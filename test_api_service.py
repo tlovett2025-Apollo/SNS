@@ -181,12 +181,16 @@ class APIServiceTests(unittest.TestCase):
 
         recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
         plan = " ".join(recipe["steps"])
+        all_statements = " ".join(item["text"] for item in recipe["plan_items"])
 
         self.assertIn("Ground beef — Frozen Raw", recipe["ingredients"])
         self.assertTrue(recipe["steps"][0].startswith("Minutes 0–7:"))
         self.assertNotIn("Tonight we are making", plan)
         self.assertNotIn("Plan on about", plan)
         self.assertNotIn("Gather the ingredients", plan)
+        self.assertIn("Tonight we are making", all_statements)
+        self.assertIn("Plan on about", all_statements)
+        self.assertIn("gather the ingredients", all_statements)
         self.assertIn("microwave defrost setting", plan)
         self.assertIn("thawed ground beef", plan)
         self.assertIn("must reach 160°F", plan)
@@ -194,6 +198,16 @@ class APIServiceTests(unittest.TestCase):
         self.assertIn("While Ground beef thaws, prepare", plan)
         self.assertEqual(1, sum("Now the cooking begins" in step for step in recipe["steps"]))
         self.assertLess(plan.index("microwave defrost setting"), plan.index("Add the ground beef to the hot skillet"))
+
+        kinds = [item["kind"] for item in recipe["plan_items"]]
+        self.assertEqual(kinds[:4], ["info", "info", "info", "action"])
+        self.assertTrue(any(
+            item["kind"] == "info" and "come to pressure" in item["text"]
+            for item in recipe["plan_items"]
+        ))
+        self.assertFalse(any(
+            "come to pressure" in step for step in recipe["steps"]
+        ))
 
     def test_candidate_temperature_and_preparation_follow_the_method(self):
         cold = _candidate_view({"strategy": "cold_meal", "candidate_id": "cold-1"})
