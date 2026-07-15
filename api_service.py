@@ -230,6 +230,15 @@ def _protein_state(item: ResolvedIngredient | None) -> str:
 def _engine_request(payload: dict, db_path: str | Path):
     snapshot = normalize_kitchen_snapshot(payload)
     resolved, pending = resolve_inventory(snapshot, db_path)
+    unique_resolved = []
+    seen_resolved = set()
+    for item in resolved:
+        key = (_key(item.name), _key(item.form_name))
+        if key in seen_resolved:
+            continue
+        seen_resolved.add(key)
+        unique_resolved.append(item)
+    resolved = unique_resolved
     protein = next(
         (item for item in resolved if _key(item.category) in _PROTEIN_CATEGORIES),
         None,
@@ -400,7 +409,51 @@ def _candidate_ingredients(candidate: dict) -> list[str]:
             if available not in ingredients:
                 ingredients.append(available)
             break
+
+    for requirement in candidate.get("inventory_requirements") or []:
+        name = _clean(requirement.get("name") if isinstance(requirement, dict) else requirement)
+        if name and not any(_key(existing) == _key(name) for existing in ingredients):
+            ingredients.append(name)
     return ingredients
+
+
+def _candidate_ingredient_lines(
+    candidate: dict,
+    resolved: list[ResolvedIngredient],
+) -> list[str]:
+    """Render selected components and recipe requirements with useful state."""
+    requirements = {
+        _key(item.get("name")): item
+        for item in candidate.get("inventory_requirements") or []
+        if isinstance(item, dict) and _clean(item.get("name"))
+    }
+    resolved_by_name = {}
+    for item in resolved:
+        resolved_by_name.setdefault(_key(item.name), item)
+
+    protein_key = _key(candidate.get("protein"))
+    lines = []
+    seen = set()
+    for name in _candidate_ingredients(candidate):
+        key = _key(name)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+
+        details = []
+        resolved_item = resolved_by_name.get(key)
+        if key == protein_key and _clean(candidate.get("protein_state")):
+            details.append(_clean(candidate.get("protein_state")))
+        elif resolved_item and _clean(resolved_item.form_name):
+            details.append(_clean(resolved_item.form_name))
+
+        requirement = requirements.get(key)
+        quantity = _clean(requirement.get("quantity")) if requirement else ""
+        if quantity:
+            details.append(quantity)
+
+        lines.append(f"{name} — {' · '.join(details)}" if details else name)
+    return lines
 
 
 def _candidate_view(candidate: dict) -> dict:
@@ -507,7 +560,7 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
         raise APIContractError(f"Unknown or unavailable candidate_id: {candidate_id}")
     recipe = build_recipe_from_candidate(candidate)
     classification = _candidate_view(candidate)
-    ingredients = _candidate_ingredients(candidate)
+    ingredients = _candidate_ingredient_lines(candidate, resolved)
     return {
         "api_version": CONTRACT_VERSION,
         "candidate_id": candidate_id,
