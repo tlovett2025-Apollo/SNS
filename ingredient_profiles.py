@@ -265,8 +265,7 @@ class IngredientProfile:
                     component=self.name,
                     activity_type="cook",
                     instruction=(
-                        "Add the ground beef to the hot skillet. Break it into small crumbles and cook, stirring and "
-                        "turning the crumbles, until evenly browned. Drain excess fat if needed."
+                        "Add the ground beef to the hot skillet and break it into small crumbles as it cooks."
                     ),
                     minutes=8,
                     human_busy=True,
@@ -276,20 +275,6 @@ class IngredientProfile:
                     depends_on=[prep_id],
                     equipment="burner",
                     activity_id=cook_id,
-                ),
-                KitchenActivity(
-                    component=self.name,
-                    activity_type="verify",
-                    instruction=(
-                        "Check the ground beef with a food thermometer; the center of the largest crumbles must reach 160°F."
-                    ),
-                    minutes=1,
-                    human_busy=True,
-                    stage="middle",
-                    parallel_ok=False,
-                    depends_on=[cook_id],
-                    equipment="counter",
-                    activity_id=f"verify:{self.name}",
                 ),
             ])
             return activities
