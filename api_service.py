@@ -44,6 +44,17 @@ _BUILDER_METHODS = (
     {"id": "handheld", "label": "Wrap or Sandwich", "description": "A handheld meal with a bread or wrap foundation."},
 )
 
+_BUILDER_EXTRA_NAMES = (
+    "Mayonnaise", "Salsa", "Ketchup", "Mustard", "BBQ sauce", "Hot sauce",
+    "Soy sauce", "Worcestershire sauce", "Pickles", "Sour cream",
+    "Greek yogurt", "Cream cheese", "Cheddar cheese", "Mozzarella cheese",
+    "Parmesan cheese", "Chicken broth", "Beef broth", "Vegetable broth",
+    "Tomato sauce", "Tomato paste", "Diced tomatoes", "Rotel",
+    "Cream of mushroom soup", "Cream of chicken soup", "Coconut milk",
+    "Peanut butter", "Butter", "Olive oil", "Sesame oil",
+)
+_BUILDER_EXTRA_ALIASES = {"mayo": "Mayonnaise"}
+
 _PROTEIN_CATEGORIES = {
     "beans", "beef", "chicken", "eggs", "plant protein", "pork", "processed meat",
     "protein", "seafood", "turkey",
@@ -209,6 +220,9 @@ def get_meal_builder_options(payload: dict | None = None, db_path: str | Path = 
     kitchen = payload if isinstance(payload, dict) else {}
     resolved, _pending = resolve_inventory(kitchen, db_path)
     owned = {_key(item.name) for item in resolved}
+    for item in _inventory_from(kitchen):
+        raw_key = _key(item.get("name"))
+        owned.add(_key(_BUILDER_EXTRA_ALIASES.get(raw_key, item.get("name"))))
     with closing(sqlite3.connect(db_path)) as con:
         con.row_factory = sqlite3.Row
         proteins = con.execute(
@@ -237,6 +251,7 @@ def get_meal_builder_options(payload: dict | None = None, db_path: str | Path = 
         "proteins": [choice(row["name"]) for row in proteins],
         "produce": [choice(row["name"], kind=row["kind"]) for row in produce],
         "foundations": [choice(row["name"]) for row in foundations],
+        "extras": [choice(name) for name in _BUILDER_EXTRA_NAMES],
         "cuisines": [row["name"] for row in cuisines],
         "methods": list(_BUILDER_METHODS),
         "serving_temperatures": [
@@ -584,6 +599,10 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         produce = [produce]
     produce = [_clean(item) for item in produce if _clean(item)]
     foundation = _clean(selections.get("foundation"))
+    extras = selections.get("extras") or []
+    if isinstance(extras, str):
+        extras = [extras]
+    extras = [_clean(item) for item in extras if _clean(item)]
     method = _clean(selections.get("cooking_method"))
     if not protein:
         raise APIContractError("Build Your Meal requires one protein.")
@@ -618,9 +637,16 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         raise APIContractError(f"Unknown produce selection: {unknown_produce[0]}")
     if foundation and _key(foundation) not in valid_foundations:
         raise APIContractError(f"Unknown foundation: {foundation}")
+    valid_extras = {_key(name) for name in _BUILDER_EXTRA_NAMES}
+    unknown_extras = [name for name in extras if _key(name) not in valid_extras]
+    if unknown_extras:
+        raise APIContractError(f"Unknown pantry or fridge extra: {unknown_extras[0]}")
 
     owned_keys = {_key(item.name) for item in resolved}
-    selected_components = [protein, *produce, foundation]
+    for item in _inventory_from(kitchen):
+        raw_key = _key(item.get("name"))
+        owned_keys.add(_key(_BUILDER_EXTRA_ALIASES.get(raw_key, item.get("name"))))
+    selected_components = [protein, *produce, foundation, *extras]
     planned_purchases = [
         name for name in selected_components if name and _key(name) not in owned_keys
     ]
@@ -637,7 +663,12 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         "max_results": 1,
         "requested_method": method,
         "planned_purchase_items": planned_purchases,
+        "selected_extras": extras,
     })
+    engine_request["available_items"] = list(dict.fromkeys([
+        *engine_request.get("available_items", []),
+        *[name for name in extras if _key(name) in owned_keys],
+    ]))
     candidates = generate_candidates(**engine_request)
     if not candidates:
         raise APIContractError(

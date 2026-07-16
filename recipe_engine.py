@@ -252,6 +252,7 @@ def generate_candidates(
     excluded_items=None,
     planned_purchase_items=None,
     requested_method="",
+    selected_extras=None,
     cooking_for_kids=False,
     kid_theme="",
 ):
@@ -267,13 +268,14 @@ def generate_candidates(
     cuisine = _clean(cuisine_name) or "Comfort Food"
     sauce = _sauce_for_cuisine(cuisine)
     selected_components = _unique([protein, *_clean(vegetable).split(" & "), foundation])
+    extras = _unique(list(selected_extras or []))
     planned_purchase_keys = {_key(item) for item in (planned_purchase_items or [])}
     available = _unique(list(available_items or []) + [
         item for item in selected_components if _key(item) not in planned_purchase_keys
     ])
     # Eligibility is about whether the finished meal has the component, while
     # ingredient status is about whether the household owns it today.
-    method_resources = _unique(available + selected_components)
+    method_resources = _unique(available + selected_components + extras)
     equipment = _unique(list(available_equipment or []))
     excluded = _unique(list(excluded_items or []))
     try:
@@ -305,7 +307,7 @@ def generate_candidates(
         is_soup = method["cooking_method"] == "soup"
         method_sauce = "rustic broth soup" if is_soup else sauce
         method_ingredients = (
-            _soup_ingredients(available)
+            _soup_ingredients(method_resources)
             if is_soup
             else (
                 get_sauce_profile(method_sauce).ingredients
@@ -316,7 +318,7 @@ def generate_candidates(
         fallback_requirements = (
             _cuisine_requirements(cuisine) if not method_ingredients else []
         )
-        requested_names = [*fallback_requirements, *(requested_items or [])]
+        requested_names = [*fallback_requirements, *extras, *(requested_items or [])]
         known_requirement_keys = {_key(item.name) for item in method_ingredients}
         requested_requirements = [
             SauceIngredient(_clean(name), "")
@@ -403,6 +405,7 @@ def generate_candidates(
             "protein_state": protein_state,
             "vegetable": vegetable,
             "foundation": foundation,
+            "selected_extras": extras,
             "cuisine": cuisine,
             "servings": servings,
             "active_minutes": active_minutes,

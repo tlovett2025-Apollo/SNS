@@ -530,6 +530,7 @@ const SNS = (() => {
     proteins: ["Chicken breast", "Ground beef", "Eggs", "Canned chicken", "White beans"].map(name => ({name})),
     produce: ["Onions", "Carrots", "Mushrooms", "Spinach", "Tomatoes", "Broccoli", "Apples"].map(name => ({name, kind: name === "Apples" ? "fruit" : "vegetable"})),
     foundations: ["White rice", "Pasta", "Bread", "Flour tortillas", "Potatoes"].map(name => ({name})),
+    extras: ["Mayonnaise", "Salsa", "Mustard", "BBQ sauce", "Hot sauce", "Soy sauce", "Sour cream", "Cheddar cheese", "Chicken broth", "Tomato sauce"].map(name => ({name})),
     cuisines: ["Comfort Food", "American", "Italian", "Mexican", "Mediterranean"],
     methods: [
       {id:"skillet", label:"Skillet", description:"One-pan stovetop meal."},
@@ -591,9 +592,26 @@ const SNS = (() => {
       </label>`;
     }).join("");
 
+    const extras = options.extras || fallbackBuilderOptions.extras;
+    const extrasHolder = form.querySelector("[data-extra-options]");
+    extrasHolder.innerHTML = extras.map(item => {
+      const isOwned = item.owned ?? owned.has(String(item.name).toLowerCase());
+      return `<label class="produce-choice" data-extra-choice data-search-name="${escapeHtml(item.name.toLowerCase())}">
+        <input type="checkbox" name="extras" value="${escapeHtml(item.name)}">
+        <span>${escapeHtml(item.name)}</span>
+        <small>${isOwned ? "In My Kitchen" : "Need to buy"}</small>
+      </label>`;
+    }).join("");
+
     form.querySelector("[data-produce-search]")?.addEventListener("input", event => {
       const query = event.target.value.trim().toLowerCase();
       form.querySelectorAll("[data-produce-choice]").forEach(choice => {
+        choice.hidden = Boolean(query) && !choice.dataset.searchName.includes(query);
+      });
+    });
+    form.querySelector("[data-extra-search]")?.addEventListener("input", event => {
+      const query = event.target.value.trim().toLowerCase();
+      form.querySelectorAll("[data-extra-choice]").forEach(choice => {
         choice.hidden = Boolean(query) && !choice.dataset.searchName.includes(query);
       });
     });
@@ -615,6 +633,7 @@ const SNS = (() => {
         protein: form.querySelector("[data-builder-protein]").value,
         protein_state: form.querySelector("[data-protein-state]").value,
         produce: [...form.querySelectorAll('input[name="produce"]:checked')].map(item => item.value),
+        extras: [...form.querySelectorAll('input[name="extras"]:checked')].map(item => item.value),
         foundation: form.querySelector("[data-builder-foundation]").value,
         cuisine: form.querySelector("[data-builder-cuisine]").value,
         cooking_method: form.querySelector('input[name="cooking-method"]:checked')?.value,

@@ -111,6 +111,8 @@ class APIServiceTests(unittest.TestCase):
         self.assertTrue(proteins["Chicken breast"])
         self.assertFalse(proteins["Ground beef"])
         self.assertTrue(produce["Mushrooms"])
+        self.assertIn("Mayonnaise", {item["name"] for item in options["extras"]})
+        self.assertIn("Salsa", {item["name"] for item in options["extras"]})
         self.assertIn("fruit", {item["kind"] for item in options["produce"]})
         self.assertFalse(next(item for item in options["serving_temperatures"] if item["id"] == "cold")["available"])
 
@@ -124,6 +126,7 @@ class APIServiceTests(unittest.TestCase):
                 "protein_state": "Frozen Raw",
                 "produce": ["Mushrooms", "Onions"],
                 "foundation": "White rice",
+                "extras": ["Mayonnaise", "Salsa"],
                 "cuisine": "Comfort Food",
                 "cooking_method": "skillet",
                 "serving_temperature": "hot",
@@ -144,7 +147,22 @@ class APIServiceTests(unittest.TestCase):
         self.assertEqual(requirements["Chicken breast"], "Have")
         self.assertEqual(requirements["Mushrooms"], "Have")
         self.assertEqual(requirements["Onions"], "Need")
+        self.assertEqual(requirements["Mayonnaise"], "Need")
+        self.assertEqual(requirements["Salsa"], "Need")
         self.assertIn("Onions", recipe["missing_items"])
+        self.assertTrue(any("Mayonnaise" in step and "Salsa" in step for step in recipe["steps"]))
+
+    def test_builder_recognizes_custom_mayo_and_salsa_as_owned_extras(self):
+        kitchen = kitchen_payload()
+        kitchen["inventory"].extend([
+            {"name": "Mayo", "form": "Refrigerated", "amount": "little"},
+            {"name": "Salsa", "form": "Refrigerated", "amount": "little"},
+        ])
+        options = get_meal_builder_options(kitchen)
+        extras = {item["name"]: item["owned"] for item in options["extras"]}
+
+        self.assertTrue(extras["Mayonnaise"])
+        self.assertTrue(extras["Salsa"])
 
     def test_builder_rejects_a_selected_household_exclusion(self):
         kitchen = kitchen_payload()

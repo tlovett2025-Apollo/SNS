@@ -59,5 +59,7 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     assert "await requestRecipe(candidate.candidate_id" in flow
     assert "One protein for now" in builder_page
     assert "Vegetables &amp; fruit" in builder_page
+    assert "Pantry &amp; fridge extras" in builder_page
+    assert 'input[name="extras"]:checked' in flow
     assert "Cold <small>training next" in builder_page
     assert "plate or in a bowl" in builder_page

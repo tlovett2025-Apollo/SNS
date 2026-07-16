@@ -50,6 +50,42 @@ def _join(items):
         return cleaned[0]
     return " & ".join(cleaned)
 
+
+_TABLE_EXTRAS = {
+    "mayonnaise", "salsa", "ketchup", "mustard", "hot sauce", "pickles",
+    "sour cream", "greek yogurt",
+}
+
+
+def _extras_instruction(candidate: dict, strategy: str) -> str:
+    """Give every user-selected pantry/fridge extra an explicit job."""
+    extras = [
+        _clean(item) for item in candidate.get("selected_extras") or [] if _clean(item)
+    ]
+    if not extras:
+        return ""
+    table = [item for item in extras if item.lower() in _TABLE_EXTRAS]
+    cooking = [item for item in extras if item not in table]
+    parts = []
+    if strategy == "handheld":
+        return f"Spread, spoon, or layer {_join(extras)} into the handheld during assembly."
+    if strategy == "soup":
+        if cooking:
+            parts.append(f"Stir in {_join(cooking)} as part of the soup and heat it through.")
+        if table:
+            parts.append(f"Take the pot off the heat, then serve {_join(table)} on top or alongside.")
+    elif strategy == "casserole":
+        if cooking:
+            parts.append(f"Mix in {_join(cooking)} before baking.")
+        if table:
+            parts.append(f"Serve {_join(table)} on top or alongside after baking.")
+    else:
+        if cooking:
+            parts.append(f"Stir {_join(cooking)} into the skillet as the sauce finishes.")
+        if table:
+            parts.append(f"Serve {_join(table)} on top or alongside the finished meal.")
+    return " ".join(parts)
+
 def _foundation_step(foundation: str, strategy: str) -> Optional[CookingStep]:
     if not foundation:
         return None
@@ -520,9 +556,14 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
                 equipment="burner",
             ))
             finish_dependency = "texture soup:meal"
+        soup_extras = _extras_instruction(candidate, strategy)
         activities.append(_planner_activity(
             "finish soup",
-            "Taste the soup. Add salt only if needed, adjust the black pepper, then serve from the pot.",
+            " ".join(filter(None, (
+                "Taste the soup. Add salt only if needed and adjust the black pepper.",
+                soup_extras,
+                "Serve from the pot.",
+            ))),
             minutes=2,
             human_busy=True,
             stage="finish",
@@ -536,9 +577,10 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         )
 
     if strategy == "casserole":
+        casserole_extras = _extras_instruction(candidate, strategy)
         activities.append(_planner_activity(
             "combine",
-            f"Combine {_join(components)} with {sauce}.",
+            " ".join(filter(None, (f"Combine {_join(components)} with {sauce}.", casserole_extras))),
             minutes=5,
             stage="finish",
             depends_on=component_finishes,
@@ -554,9 +596,13 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             equipment="oven",
         ))
     elif strategy == "handheld":
+        handheld_extras = _extras_instruction(candidate, strategy)
         activities.append(_planner_activity(
             "assemble",
-            f"Add {sauce}, then wrap, stack, or fold the prepared components.",
+            " ".join(filter(None, (
+                f"Add {sauce}, then wrap, stack, or fold the prepared components.",
+                handheld_extras,
+            ))),
             minutes=5,
             stage="finish",
             depends_on=component_finishes,
@@ -591,6 +637,10 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             else sauce_profile.cook_instruction if sauce_profile
             else f"Taste, adjust seasoning, and finish {sauce}; use the browned pan flavor when available."
         )
+        finish_instruction = " ".join(filter(None, (
+            finish_instruction,
+            _extras_instruction(candidate, strategy),
+        )))
         activities.append(_planner_activity(
             "finish sauce",
             finish_instruction,
