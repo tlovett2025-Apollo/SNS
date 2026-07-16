@@ -1,7 +1,7 @@
 import re
 
 from cooking_planner import build_cooking_activities, summarize_cooking_activities
-from recipe_engine import generate_candidates
+from recipe_engine import build_recipe_from_candidate, generate_candidates
 
 
 def sample_candidate():
@@ -136,6 +136,69 @@ def test_cooked_chicken_reheats_without_raw_cooking_cycle():
     assert kinds == ["prep", "reheat"]
     assert "cook" not in kinds
     assert "rest" not in kinds
+
+
+def test_generic_canned_protein_and_beans_publish_reheating_not_cooking():
+    from ingredient_profiles import get_ingredient_profile
+
+    chicken = get_ingredient_profile("Canned chicken", "protein").publish_activities("skillet", "Canned")
+    beans = get_ingredient_profile("Navy beans", "foundation").publish_activities("skillet", "Canned")
+
+    assert [activity.activity_type for activity in chicken] == ["prep", "reheat"]
+    assert [activity.activity_type for activity in beans] == ["prep", "reheat"]
+    assert "drain" in chicken[0].instruction.lower()
+    assert "drain and rinse" in beans[0].instruction.lower()
+    assert "mash" in beans[1].instruction.lower()
+
+
+def test_citrus_finishes_the_meal_instead_of_cooking_as_a_vegetable():
+    from ingredient_profiles import get_ingredient_profile
+
+    activities = get_ingredient_profile("Lemons", "vegetable").publish_activities("skillet", "Fresh")
+
+    assert [activity.activity_type for activity in activities] == ["prep", "finish"]
+    assert activities[-1].equipment == "counter"
+    assert "lemon juice" in activities[-1].instruction.lower()
+
+
+def test_integrated_rustic_sauce_softens_aromatics_before_tomatoes_join():
+    candidate = generate_candidates(
+        "Rotisserie chicken", "", "", "Italian", "Low", "Moderate", 45, 4, 1,
+        vegetable_names=["Onions", "Red bell peppers", "Tomatoes"],
+        protein_state="Cooked",
+        available_items=["Rotisserie chicken", "Onions", "Red bell peppers", "Tomatoes"],
+        requested_method="skillet",
+        meal_structure="integrated",
+    )[0]
+    recipe = build_recipe_from_candidate(candidate)
+    plan = " ".join(recipe["action_steps"])
+
+    self_soften = plan.index("soften them")
+    tomato_join = plan.index("Add Tomatoes")
+    assert "Onions & Red bell peppers" in plan
+    assert self_soften < tomato_join
+    assert "heat it gently until hot; do not recook it" in plan
+
+
+def test_integrated_skillet_protects_one_vessel_from_overlapping_operations():
+    candidate = generate_candidates(
+        "Rotisserie chicken", "", "Navy beans", "Mediterranean", "Low", "Moderate", 45, 4, 1,
+        vegetable_names=["Mushrooms", "Zucchini"], protein_state="Cooked",
+        component_forms={"Navy beans": "Canned", "Rotisserie chicken": "Ready to Eat"},
+        available_items=["Rotisserie chicken", "Navy beans", "Mushrooms", "Zucchini"],
+        requested_method="skillet", meal_structure="integrated",
+    )[0]
+    from cooking_planner import build_kitchen_lane_schedule
+    schedule = build_kitchen_lane_schedule(candidate)
+    skillet_work = sorted(
+        [item for item in schedule if item.activity.equipment == "burner" and item.activity.component != "Navy beans"],
+        key=lambda item: item.start_minute,
+    )
+
+    assert all(
+        current.end_minute <= following.start_minute
+        for current, following in zip(skillet_work, skillet_work[1:])
+    )
 
 
 def test_state_changes_lane_schedule_duration():

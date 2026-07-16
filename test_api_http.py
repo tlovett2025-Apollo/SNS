@@ -43,6 +43,10 @@ class APIHTTPTests(unittest.TestCase):
         self.assertTrue(body["proteins"])
         self.assertTrue(next(item for item in body["proteins"] if item["name"] == "Chicken breast")["owned"])
         self.assertFalse(next(item for item in body["serving_temperatures"] if item["id"] == "cold")["available"])
+        self.assertEqual(
+            {item["id"] for item in body["meal_structures"]},
+            {"integrated", "composed_plate", "layered_bowl"},
+        )
 
     def test_recipe_round_trip_over_http(self):
         kitchen = kitchen_payload()

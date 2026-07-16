@@ -253,6 +253,8 @@ def generate_candidates(
     planned_purchase_items=None,
     requested_method="",
     selected_extras=None,
+    component_forms=None,
+    meal_structure="integrated",
     cooking_for_kids=False,
     kid_theme="",
 ):
@@ -269,6 +271,7 @@ def generate_candidates(
     sauce = _sauce_for_cuisine(cuisine)
     selected_components = _unique([protein, *_clean(vegetable).split(" & "), foundation])
     extras = _unique(list(selected_extras or []))
+    component_forms = dict(component_forms or {})
     planned_purchase_keys = {_key(item) for item in (planned_purchase_items or [])}
     available = _unique(list(available_items or []) + [
         item for item in selected_components if _key(item) not in planned_purchase_keys
@@ -406,6 +409,8 @@ def generate_candidates(
             "vegetable": vegetable,
             "foundation": foundation,
             "selected_extras": extras,
+            "component_forms": component_forms,
+            "meal_structure": _clean(meal_structure) or "integrated",
             "cuisine": cuisine,
             "servings": servings,
             "active_minutes": active_minutes,

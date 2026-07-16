@@ -227,6 +227,52 @@ class IngredientProfile:
             return []
 
         selected_state_name = _clean(state_name) or self.default_state
+        state_key = _key(selected_state_name)
+        if self.role == "protein" and state_key in {"cooked", "canned", "ready to eat"}:
+            canned = state_key == "canned" or _key(self.name).startswith("canned ")
+            prep_instruction = (
+                f"Drain {self.name} and break it into serving-size pieces."
+                if canned else
+                f"Remove any bones or skin as desired, then slice or shred {self.name}."
+            )
+            return [
+                KitchenActivity(
+                    component=self.name, activity_type="prep",
+                    instruction=prep_instruction, minutes=2, human_busy=True,
+                    stage="middle", parallel_ok=True, equipment="counter",
+                    activity_id=f"prep:{self.name}",
+                ),
+                KitchenActivity(
+                    component=self.name, activity_type="reheat",
+                    instruction=f"Fold in {self.name} near the end and heat it gently until hot.",
+                    minutes=4, human_busy=True, attention_load=0.5,
+                    stage="late", parallel_ok=False, depends_on=[f"prep:{self.name}"],
+                    equipment="burner", activity_id=f"reheat:{self.name}",
+                ),
+            ]
+        if state_key == "canned" and self.role in {"foundation", "vegetable"}:
+            bean = "bean" in _key(self.name)
+            return [
+                KitchenActivity(
+                    component=self.name, activity_type="prep",
+                    instruction=(
+                        f"Drain and rinse {self.name}. Leave them whole, or mash some for a creamier texture."
+                        if bean else f"Drain {self.name} well."
+                    ),
+                    minutes=2, human_busy=True, stage="middle", parallel_ok=True,
+                    equipment="counter", activity_id=f"prep:{self.name}",
+                ),
+                KitchenActivity(
+                    component=self.name, activity_type="reheat",
+                    instruction=(
+                        f"Stir in {self.name}, mash or purée further if desired, and heat until steaming."
+                        if bean else f"Add {self.name} and heat through gently."
+                    ),
+                    minutes=4, human_busy=True, attention_load=0.5,
+                    stage="late", parallel_ok=False, depends_on=[f"prep:{self.name}"],
+                    equipment="burner", activity_id=f"reheat:{self.name}",
+                ),
+            ]
         if self.role == "protein" and _key(self.name) == "ground beef" and selected_state_name != "Cooked":
             thaw_id = f"thaw:{self.name}"
             prep_id = f"prep:{self.name}"
@@ -687,6 +733,25 @@ def _olive_activities(self, strategy="", state_name=""):
         ),
     ]
 
+
+def _citrus_activities(self, strategy="", state_name=""):
+    citrus = _key(self.name).rstrip("s")
+    return [
+        KitchenActivity(
+            component=self.name, activity_type="prep",
+            instruction=f"Zest {self.name} if desired, then cut and juice it; remove any seeds.",
+            minutes=2, human_busy=True, stage="middle", parallel_ok=True,
+            equipment="counter", activity_id=f"prep:{self.name}",
+        ),
+        KitchenActivity(
+            component=self.name, activity_type="finish",
+            instruction=f"Add the {citrus} juice and zest at the finish, tasting as you go.",
+            minutes=1, human_busy=True, stage="finish", parallel_ok=False,
+            depends_on=[f"prep:{self.name}"], equipment="counter",
+            activity_id=f"finish:{self.name}",
+        ),
+    ]
+
 # Prototype per-KO overrides. These will eventually be supplied by CKB activity data.
 CHICKEN_BREAST.publish_activities = _chicken_activities.__get__(CHICKEN_BREAST, IngredientProfile)
 SWISS_CHARD.publish_activities = _chard_activities.__get__(SWISS_CHARD, IngredientProfile)
@@ -733,4 +798,8 @@ def get_ingredient_profile(name, role="ingredient"):
         return MUSHROOMS
     if k == "asparagus":
         return ASPARAGUS
+    if k in {"lemon", "lemons", "lime", "limes"}:
+        profile = IngredientProfile(name=cleaned_name, role=role, prep_minutes=2, cook_minutes=0)
+        profile.publish_activities = _citrus_activities.__get__(profile, IngredientProfile)
+        return profile
     return IngredientProfile(name=cleaned_name, role=role)

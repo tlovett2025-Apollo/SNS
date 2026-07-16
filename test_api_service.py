@@ -139,7 +139,7 @@ class APIServiceTests(unittest.TestCase):
 
         choices = get_recipe_list(request)["candidates"]
         self.assertEqual(len(choices), 1)
-        self.assertTrue(choices[0]["candidate_id"].startswith("build-skillet-"))
+        self.assertTrue(choices[0]["candidate_id"].startswith("build-integrated-skillet-"))
         recipe = get_recipe({"candidate_id": choices[0]["candidate_id"], "kitchen": request})
         requirements = {
             item["name"]: item["status"] for item in recipe["inventory_requirements"]
@@ -163,6 +163,61 @@ class APIServiceTests(unittest.TestCase):
 
         self.assertTrue(extras["Mayonnaise"])
         self.assertTrue(extras["Salsa"])
+
+    def test_builder_inherits_canned_and_ready_to_eat_forms_from_my_kitchen(self):
+        kitchen = {
+            "household_id": "forms-household",
+            "inventory": [
+                {"name": "Rotisserie chicken", "form": "Ready to Eat", "amount": "little"},
+                {"name": "Navy beans", "form": "Canned", "amount": "little"},
+                {"name": "Mushrooms", "form": "Fresh", "amount": "little"},
+            ],
+            "meal_preferences": {},
+        }
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": kitchen,
+            "selections": {
+                "protein": "Rotisserie chicken",
+                # The stale browser value must lose to the owned inventory lot.
+                "protein_state": "Fresh Raw",
+                "produce": ["Mushrooms"],
+                "foundation": "Navy beans",
+                "cooking_method": "skillet",
+                "meal_structure": "integrated",
+                "serving_temperature": "hot",
+            },
+        }
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+        plan = " ".join(recipe["steps"])
+
+        self.assertIn("Rotisserie chicken — Cooked", recipe["ingredients"])
+        self.assertIn("Navy beans — Canned", recipe["ingredients"])
+        self.assertIn("Drain and rinse Navy beans", plan)
+        self.assertIn("slice or shred Rotisserie chicken", plan)
+        self.assertIn("do not recook it", plan)
+        self.assertNotIn("Rotisserie chicken to the skillet and cook until ready", plan)
+        self.assertNotIn("Prep is complete", plan)
+        self.assertNotIn("Now the cooking begins", plan)
+        self.assertNotIn("main cooking is done", plan)
+
+    def test_builder_classifies_composed_plate_and_layered_bowl_separately(self):
+        kitchen = kitchen_payload()
+        base = {
+            "protein": "Chicken breast", "protein_state": "Frozen Raw",
+            "produce": ["Mushrooms"], "foundation": "White rice",
+            "cooking_method": "skillet", "serving_temperature": "hot",
+        }
+        for structure, expected_shape in (("composed_plate", "plate"), ("layered_bowl", "bowl")):
+            request = {
+                "mode": "build_your_meal", "kitchen": kitchen,
+                "selections": {**base, "meal_structure": structure},
+            }
+            choice = get_recipe_list(request)["candidates"][0]
+            self.assertEqual(choice["meal_structure"], structure)
+            self.assertEqual(choice["meal_shape"], expected_shape)
+            self.assertIn(structure, choice["candidate_id"])
 
     def test_builder_rejects_a_selected_household_exclusion(self):
         kitchen = kitchen_payload()
@@ -320,10 +375,7 @@ class APIServiceTests(unittest.TestCase):
         later_steps = " ".join(recipe["steps"][4:]).lower()
         self.assertNotIn("frozen chicken", later_steps)
         self.assertNotIn("the foundation", " ".join(recipe["steps"]).lower())
-        self.assertEqual(
-            1,
-            sum("main cooking is done" in step.lower() for step in recipe["steps"]),
-        )
+        self.assertFalse(any("main cooking is done" in step.lower() for step in recipe["steps"]))
 
     def test_numbered_plan_contains_actions_and_handles_frozen_ground_beef(self):
         kitchen = frozen_ground_beef_payload()
@@ -352,8 +404,8 @@ class APIServiceTests(unittest.TestCase):
         self.assertIn("Prepare these first", plan)
         self.assertNotIn("While Ground beef thaws", plan)
         self.assertNotIn("ingredient prep is handled", plan.lower())
-        self.assertEqual(1, sum("Prep is complete" in step for step in recipe["steps"]))
-        self.assertEqual(1, sum("Now the cooking begins" in step for step in recipe["steps"]))
+        self.assertFalse(any("Prep is complete" in step for step in recipe["steps"]))
+        self.assertFalse(any("Now the cooking begins" in step for step in recipe["steps"]))
         self.assertLess(plan.index("microwave defrost setting"), plan.index("Heat the skillet"))
 
         kinds = [item["kind"] for item in recipe["plan_items"]]
@@ -418,7 +470,7 @@ class APIServiceTests(unittest.TestCase):
         self.assertIn("onions are soft and beginning to color", plan)
         self.assertIn("Spoon everything in the skillet", plan)
         self.assertNotIn("Add Ground beef to the plates", plan)
-        self.assertIn("Good job—the main cooking is done", plan)
+        self.assertNotIn("Good job—the main cooking is done", plan)
 
     def test_excluded_component_is_rejected_before_ranking(self):
         candidates = generate_candidates(

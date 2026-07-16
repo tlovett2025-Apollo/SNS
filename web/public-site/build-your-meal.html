@@ -31,7 +31,7 @@
         <div class="builder-section-heading"><span>1</span><div><h2>Choose the food</h2><p>One protein for now; as many vegetables or fruits as you want.</p></div></div>
         <div class="builder-two-column">
           <label class="builder-field"><span>Protein <em>Choose one</em></span><select required data-builder-protein></select></label>
-          <label class="builder-field"><span>Protein state</span><select data-protein-state><option>Fresh Raw</option><option>Frozen Raw</option><option>Cooked</option></select></label>
+          <label class="builder-field"><span>Protein form</span><select data-protein-state><option>Fresh Raw</option><option>Frozen Raw</option><option>Cooked</option><option>Canned</option></select><small class="field-note" data-protein-form-note>Choose the form you have or plan to buy.</small></label>
           <label class="builder-field"><span>Foundation <em>Optional</em></span><select data-builder-foundation></select></label>
           <label class="builder-field"><span>Cuisine direction</span><select data-builder-cuisine></select></label>
         </div>
@@ -53,6 +53,10 @@
 
       <section class="builder-section">
         <div class="builder-section-heading"><span>3</span><div><h2>Shape tonight’s plan</h2><p>These choices control the plan’s timing and fit.</p></div></div>
+        <h3 class="builder-subheading">Meal structure</h3>
+        <div class="builder-choice-grid three-up" data-structure-options></div>
+        <p class="structure-guidance" data-structure-guidance aria-live="polite"></p>
+        <h3 class="builder-subheading">Serving temperature and limits</h3>
         <div class="temperature-row" role="group" aria-label="Serving temperature">
           <label class="segment-choice"><input type="radio" name="temperature" value="hot" checked><span>Hot</span></label>
           <label class="segment-choice unavailable"><input type="radio" name="temperature" value="cold" disabled><span>Cold <small>training next</small></span></label>

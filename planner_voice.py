@@ -64,7 +64,6 @@ def _friendly_closing(activity_type: str) -> str:
         "plate": "You are ready to plate.",
         "finish sauce": "The sauce is ready.",
         "finish soup": "The soup is nearly ready.",
-        "finish and serve": "You are at the finish.",
         "bake": "The oven can take over for a while.",
         "rest": "Let it rest.",
         "natural release": "Let the pressure release naturally.",
@@ -107,21 +106,7 @@ def activity_message(activity, duration: int, attention_minutes: int = 0) -> str
 
 
 def transition_message(previous_activity, next_activity) -> Optional[str]:
-    """Return a brief transition only when it adds useful orientation."""
-    if previous_activity is None or next_activity is None:
-        return None
-
-    previous_stage = _clean(getattr(previous_activity, "stage", ""))
-    next_stage = _clean(getattr(next_activity, "stage", ""))
-    if previous_stage == next_stage:
-        return None
-
-    if next_stage == "finish":
-        return "Good job—the main cooking is done, and we are moving into the finish."
-    if next_stage == "late":
-        return "Looking good. We are in the final cooking stage now."
-    if previous_stage == "early" and next_stage == "middle":
-        return "Prep is complete. Now the cooking begins."
+    """Stage labels stay internal; the actual action text carries the flow."""
     return None
 
 

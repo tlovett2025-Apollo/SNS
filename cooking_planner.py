@@ -55,17 +55,26 @@ _TABLE_EXTRAS = {
     "mayonnaise", "salsa", "ketchup", "mustard", "hot sauce", "pickles",
     "sour cream", "greek yogurt",
 }
+_COOKING_FATS = {"olive oil", "vegetable oil", "canola oil", "sesame oil", "butter", "margarine"}
 
 
 def _extras_instruction(candidate: dict, strategy: str) -> str:
     """Give every user-selected pantry/fridge extra an explicit job."""
+    sauce_profile = get_sauce_profile(_clean(candidate.get("sauce")))
+    sauce_keys = {
+        _clean(item.name).lower() for item in (sauce_profile.ingredients if sauce_profile else [])
+    }
     extras = [
         _clean(item) for item in candidate.get("selected_extras") or [] if _clean(item)
+        and _clean(item).lower() not in sauce_keys
     ]
     if not extras:
         return ""
     table = [item for item in extras if item.lower() in _TABLE_EXTRAS]
-    cooking = [item for item in extras if item not in table]
+    cooking = [
+        item for item in extras
+        if item not in table and not (strategy == "skillet" and item.lower() in _COOKING_FATS)
+    ]
     parts = []
     if strategy == "handheld":
         return f"Spread, spoon, or layer {_join(extras)} into the handheld during assembly."
@@ -339,6 +348,10 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
     foundation = _clean(candidate.get("foundation"))
     strategy = _clean(candidate.get("strategy")) or "plate"
     protein_state = _clean(candidate.get("protein_state")) or "Fresh Raw"
+    component_forms = {
+        _clean(name).lower(): _clean(form)
+        for name, form in (candidate.get("component_forms") or {}).items()
+    }
     sauce = _clean(candidate.get("sauce")) or "simple sauce"
     sauce_profile = get_sauce_profile(sauce)
     components = [item for item in [protein, *vegetables, foundation] if item]
@@ -356,7 +369,9 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
 
     if foundation:
         activities.extend(
-            get_ingredient_profile(foundation, "foundation").publish_activities(strategy)
+            get_ingredient_profile(foundation, "foundation").publish_activities(
+                strategy, component_forms.get(foundation.lower(), "")
+            )
         )
     if protein:
         activities.extend(
@@ -364,7 +379,9 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         )
     for vegetable in vegetables:
         activities.extend(
-            get_ingredient_profile(vegetable, "vegetable").publish_activities(strategy)
+            get_ingredient_profile(vegetable, "vegetable").publish_activities(
+                strategy, component_forms.get(vegetable.lower(), "")
+            )
         )
 
     component_finishes = [
@@ -652,6 +669,7 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         one_pan_ground_meat = (
             strategy == "skillet" and "ground" in protein.lower() and bool(vegetables)
         )
+        meal_structure = _clean(candidate.get("meal_structure")) or "integrated"
         plated_components = _join([foundation, *vegetables]) or "the cooked components"
         protein_has_slice = any(
             activity.component == protein and activity.activity_type == "slice"
@@ -665,10 +683,19 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             protein_service = f"Add {protein} to the plates and serve immediately."
         else:
             protein_service = "Serve immediately."
-        if one_pan_ground_meat:
+        if meal_structure == "layered_bowl":
+            service_instruction = (
+                f"Divide {foundation} among bowls, then spoon the finished vegetables, sauce, and {protein} over it. Serve immediately."
+                if foundation else
+                f"Spoon the finished vegetables, sauce, and {protein} into bowls and serve immediately."
+            )
+        elif meal_structure == "integrated" and strategy == "skillet":
             service_instruction = (
                 f"Divide {foundation} among plates or shallow bowls, then spoon everything in the skillet over it and serve immediately."
-                if foundation else
+                if foundation and not any(
+                    _clean(candidate.get("component_forms", {}).get(foundation)).lower() == value
+                    for value in ("canned", "cooked", "ready to eat")
+                ) else
                 "Spoon everything in the skillet onto plates or into shallow bowls and serve immediately."
             )
         else:
@@ -906,7 +933,10 @@ def consolidate_skillet_vegetables(
     skillet meal, compatible vegetables belong in one pan with a short head
     start for the sturdier ingredient, not in consecutive isolated recipes.
     """
-    if _clean(candidate.get("strategy")) != "skillet":
+    if (
+        _clean(candidate.get("strategy")) != "skillet"
+        or _clean(candidate.get("meal_structure")) == "composed_plate"
+    ):
         return activities
 
     vegetables = _split_joined_items(candidate.get("vegetable"))
@@ -919,10 +949,10 @@ def consolidate_skillet_vegetables(
         activity for activity in activities
         if activity.source == "ko"
         and activity.component in vegetables
-        and activity.activity_type == "cook"
+        and activity.activity_type in {"cook", "saute"}
         and (activity.equipment or "").lower() == "burner"
     ]
-    if len(vegetable_activities) != len(vegetables):
+    if not vegetable_activities or (len(vegetable_activities) < 2 and not ground_meat):
         return activities
 
     if ground_meat:
@@ -1007,15 +1037,36 @@ def consolidate_skillet_vegetables(
         return rewritten
 
     sturdy_words = ("carrot", "potato", "parsnip", "turnip", "squash")
+    def environment_priority(activity):
+        name = activity.component.lower()
+        if "mushroom" in name:
+            return 0
+        if any(word in name for word in ("onion", "pepper")):
+            return 1
+        if any(word in name for word in sturdy_words):
+            return 2
+        if "tomato" in name:
+            return 4
+        return 3
     vegetable_activities.sort(key=lambda activity: (
-        not any(word in activity.component.lower() for word in sturdy_words),
-        vegetables.index(activity.component),
+        environment_priority(activity), vegetables.index(activity.component),
     ))
     first, *later = vegetable_activities
-    total_minutes = max(int(activity.minutes or 0) for activity in vegetable_activities)
-    total_minutes = max(2, total_minutes)
-    head_start = min(3, max(1, total_minutes // 3))
-    together_minutes = max(1, total_minutes - head_start)
+    names = {activity.component.lower() for activity in vegetable_activities}
+    mushroom_first = "mushroom" in first.component.lower()
+    rustic_sauce = (
+        any("tomato" in name for name in names)
+        and any(any(word in name for word in ("onion", "pepper")) for name in names)
+    )
+    if mushroom_first:
+        head_start, together_minutes = 6, 6
+    elif rustic_sauce:
+        head_start, together_minutes = 4, 8
+    else:
+        base_minutes = max(2, max(int(activity.minutes or 0) for activity in vegetable_activities))
+        head_start = min(3, max(1, base_minutes // 3))
+        together_minutes = max(2, base_minutes - head_start)
+    total_minutes = head_start + together_minutes
 
     dependencies = []
     old_ids = {_activity_id(activity) for activity in vegetable_activities}
@@ -1023,6 +1074,7 @@ def consolidate_skillet_vegetables(
         for dependency in activity.depends_on:
             if dependency not in old_ids and dependency not in dependencies:
                 dependencies.append(dependency)
+    cooked_protein = _clean(candidate.get("protein_state")) in {"Cooked", "Canned"}
     protein_gate = next(
         (_activity_id(activity) for activity in activities
          if activity.component == _clean(candidate.get("protein"))
@@ -1034,14 +1086,36 @@ def consolidate_skillet_vegetables(
          and activity.activity_type in {"cook", "reheat"}),
         None,
     )
-    if protein_gate and protein_gate not in dependencies:
+    if protein_gate and not cooked_protein and protein_gate not in dependencies:
         dependencies.append(protein_gate)
 
+    selected_fat = next((
+        item for item in candidate.get("selected_extras") or []
+        if _clean(item).lower() in _COOKING_FATS
+    ), "")
+    heat_fat = f"Heat {_clean(selected_fat)} in the skillet. " if selected_fat else ""
+    vessel_opening = "Add" if cooked_protein else "After moving the protein to a plate, add"
+    if mushroom_first:
+        opening = (
+            heat_fat + f"{vessel_opening} {first.component} to the skillet in a single, uncrowded layer. "
+            f"Let the moisture evaporate and the bottoms brown before turning, about {head_start} minutes. "
+        )
+    elif rustic_sauce:
+        aromatics = [
+            activity.component for activity in vegetable_activities
+            if any(word in activity.component.lower() for word in ("onion", "pepper"))
+        ]
+        opening = (
+            heat_fat + f"{vessel_opening} {_join(aromatics)} to the skillet and soften them for about {head_start} minutes. "
+        )
+        later = [activity for activity in vegetable_activities if activity.component not in aromatics]
+    else:
+        opening = heat_fat + f"{vessel_opening} {first.component} to the skillet and cook for {head_start} minutes. "
     shared = _planner_activity(
         "cook vegetables",
         (
-            f"After moving the chicken to a plate, add {first.component} to the same skillet and "
-            f"cook for {head_start} minutes. Add {_join([item.component for item in later])}, then "
+            opening
+            + f"Add {_join([item.component for item in later])}, then "
             f"cook everything together for about {together_minutes} more minutes, stirring as needed, "
             "until the vegetables are tender and ready for the sauce."
         ),
@@ -1070,6 +1144,118 @@ def consolidate_skillet_vegetables(
         rewritten.append(activity)
     rewritten.append(shared)
     return rewritten
+
+
+def consolidate_integrated_skillet_reheating(
+    activities: List[KitchenActivity],
+    candidate: dict,
+) -> List[KitchenActivity]:
+    """Bring ready-to-eat components into one skillet after browning/softening."""
+    if (
+        _clean(candidate.get("strategy")) != "skillet"
+        or _clean(candidate.get("meal_structure")) == "composed_plate"
+    ):
+        return activities
+    selected = {
+        _clean(candidate.get("protein")),
+        _clean(candidate.get("foundation")),
+        *_split_joined_items(candidate.get("vegetable")),
+    }
+    reheats = [
+        activity for activity in activities
+        if activity.component in selected
+        and activity.activity_type == "reheat"
+        and (activity.equipment or "").lower() == "burner"
+    ]
+    if not reheats:
+        return activities
+
+    old_ids = {_activity_id(activity) for activity in reheats}
+    dependencies = []
+    for activity in reheats:
+        for dependency in activity.depends_on:
+            if dependency not in old_ids and dependency not in dependencies:
+                dependencies.append(dependency)
+    vegetable_gate = next((
+        _activity_id(activity) for activity in activities
+        if activity.activity_type in {"cook vegetables", "cook skillet"}
+    ), None) or next((
+        _activity_id(activity) for activity in activities
+        if activity.component in _split_joined_items(candidate.get("vegetable"))
+        and (activity.equipment or "").lower() == "burner"
+        and activity.activity_type not in {"prep", "reheat"}
+    ), None)
+    if vegetable_gate and vegetable_gate not in dependencies:
+        dependencies.append(vegetable_gate)
+
+    foundation = _clean(candidate.get("foundation"))
+    protein = _clean(candidate.get("protein"))
+    instructions = []
+    if any(activity.component == foundation for activity in reheats):
+        if "bean" in foundation.lower():
+            instructions.append(
+                f"Stir in {foundation}; mash or purée some if desired, and heat it through."
+            )
+        else:
+            instructions.append(f"Add {foundation} and heat it through.")
+    if any(activity.component == protein for activity in reheats):
+        instructions.append(
+            f"Fold in {protein} near the end and heat it gently until hot; do not recook it."
+        )
+    for activity in reheats:
+        if activity.component not in {foundation, protein}:
+            instructions.append(activity.instruction)
+
+    shared = _planner_activity(
+        "gentle reheat",
+        " ".join(instructions),
+        minutes=max(4, max(int(activity.minutes or 0) for activity in reheats) + (2 if len(reheats) > 1 else 0)),
+        human_busy=True, stage="late", depends_on=dependencies, equipment="burner",
+    )
+    shared.attention_load = max(float(activity.attention_load or 0) for activity in reheats)
+
+    rewritten = []
+    for activity in activities:
+        if activity in reheats:
+            continue
+        activity.depends_on = list(dict.fromkeys(
+            "gentle reheat:meal" if dependency in old_ids else dependency
+            for dependency in activity.depends_on
+        ))
+        rewritten.append(activity)
+    rewritten.append(shared)
+    return rewritten
+
+
+def constrain_single_skillet_environment(
+    activities: List[KitchenActivity], candidate: dict,
+) -> List[KitchenActivity]:
+    """Serialize incompatible operations that require the meal's one skillet.
+
+    Compatible ingredients have already been consolidated into shared
+    activities. This pass protects those cooking environments from unrelated
+    burner work while still allowing a separate foundation pot or appliance.
+    """
+    if _clean(candidate.get("strategy")) != "skillet":
+        return activities
+    foundation = _clean(candidate.get("foundation"))
+    skillet_work = [
+        activity for activity in activities
+        if (activity.equipment or "").lower() == "burner"
+        and activity.component != foundation
+    ]
+    stage_order = {"early": 0, "middle": 1, "late": 2, "finish": 3}
+    position = {id(activity): index for index, activity in enumerate(activities)}
+    skillet_work.sort(key=lambda activity: (
+        stage_order.get(activity.stage, 1), position[id(activity)]
+    ))
+    previous_id = None
+    for activity in skillet_work:
+        activity_id = _activity_id(activity)
+        if previous_id and previous_id not in activity.depends_on:
+            activity.depends_on.append(previous_id)
+        previous_id = activity_id
+    return activities
 
 
 
@@ -1168,6 +1354,8 @@ def build_activity_graph(candidate: dict) -> Dict[str, KitchenActivity]:
                 ):
                     activity.depends_on.append(prep_id)
     activities = consolidate_skillet_vegetables(activities, candidate)
+    activities = consolidate_integrated_skillet_reheating(activities, candidate)
+    activities = constrain_single_skillet_environment(activities, candidate)
     activities = consolidate_final_service(activities)
     for activity in activities:
         activity.activity_id = _activity_id(activity)
@@ -1755,8 +1943,6 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
         (item.end_minute for item in schedule if item.activity.stage == "middle"),
         default=0,
     )
-    finish_announced = False
-    middle_announced = False
     previous_action_end = None
     for item in schedule:
         activity = item.activity
@@ -1764,17 +1950,6 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
             continue
 
         transition = transition_message(previous_activity, activity)
-        if activity.stage == "middle":
-            if middle_announced:
-                transition = None
-            elif transition:
-                middle_announced = True
-        if activity.stage == "finish":
-            if item.start_minute < middle_cooking_end or finish_announced:
-                transition = None
-            else:
-                transition = "Good job—the main cooking is done, and we are moving into the finish."
-                finish_announced = True
 
         if (
             activity.activity_type == "shared simmer"

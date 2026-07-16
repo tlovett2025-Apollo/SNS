@@ -537,6 +537,11 @@ const SNS = (() => {
       {id:"soup", label:"Soup", description:"A broth-based meal in one pot."},
       {id:"casserole", label:"Casserole", description:"An oven-baked family-style meal."},
       {id:"handheld", label:"Wrap or Sandwich", description:"A handheld meal with bread or a wrap."}
+    ],
+    meal_structures: [
+      {id:"integrated", label:"Cooked Together", description:"A cohesive skillet, pot, soup, or casserole."},
+      {id:"composed_plate", label:"Composed Plate", description:"Restaurant-style separate components."},
+      {id:"layered_bowl", label:"Layered Bowl", description:"Components arranged over a foundation."}
     ]
   };
 
@@ -563,8 +568,24 @@ const SNS = (() => {
 
     const protein = form.querySelector("[data-builder-protein]");
     protein.innerHTML = `<option value="">Choose one protein</option>` + (options.proteins || []).map(item =>
-      `<option value="${escapeHtml(item.name)}">${escapeHtml(choiceLabel(item, owned))}</option>`
+      `<option value="${escapeHtml(item.name)}" data-form="${escapeHtml(item.form || "")}">${escapeHtml(choiceLabel(item, owned))}</option>`
     ).join("");
+
+    const proteinForm = form.querySelector("[data-protein-state]");
+    const syncProteinForm = () => {
+      const selected = protein.selectedOptions[0];
+      const name = String(selected?.value || "").toLowerCase();
+      const savedForm = String(selected?.dataset.form || "").toLowerCase();
+      let locked = "";
+      if (name.startsWith("canned ") || savedForm.includes("canned")) locked = "Canned";
+      else if (name.includes("rotisserie") || ["cooked", "prepared", "ready to eat", "leftover"].some(term => savedForm.includes(term))) locked = "Cooked";
+      if (locked) proteinForm.value = locked;
+      proteinForm.disabled = Boolean(locked);
+      form.querySelector("[data-protein-form-note]").textContent = locked
+        ? `${locked} comes from My Kitchen and will be used automatically.`
+        : "Choose the form you have or plan to buy.";
+    };
+    protein.addEventListener("change", syncProteinForm);
 
     const foundation = form.querySelector("[data-builder-foundation]");
     foundation.innerHTML = `<option value="">No foundation</option>` + (options.foundations || []).map(item =>
@@ -580,6 +601,38 @@ const SNS = (() => {
         <input type="radio" name="cooking-method" value="${escapeHtml(item.id)}"${index === 0 ? " checked" : ""}>
         <span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.description)}</small></span>
       </label>`).join("");
+    form.querySelector("[data-structure-options]").innerHTML = (options.meal_structures || fallbackBuilderOptions.meal_structures).map((item, index) => `
+      <label class="builder-choice-card">
+        <input type="radio" name="meal-structure" value="${escapeHtml(item.id)}"${index === 0 ? " checked" : ""}>
+        <span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.description)}</small></span>
+      </label>`).join("");
+    const syncStructureGuidance = () => {
+      const method = form.querySelector('input[name="cooking-method"]:checked')?.value;
+      const structureInputs = [...form.querySelectorAll('input[name="meal-structure"]')];
+      structureInputs.forEach(input => {
+        input.disabled = method !== "skillet" && input.value !== "integrated";
+      });
+      if (structureInputs.find(input => input.checked)?.disabled) {
+        structureInputs.find(input => input.value === "integrated").checked = true;
+      }
+      const structure = structureInputs.find(input => input.checked)?.value;
+      const produceCount = form.querySelectorAll('input[name="produce"]:checked').length;
+      const guidance = form.querySelector("[data-structure-guidance]");
+      if (method !== "skillet") {
+        guidance.textContent = "This cooking method already determines how the meal comes together.";
+      } else if (structure === "composed_plate" && produceCount > 2) {
+        guidance.textContent = "Composed plates usually feature one or two vegetables. You can continue, or choose the ingredients you most want to taste separately.";
+      } else if (structure === "composed_plate") {
+        guidance.textContent = "Each component will be prepared independently and timed to meet on the plate.";
+      } else if (structure === "layered_bowl") {
+        guidance.textContent = "The foundation goes into the bowl first, with the other components arranged over it.";
+      } else {
+        guidance.textContent = "Compatible ingredients can join the same vessel as the cooking environment changes.";
+      }
+    };
+    form.querySelectorAll('input[name="cooking-method"], input[name="meal-structure"]').forEach(input =>
+      input.addEventListener("change", syncStructureGuidance)
+    );
 
     const produce = options.produce || fallbackBuilderOptions.produce;
     const produceHolder = form.querySelector("[data-produce-options]");
@@ -591,6 +644,8 @@ const SNS = (() => {
         <small>${isOwned ? "In My Kitchen" : "Need to buy"}${item.kind === "fruit" ? " · Fruit" : ""}</small>
       </label>`;
     }).join("");
+    produceHolder.addEventListener("change", syncStructureGuidance);
+    syncStructureGuidance();
 
     const extras = options.extras || fallbackBuilderOptions.extras;
     const extrasHolder = form.querySelector("[data-extra-options]");
@@ -637,6 +692,7 @@ const SNS = (() => {
         foundation: form.querySelector("[data-builder-foundation]").value,
         cuisine: form.querySelector("[data-builder-cuisine]").value,
         cooking_method: form.querySelector('input[name="cooking-method"]:checked')?.value,
+        meal_structure: form.querySelector('input[name="meal-structure"]:checked')?.value,
         serving_temperature: form.querySelector('input[name="temperature"]:checked')?.value,
         meal_occasion: form.querySelector("[data-meal-occasion]").value,
         energy: form.querySelector("[data-builder-energy]").value,
@@ -660,6 +716,7 @@ const SNS = (() => {
       await requestRecipe(candidate.candidate_id || candidate.id);
     } catch (error) {
       status.textContent = error.message || "The meal could not be built yet. Try another method or ingredient.";
+    } finally {
       button.disabled = false;
     }
   }

@@ -61,10 +61,7 @@ class PlannerVoiceTests(unittest.TestCase):
     def test_finish_transition_is_brief(self):
         previous = SimpleNamespace(stage="middle")
         next_activity = SimpleNamespace(stage="finish")
-        self.assertEqual(
-            transition_message(previous, next_activity),
-            "Good job—the main cooking is done, and we are moving into the finish.",
-        )
+        self.assertIsNone(transition_message(previous, next_activity))
 
     def test_cooking_transition_does_not_claim_prep_is_underway(self):
         previous = SimpleNamespace(stage="early")
@@ -72,8 +69,7 @@ class PlannerVoiceTests(unittest.TestCase):
 
         result = transition_message(previous, next_activity)
 
-        self.assertEqual(result, "Prep is complete. Now the cooking begins.")
-        self.assertNotIn("meal is underway", result.lower())
+        self.assertIsNone(result)
 
     def test_completion_is_useful(self):
         result = completion_message({"sauce": "simple stir-fry sauce"})

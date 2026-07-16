@@ -219,6 +219,7 @@ def get_meal_builder_options(payload: dict | None = None, db_path: str | Path = 
     """Return the trained choice catalog with current-kitchen ownership flags."""
     kitchen = payload if isinstance(payload, dict) else {}
     resolved, _pending = resolve_inventory(kitchen, db_path)
+    resolved_by_name = {_key(item.name): item for item in resolved}
     owned = {_key(item.name) for item in resolved}
     for item in _inventory_from(kitchen):
         raw_key = _key(item.get("name"))
@@ -244,7 +245,13 @@ def get_meal_builder_options(payload: dict | None = None, db_path: str | Path = 
         cuisines = con.execute("SELECT name FROM cuisines ORDER BY cuisine_id").fetchall()
 
     def choice(name: str, **extra) -> dict:
-        return {"name": name, "owned": _key(name) in owned, **extra}
+        inventory_item = resolved_by_name.get(_key(name))
+        return {
+            "name": name,
+            "owned": _key(name) in owned,
+            "form": inventory_item.form_name if inventory_item else None,
+            **extra,
+        }
 
     return {
         "api_version": CONTRACT_VERSION,
@@ -254,6 +261,11 @@ def get_meal_builder_options(payload: dict | None = None, db_path: str | Path = 
         "extras": [choice(name) for name in _BUILDER_EXTRA_NAMES],
         "cuisines": [row["name"] for row in cuisines],
         "methods": list(_BUILDER_METHODS),
+        "meal_structures": [
+            {"id": "integrated", "label": "Cooked Together", "description": "A cohesive skillet, pot, soup, or casserole."},
+            {"id": "composed_plate", "label": "Composed Plate", "description": "Restaurant-style: protein, vegetable, and foundation prepared independently."},
+            {"id": "layered_bowl", "label": "Layered Bowl", "description": "A foundation with components arranged or spooned over it."},
+        ],
         "serving_temperatures": [
             {"id": "hot", "label": "Hot", "available": True},
             {"id": "cold", "label": "Cold", "available": False,
@@ -297,9 +309,12 @@ def save_my_kitchen(
 
 def _protein_state(item: ResolvedIngredient | None) -> str:
     form = _key(item.form_name if item else "")
+    name = _key(item.name if item else "")
+    if "canned" in form or name.startswith("canned "):
+        return "Canned"
     if "frozen" in form:
         return "Frozen Raw"
-    if any(word in form for word in ("canned", "cooked", "prepared", "leftover")):
+    if any(word in form for word in ("cooked", "prepared", "leftover", "ready to eat")) or "rotisserie" in name:
         return "Cooked"
     return "Fresh Raw"
 
@@ -558,12 +573,18 @@ def _candidate_ingredient_lines(
 def _candidate_view(candidate: dict) -> dict:
     method = _clean(candidate.get("cooking_method", candidate.get("strategy")))
     candidate_id = _clean(candidate.get("candidate_id")) or method or "candidate"
-    meal_shape = _MEAL_SHAPES.get(method, "plate")
+    meal_structure = _clean(candidate.get("meal_structure")) or "integrated"
+    meal_shape = (
+        "bowl" if meal_structure == "layered_bowl"
+        else "plate" if meal_structure == "composed_plate"
+        else _MEAL_SHAPES.get(method, "plate")
+    )
     return {
         "candidate_id": candidate_id,
         "id": candidate_id,
         "title": candidate.get("title") or candidate.get("label") or "Stock & Stir meal",
         "meal_shape": meal_shape,
+        "meal_structure": meal_structure,
         "serving_temperature": "cold" if method == "cold_meal" else "hot",
         "preparation_mode": "assembled" if method in {"cold_meal", "handheld"} else "cooked",
         "meal_occasion": candidate.get("meal_occasion") or "Any",
@@ -604,10 +625,15 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         extras = [extras]
     extras = [_clean(item) for item in extras if _clean(item)]
     method = _clean(selections.get("cooking_method"))
+    meal_structure = _clean(selections.get("meal_structure")) or "integrated"
     if not protein:
         raise APIContractError("Build Your Meal requires one protein.")
     if method not in _LIVE_PLANNER_METHODS:
         raise APIContractError("Choose a currently supported cooking method.")
+    if meal_structure not in {"integrated", "composed_plate", "layered_bowl"}:
+        raise APIContractError("Choose a supported meal structure.")
+    if method != "skillet" and meal_structure != "integrated":
+        raise APIContractError("That cooking method already determines an integrated meal structure.")
     if _clean(selections.get("serving_temperature")) == "cold":
         raise APIContractError("Cold meal planning is visible but is not trained yet.")
 
@@ -643,6 +669,7 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         raise APIContractError(f"Unknown pantry or fridge extra: {unknown_extras[0]}")
 
     owned_keys = {_key(item.name) for item in resolved}
+    resolved_by_name = {_key(item.name): item for item in resolved}
     for item in _inventory_from(kitchen):
         raw_key = _key(item.get("name"))
         owned_keys.add(_key(_BUILDER_EXTRA_ALIASES.get(raw_key, item.get("name"))))
@@ -650,9 +677,15 @@ def _builder_candidates(payload: dict, db_path: str | Path):
     planned_purchases = [
         name for name in selected_components if name and _key(name) not in owned_keys
     ]
+    owned_protein = resolved_by_name.get(_key(protein))
+    component_forms = {
+        name: resolved_by_name[_key(name)].form_name
+        for name in [protein, *produce, foundation]
+        if name and _key(name) in resolved_by_name and resolved_by_name[_key(name)].form_name
+    }
     engine_request.update({
         "protein_name": protein,
-        "protein_state": _clean(selections.get("protein_state")) or "Fresh Raw",
+        "protein_state": _protein_state(owned_protein) if owned_protein else (_clean(selections.get("protein_state")) or "Fresh Raw"),
         "vegetable_name": produce[0] if produce else "",
         "vegetable_names": produce,
         "foundation_name": foundation,
@@ -664,6 +697,8 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         "requested_method": method,
         "planned_purchase_items": planned_purchases,
         "selected_extras": extras,
+        "component_forms": component_forms,
+        "meal_structure": meal_structure,
     })
     engine_request["available_items"] = list(dict.fromkeys([
         *engine_request.get("available_items", []),
@@ -676,7 +711,7 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         )
     candidate = candidates[0]
     candidate["candidate_id"] = "-".join((
-        "build", _slug(method), _slug(protein),
+        "build", _slug(engine_request["meal_structure"]), _slug(method), _slug(protein),
         _slug("-".join(produce)) or "no-produce",
         _slug(foundation) or "no-foundation",
     ))
@@ -769,6 +804,7 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
         "api_contract": CONTRACT_VERSION,
         "candidate_id": candidate_id,
         "cooking_method": candidate.get("cooking_method", candidate.get("strategy")),
+        "meal_structure": candidate.get("meal_structure"),
         "energy": _request.get("energy_level"),
         "equipment": _request.get("available_equipment") or [],
         "protein_state": _request.get("protein_state"),
@@ -792,6 +828,7 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
         "plan_items": list(recipe.get("plan_items") or []),
         "total_minutes": classification["total_minutes"],
         "meal_shape": classification["meal_shape"],
+        "meal_structure": classification["meal_structure"],
         "serving_temperature": classification["serving_temperature"],
         "preparation_mode": classification["preparation_mode"],
         "meal_occasion": classification["meal_occasion"],
