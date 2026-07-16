@@ -250,6 +250,8 @@ def generate_candidates(
     requested_items=None,
     available_equipment=None,
     excluded_items=None,
+    planned_purchase_items=None,
+    requested_method="",
     cooking_for_kids=False,
     kid_theme="",
 ):
@@ -265,7 +267,13 @@ def generate_candidates(
     cuisine = _clean(cuisine_name) or "Comfort Food"
     sauce = _sauce_for_cuisine(cuisine)
     selected_components = _unique([protein, *_clean(vegetable).split(" & "), foundation])
-    available = _unique(list(available_items or []) + selected_components)
+    planned_purchase_keys = {_key(item) for item in (planned_purchase_items or [])}
+    available = _unique(list(available_items or []) + [
+        item for item in selected_components if _key(item) not in planned_purchase_keys
+    ])
+    # Eligibility is about whether the finished meal has the component, while
+    # ingredient status is about whether the household owns it today.
+    method_resources = _unique(available + selected_components)
     equipment = _unique(list(available_equipment or []))
     excluded = _unique(list(excluded_items or []))
     try:
@@ -288,7 +296,8 @@ def generate_candidates(
     ]
     methods = [
         method for method in methods
-        if _method_is_eligible(method["cooking_method"], available, foundation, equipment)
+        if _method_is_eligible(method["cooking_method"], method_resources, foundation, equipment)
+        and (not _clean(requested_method) or method["cooking_method"] == _clean(requested_method))
     ]
 
     candidates = []

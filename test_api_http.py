@@ -36,6 +36,14 @@ class APIHTTPTests(unittest.TestCase):
         self.assertEqual(body["api_version"], "1.0")
         self.assertTrue(body["candidates"])
 
+    def test_meal_builder_options_endpoint_marks_owned_choices(self):
+        response = self.client.post("/api/GetMealBuilderOptions", json=kitchen_payload())
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["proteins"])
+        self.assertTrue(next(item for item in body["proteins"] if item["name"] == "Chicken breast")["owned"])
+        self.assertFalse(next(item for item in body["serving_temperatures"] if item["id"] == "cold")["available"])
+
     def test_recipe_round_trip_over_http(self):
         kitchen = kitchen_payload()
         choices = self.client.post("/api/GetRecipeList", json=kitchen).json()

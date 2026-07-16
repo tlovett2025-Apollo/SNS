@@ -37,6 +37,13 @@ _MEAL_SHAPES = {
 
 _LIVE_PLANNER_METHODS = {"skillet", "casserole", "soup", "handheld"}
 
+_BUILDER_METHODS = (
+    {"id": "skillet", "label": "Skillet", "description": "One-pan stovetop meal."},
+    {"id": "soup", "label": "Soup", "description": "A broth-based meal in one pot."},
+    {"id": "casserole", "label": "Casserole", "description": "An oven-baked family-style meal."},
+    {"id": "handheld", "label": "Wrap or Sandwich", "description": "A handheld meal with a bread or wrap foundation."},
+)
+
 _PROTEIN_CATEGORIES = {
     "beans", "beef", "chicken", "eggs", "plant protein", "pork", "processed meat",
     "protein", "seafood", "turkey",
@@ -195,6 +202,50 @@ def resolve_inventory(payload: dict, db_path: str | Path = DB_PATH) -> tuple[lis
                 source=item,
             ))
     return resolved, pending
+
+
+def get_meal_builder_options(payload: dict | None = None, db_path: str | Path = DB_PATH) -> dict:
+    """Return the trained choice catalog with current-kitchen ownership flags."""
+    kitchen = payload if isinstance(payload, dict) else {}
+    resolved, _pending = resolve_inventory(kitchen, db_path)
+    owned = {_key(item.name) for item in resolved}
+    with closing(sqlite3.connect(db_path)) as con:
+        con.row_factory = sqlite3.Row
+        proteins = con.execute(
+            """SELECT i.name FROM proteins p JOIN ingredients i USING (ingredient_id)
+               WHERE i.active=1 AND p.verified=1 ORDER BY i.display_order,i.name"""
+        ).fetchall()
+        produce = con.execute(
+            """SELECT i.name,'vegetable' AS kind FROM vegetables v
+                 JOIN ingredients i USING (ingredient_id)
+               WHERE i.active=1 AND v.verified=1
+               UNION ALL
+               SELECT i.name,'fruit' AS kind FROM ingredients i
+               WHERE i.active=1 AND lower(i.category)='fruit'
+               ORDER BY kind,name"""
+        ).fetchall()
+        foundations = con.execute(
+            """SELECT name FROM foundations WHERE verified=1 ORDER BY foundation_id"""
+        ).fetchall()
+        cuisines = con.execute("SELECT name FROM cuisines ORDER BY cuisine_id").fetchall()
+
+    def choice(name: str, **extra) -> dict:
+        return {"name": name, "owned": _key(name) in owned, **extra}
+
+    return {
+        "api_version": CONTRACT_VERSION,
+        "proteins": [choice(row["name"]) for row in proteins],
+        "produce": [choice(row["name"], kind=row["kind"]) for row in produce],
+        "foundations": [choice(row["name"]) for row in foundations],
+        "cuisines": [row["name"] for row in cuisines],
+        "methods": list(_BUILDER_METHODS),
+        "serving_temperatures": [
+            {"id": "hot", "label": "Hot", "available": True},
+            {"id": "cold", "label": "Cold", "available": False,
+             "note": "Cold meal planning is the next cooking grammar being trained."},
+        ],
+        "meal_occasions": ["Breakfast", "Lunch", "Dinner", "Any"],
+    }
 
 
 def save_my_kitchen(
@@ -500,6 +551,7 @@ def _candidate_view(candidate: dict) -> dict:
         "meal_shape": meal_shape,
         "serving_temperature": "cold" if method == "cold_meal" else "hot",
         "preparation_mode": "assembled" if method in {"cold_meal", "handheld"} else "cooked",
+        "meal_occasion": candidate.get("meal_occasion") or "Any",
         "servings": candidate.get("servings", 4),
         "energy": candidate.get("energy") or "Low",
         "total_minutes": candidate.get("minutes", 0),
@@ -521,7 +573,91 @@ def _candidate_view(candidate: dict) -> dict:
     }
 
 
+def _builder_candidates(payload: dict, db_path: str | Path):
+    kitchen = payload.get("kitchen") if isinstance(payload.get("kitchen"), dict) else {}
+    selections = payload.get("selections") if isinstance(payload.get("selections"), dict) else {}
+    snapshot, resolved, pending, engine_request = _engine_request(kitchen, db_path)
+
+    protein = _clean(selections.get("protein"))
+    produce = selections.get("produce") or []
+    if isinstance(produce, str):
+        produce = [produce]
+    produce = [_clean(item) for item in produce if _clean(item)]
+    foundation = _clean(selections.get("foundation"))
+    method = _clean(selections.get("cooking_method"))
+    if not protein:
+        raise APIContractError("Build Your Meal requires one protein.")
+    if method not in _LIVE_PLANNER_METHODS:
+        raise APIContractError("Choose a currently supported cooking method.")
+    if _clean(selections.get("serving_temperature")) == "cold":
+        raise APIContractError("Cold meal planning is visible but is not trained yet.")
+
+    with closing(sqlite3.connect(db_path)) as con:
+        valid_protein = con.execute(
+            """SELECT 1 FROM proteins p JOIN ingredients i USING (ingredient_id)
+               WHERE p.verified=1 AND i.active=1 AND lower(i.name)=lower(?)""",
+            (protein,),
+        ).fetchone()
+        valid_produce = {
+            _key(row[0]) for row in con.execute(
+                """SELECT i.name FROM vegetables v JOIN ingredients i USING (ingredient_id)
+                   WHERE v.verified=1 AND i.active=1
+                   UNION SELECT name FROM ingredients
+                   WHERE active=1 AND lower(category)='fruit'"""
+            ).fetchall()
+        }
+        valid_foundations = {
+            _key(row[0]) for row in con.execute(
+                "SELECT name FROM foundations WHERE verified=1"
+            ).fetchall()
+        }
+    if not valid_protein:
+        raise APIContractError(f"Unknown or untrained protein: {protein}")
+    unknown_produce = [name for name in produce if _key(name) not in valid_produce]
+    if unknown_produce:
+        raise APIContractError(f"Unknown produce selection: {unknown_produce[0]}")
+    if foundation and _key(foundation) not in valid_foundations:
+        raise APIContractError(f"Unknown foundation: {foundation}")
+
+    owned_keys = {_key(item.name) for item in resolved}
+    selected_components = [protein, *produce, foundation]
+    planned_purchases = [
+        name for name in selected_components if name and _key(name) not in owned_keys
+    ]
+    engine_request.update({
+        "protein_name": protein,
+        "protein_state": _clean(selections.get("protein_state")) or "Fresh Raw",
+        "vegetable_name": produce[0] if produce else "",
+        "vegetable_names": produce,
+        "foundation_name": foundation,
+        "cuisine_name": _clean(selections.get("cuisine")) or "Comfort Food",
+        "energy_level": _clean(selections.get("energy")) or "Low",
+        "time_minutes": selections.get("time_minutes") or 45,
+        "servings": selections.get("servings") or 4,
+        "max_results": 1,
+        "requested_method": method,
+        "planned_purchase_items": planned_purchases,
+    })
+    candidates = generate_candidates(**engine_request)
+    if not candidates:
+        raise APIContractError(
+            "Those choices conflict with My Kitchen exclusions or the selected method."
+        )
+    candidate = candidates[0]
+    candidate["candidate_id"] = "-".join((
+        "build", _slug(method), _slug(protein),
+        _slug("-".join(produce)) or "no-produce",
+        _slug(foundation) or "no-foundation",
+    ))
+    candidate["title"] = _concept_title(candidate)
+    candidate["meal_occasion"] = _clean(selections.get("meal_occasion")) or "Any"
+    candidate["serving_temperature"] = "hot"
+    return snapshot, resolved, pending, [candidate], engine_request
+
+
 def _raw_candidates(payload: dict, db_path: str | Path):
+    if _clean(payload.get("mode")) == "build_your_meal":
+        return _builder_candidates(payload, db_path)
     snapshot, resolved, pending, engine_request = _engine_request(payload, db_path)
     if not any((
         engine_request["protein_name"],
@@ -627,6 +763,7 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
         "meal_shape": classification["meal_shape"],
         "serving_temperature": classification["serving_temperature"],
         "preparation_mode": classification["preparation_mode"],
+        "meal_occasion": classification["meal_occasion"],
         "cost_estimate": None,
         "capability_status": "supported",
         "grocery_list": list(recipe.get("grocery_list") or []),

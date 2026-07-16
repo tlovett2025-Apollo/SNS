@@ -13,7 +13,13 @@ import os
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from api_service import APIContractError, get_recipe, get_recipe_list, save_my_kitchen
+from api_service import (
+    APIContractError,
+    get_meal_builder_options,
+    get_recipe,
+    get_recipe_list,
+    save_my_kitchen,
+)
 from build_provenance import collect_build_provenance
 from config import DB_PATH
 from household_inventory import (
@@ -127,6 +133,14 @@ def save_kitchen_endpoint(payload: dict) -> dict:
 def recipe_list_endpoint(payload: dict) -> dict:
     try:
         return get_recipe_list(payload, db_path=DB_PATH)
+    except Exception as exc:
+        raise _domain_error(exc) from exc
+
+
+@app.post("/api/GetMealBuilderOptions")
+def meal_builder_options_endpoint(payload: dict) -> dict:
+    try:
+        return get_meal_builder_options(payload, db_path=DB_PATH)
     except Exception as exc:
         raise _domain_error(exc) from exc
 

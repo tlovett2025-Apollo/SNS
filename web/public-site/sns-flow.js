@@ -4,6 +4,7 @@ const SNS = (() => {
   const endpoint = path => `${apiBase}${path}`;
   const API = {
     saveKitchen: endpoint("/api/SaveMyKitchen"),
+    getMealBuilderOptions: endpoint("/api/GetMealBuilderOptions"),
     getRecipeList: endpoint("/api/GetRecipeList"),
     getRecipe: endpoint("/api/GetRecipe"),
     createCheckout: endpoint("/api/CreateCheckoutSession"),
@@ -518,6 +519,132 @@ const SNS = (() => {
     location.href = "choose-recipe.html";
   }
 
+  function openMealBuilder() {
+    const payload = kitchenPayload();
+    sessionStorage.setItem("snsKitchenPayload", JSON.stringify(payload));
+    storeBrowserKitchen();
+    location.href = "build-your-meal.html";
+  }
+
+  const fallbackBuilderOptions = {
+    proteins: ["Chicken breast", "Ground beef", "Eggs", "Canned chicken", "White beans"].map(name => ({name})),
+    produce: ["Onions", "Carrots", "Mushrooms", "Spinach", "Tomatoes", "Broccoli", "Apples"].map(name => ({name, kind: name === "Apples" ? "fruit" : "vegetable"})),
+    foundations: ["White rice", "Pasta", "Bread", "Flour tortillas", "Potatoes"].map(name => ({name})),
+    cuisines: ["Comfort Food", "American", "Italian", "Mexican", "Mediterranean"],
+    methods: [
+      {id:"skillet", label:"Skillet", description:"One-pan stovetop meal."},
+      {id:"soup", label:"Soup", description:"A broth-based meal in one pot."},
+      {id:"casserole", label:"Casserole", description:"An oven-baked family-style meal."},
+      {id:"handheld", label:"Wrap or Sandwich", description:"A handheld meal with bread or a wrap."}
+    ]
+  };
+
+  function ownedKitchenNames(kitchen) {
+    return new Set((kitchen.inventory || []).map(item => String(item.name || "").toLowerCase()));
+  }
+
+  function choiceLabel(item, owned) {
+    const isOwned = item.owned ?? owned.has(String(item.name).toLowerCase());
+    return `${item.name}${isOwned ? " — In My Kitchen" : " — Need to buy"}`;
+  }
+
+  async function renderMealBuilder() {
+    const form = document.querySelector("[data-meal-builder]");
+    if (!form) return;
+    const kitchen = JSON.parse(sessionStorage.getItem("snsKitchenPayload") || "{}");
+    const owned = ownedKitchenNames(kitchen);
+    let options;
+    try {
+      options = await postJson(API.getMealBuilderOptions, kitchen);
+    } catch {
+      options = fallbackBuilderOptions;
+    }
+
+    const protein = form.querySelector("[data-builder-protein]");
+    protein.innerHTML = `<option value="">Choose one protein</option>` + (options.proteins || []).map(item =>
+      `<option value="${escapeHtml(item.name)}">${escapeHtml(choiceLabel(item, owned))}</option>`
+    ).join("");
+
+    const foundation = form.querySelector("[data-builder-foundation]");
+    foundation.innerHTML = `<option value="">No foundation</option>` + (options.foundations || []).map(item =>
+      `<option value="${escapeHtml(item.name)}">${escapeHtml(choiceLabel(item, owned))}</option>`
+    ).join("");
+
+    form.querySelector("[data-builder-cuisine]").innerHTML = (options.cuisines || fallbackBuilderOptions.cuisines).map(name =>
+      `<option value="${escapeHtml(name)}"${name === "Comfort Food" ? " selected" : ""}>${escapeHtml(name)}</option>`
+    ).join("");
+
+    form.querySelector("[data-method-options]").innerHTML = (options.methods || fallbackBuilderOptions.methods).map((item, index) => `
+      <label class="builder-choice-card">
+        <input type="radio" name="cooking-method" value="${escapeHtml(item.id)}"${index === 0 ? " checked" : ""}>
+        <span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.description)}</small></span>
+      </label>`).join("");
+
+    const produce = options.produce || fallbackBuilderOptions.produce;
+    const produceHolder = form.querySelector("[data-produce-options]");
+    produceHolder.innerHTML = produce.map(item => {
+      const isOwned = item.owned ?? owned.has(String(item.name).toLowerCase());
+      return `<label class="produce-choice" data-produce-choice data-search-name="${escapeHtml(item.name.toLowerCase())}">
+        <input type="checkbox" name="produce" value="${escapeHtml(item.name)}">
+        <span>${escapeHtml(item.name)}</span>
+        <small>${isOwned ? "In My Kitchen" : "Need to buy"}${item.kind === "fruit" ? " · Fruit" : ""}</small>
+      </label>`;
+    }).join("");
+
+    form.querySelector("[data-produce-search]")?.addEventListener("input", event => {
+      const query = event.target.value.trim().toLowerCase();
+      form.querySelectorAll("[data-produce-choice]").forEach(choice => {
+        choice.hidden = Boolean(query) && !choice.dataset.searchName.includes(query);
+      });
+    });
+    form.addEventListener("submit", generateBuiltMeal);
+    form.querySelector("[data-builder-loading]").hidden = true;
+    form.querySelector("[data-builder-fields]").hidden = false;
+  }
+
+  async function generateBuiltMeal(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = form.querySelector("[data-builder-status]");
+    const button = form.querySelector("button[type=submit]");
+    const kitchen = JSON.parse(sessionStorage.getItem("snsKitchenPayload") || "{}");
+    const payload = {
+      mode: "build_your_meal",
+      kitchen,
+      selections: {
+        protein: form.querySelector("[data-builder-protein]").value,
+        protein_state: form.querySelector("[data-protein-state]").value,
+        produce: [...form.querySelectorAll('input[name="produce"]:checked')].map(item => item.value),
+        foundation: form.querySelector("[data-builder-foundation]").value,
+        cuisine: form.querySelector("[data-builder-cuisine]").value,
+        cooking_method: form.querySelector('input[name="cooking-method"]:checked')?.value,
+        serving_temperature: form.querySelector('input[name="temperature"]:checked')?.value,
+        meal_occasion: form.querySelector("[data-meal-occasion]").value,
+        energy: form.querySelector("[data-builder-energy]").value,
+        time_minutes: Number(form.querySelector("[data-builder-time]").value),
+        servings: Number(form.querySelector("[data-builder-servings]").value)
+      }
+    };
+    if (!payload.selections.protein) {
+      status.textContent = "Choose one protein first.";
+      form.querySelector("[data-builder-protein]").focus();
+      return;
+    }
+    button.disabled = true;
+    status.textContent = "Building your meal…";
+    try {
+      const response = await postJson(API.getRecipeList, payload);
+      const candidate = response.candidates?.[0];
+      if (!candidate) throw new Error(response.notices?.[0]?.message || "No trained plan matched those choices.");
+      sessionStorage.setItem("snsKitchenPayload", JSON.stringify(payload));
+      sessionStorage.setItem("snsRecipeChoices", JSON.stringify([candidate]));
+      await requestRecipe(candidate.candidate_id || candidate.id);
+    } catch (error) {
+      status.textContent = error.message || "The meal could not be built yet. Try another method or ingredient.";
+      button.disabled = false;
+    }
+  }
+
   function renderRecipeChoices() {
     const holder = document.querySelector("[data-recipe-grid]");
     if (!holder) return;
@@ -665,8 +792,10 @@ const SNS = (() => {
     updateCount();
     renderRecipeChoices();
     renderRecipe();
+    renderMealBuilder();
     document.querySelector("[data-save-kitchen]")?.addEventListener("click", saveKitchen);
     document.querySelector("[data-get-recipes]")?.addEventListener("click", generateRecipeList);
+    document.querySelector("[data-build-meal]")?.addEventListener("click", openMealBuilder);
     document.querySelectorAll("[data-checkout]").forEach(b => b.addEventListener("click", () => checkout(b.dataset.checkout)));
     document.querySelector("[data-billing-portal]")?.addEventListener("click", billingPortal);
   }

@@ -46,3 +46,18 @@ def test_recipe_page_exposes_inventory_resolutions_and_preserves_substep_breaks(
     assert "item.omission_consequence" in flow
     assert "item.resolved_name" in flow
     assert "white-space: pre-wrap" in css
+
+
+def test_build_your_meal_is_a_direct_shared_engine_path():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
+    builder_page = (PUBLIC_FLOW.parent / "build-your-meal.html").read_text(encoding="utf-8")
+
+    assert "data-build-meal" in kitchen_page
+    assert "Build Your Meal" in kitchen_page
+    assert 'mode: "build_your_meal"' in flow
+    assert "await requestRecipe(candidate.candidate_id" in flow
+    assert "One protein for now" in builder_page
+    assert "Vegetables &amp; fruit" in builder_page
+    assert "Cold <small>training next" in builder_page
+    assert "plate or in a bowl" in builder_page

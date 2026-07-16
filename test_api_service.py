@@ -8,6 +8,7 @@ from unittest.mock import patch
 from api_service import (
     APIContractError,
     _candidate_view,
+    get_meal_builder_options,
     get_recipe,
     get_recipe_list,
     normalize_kitchen_snapshot,
@@ -102,6 +103,66 @@ def cooked_bean_soup_payload(energy="Low", equipment=None):
 
 
 class APIServiceTests(unittest.TestCase):
+    def test_builder_catalog_marks_current_kitchen_ownership(self):
+        options = get_meal_builder_options(kitchen_payload())
+        proteins = {item["name"]: item["owned"] for item in options["proteins"]}
+        produce = {item["name"]: item["owned"] for item in options["produce"]}
+
+        self.assertTrue(proteins["Chicken breast"])
+        self.assertFalse(proteins["Ground beef"])
+        self.assertTrue(produce["Mushrooms"])
+        self.assertIn("fruit", {item["kind"] for item in options["produce"]})
+        self.assertFalse(next(item for item in options["serving_temperatures"] if item["id"] == "cold")["available"])
+
+    def test_builder_returns_one_exact_method_and_preserves_shopping_needs(self):
+        kitchen = kitchen_payload()
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": kitchen,
+            "selections": {
+                "protein": "Chicken breast",
+                "protein_state": "Frozen Raw",
+                "produce": ["Mushrooms", "Onions"],
+                "foundation": "White rice",
+                "cuisine": "Comfort Food",
+                "cooking_method": "skillet",
+                "serving_temperature": "hot",
+                "meal_occasion": "Dinner",
+                "energy": "Low",
+                "time_minutes": 60,
+                "servings": 4,
+            },
+        }
+
+        choices = get_recipe_list(request)["candidates"]
+        self.assertEqual(len(choices), 1)
+        self.assertTrue(choices[0]["candidate_id"].startswith("build-skillet-"))
+        recipe = get_recipe({"candidate_id": choices[0]["candidate_id"], "kitchen": request})
+        requirements = {
+            item["name"]: item["status"] for item in recipe["inventory_requirements"]
+        }
+        self.assertEqual(requirements["Chicken breast"], "Have")
+        self.assertEqual(requirements["Mushrooms"], "Have")
+        self.assertEqual(requirements["Onions"], "Need")
+        self.assertIn("Onions", recipe["missing_items"])
+
+    def test_builder_rejects_a_selected_household_exclusion(self):
+        kitchen = kitchen_payload()
+        kitchen["meal_preferences"] = {"excluded_items": ["Onions"]}
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": kitchen,
+            "selections": {
+                "protein": "Chicken breast",
+                "produce": ["Onions"],
+                "cooking_method": "skillet",
+                "serving_temperature": "hot",
+            },
+        }
+
+        with self.assertRaisesRegex(APIContractError, "conflict"):
+            get_recipe_list(request)
+
     def test_snapshot_normalizes_current_browser_payload(self):
         snapshot = normalize_kitchen_snapshot(kitchen_payload())
         self.assertEqual(snapshot["api_version"], "1.0")

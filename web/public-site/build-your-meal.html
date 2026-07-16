@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#355f49">
+  <title>Build Your Meal · Stock &amp; Stir</title>
+  <link rel="stylesheet" href="sns-flow.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="index.html">Stock <span>&amp;</span> Stir</a>
+  <nav class="header-nav" aria-label="Meal navigation">
+    <a class="header-link" href="my-kitchen.html">Back to My Kitchen</a>
+  </nav>
+</header>
+<main class="builder-page">
+  <section class="builder-hero">
+    <div>
+      <div class="eyebrow">Build Your Meal</div>
+      <h1>You choose the direction.</h1>
+      <p class="lede">Choose what you want to cook—even if you need to buy it. Every ingredient is still checked against My Kitchen and your exclusions.</p>
+    </div>
+    <aside class="builder-promise"><strong>One clear plan</strong><span>Your method, ingredients, and limits go through the same Stock &amp; Stir cooking engine.</span></aside>
+  </section>
+
+  <form class="meal-builder" data-meal-builder>
+    <p class="notice" data-builder-loading>Loading the meal choices…</p>
+    <div data-builder-fields hidden>
+      <section class="builder-section">
+        <div class="builder-section-heading"><span>1</span><div><h2>Choose the food</h2><p>One protein for now; as many vegetables or fruits as you want.</p></div></div>
+        <div class="builder-two-column">
+          <label class="builder-field"><span>Protein <em>Choose one</em></span><select required data-builder-protein></select></label>
+          <label class="builder-field"><span>Protein state</span><select data-protein-state><option>Fresh Raw</option><option>Frozen Raw</option><option>Cooked</option></select></label>
+          <label class="builder-field"><span>Foundation <em>Optional</em></span><select data-builder-foundation></select></label>
+          <label class="builder-field"><span>Cuisine direction</span><select data-builder-cuisine></select></label>
+        </div>
+        <div class="produce-picker">
+          <label class="builder-field"><span>Vegetables &amp; fruit <em>Choose any number</em></span><input type="search" data-produce-search placeholder="Search onions, carrots, apples…"></label>
+          <div class="produce-options" data-produce-options></div>
+        </div>
+      </section>
+
+      <section class="builder-section">
+        <div class="builder-section-heading"><span>2</span><div><h2>Choose how to cook it</h2><p>This is the cooking method—not whether dinner goes on a plate or in a bowl.</p></div></div>
+        <div class="builder-choice-grid" data-method-options></div>
+      </section>
+
+      <section class="builder-section">
+        <div class="builder-section-heading"><span>3</span><div><h2>Shape tonight’s plan</h2><p>These choices control the plan’s timing and fit.</p></div></div>
+        <div class="temperature-row" role="group" aria-label="Serving temperature">
+          <label class="segment-choice"><input type="radio" name="temperature" value="hot" checked><span>Hot</span></label>
+          <label class="segment-choice unavailable"><input type="radio" name="temperature" value="cold" disabled><span>Cold <small>training next</small></span></label>
+        </div>
+        <div class="builder-four-column">
+          <label class="builder-field"><span>Meal</span><select data-meal-occasion><option>Breakfast</option><option>Lunch</option><option selected>Dinner</option><option>Any</option></select></label>
+          <label class="builder-field"><span>Energy</span><select data-builder-energy><option>Very Low</option><option selected>Low</option><option>Medium</option><option>High</option></select></label>
+          <label class="builder-field"><span>Time available</span><select data-builder-time><option value="20">20 minutes</option><option value="30">30 minutes</option><option value="45" selected>45 minutes</option><option value="60">60 minutes</option><option value="90">90 minutes</option></select></label>
+          <label class="builder-field"><span>Servings</span><select data-builder-servings><option>1</option><option>2</option><option selected>4</option><option>6</option><option>8</option></select></label>
+        </div>
+      </section>
+
+      <div class="builder-submit">
+        <p data-builder-status aria-live="polite">Items marked “Need to buy” will appear in the Kitchen check.</p>
+        <button class="btn btn-primary" type="submit">Build My Meal</button>
+      </div>
+    </div>
+  </form>
+</main>
+<script src="sns-flow.js"></script>
+</body>
+</html>
