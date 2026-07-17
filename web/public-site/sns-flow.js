@@ -183,6 +183,8 @@ const SNS = (() => {
       title: meal.title,
       protein: meal.protein || "",
       dish_family: meal.dish_family || "",
+      meal_structure: meal.meal_structure || "",
+      production_strategy: meal.production_strategy || "",
       cuisine: meal.cuisine || "",
       cooking_method: meal.cooking_method || "",
       cooked_at: new Date().toISOString()
@@ -578,7 +580,7 @@ const SNS = (() => {
     const has = (...parts) => parts.every(p => names.some(n => n.includes(p)));
     const recipes = [];
     if (has("chicken") && has("rice")) recipes.push({
-      id:"chicken-rice-skillet", title:"Comforting Chicken & Rice Skillet",
+      id:"chicken-rice-supper", title:"Comforting One-Pot Chicken & Rice",
       minutes:35, effort:"Low", match:"Strong match",
       summary:"A calm one-pan meal built from familiar pantry food.",
       meal_shape:"plate", serving_temperature:"hot", preparation_mode:"cooked",
@@ -593,7 +595,7 @@ const SNS = (() => {
     });
     recipes.push(
       {id:"pantry-soup", title:"Use-What-You-Have Pantry Soup", minutes:40, effort:"Flexible", match:"Good match", summary:"A forgiving soup shaped around the foods already selected."},
-      {id:"kitchen-skillet", title:"My Kitchen Supper Skillet", minutes:30, effort:"Medium", match:"Good match", summary:"Protein, vegetables, and a foundation brought together in one skillet."},
+      {id:"kitchen-supper", title:"My Kitchen One-Pot Supper", minutes:30, effort:"Medium", match:"Good match", summary:"Compatible ingredients brought together in stages in one vessel."},
       {id:"simple-plate", title:"Simple Protein, Vegetable & Foundation Plate", minutes:25, effort:"Low", match:"Practical match", summary:"Cook the components simply and finish them together."}
     );
     return recipes.slice(0, 6);
@@ -634,6 +636,10 @@ const SNS = (() => {
     location.href = "build-your-meal.html";
   }
 
+  function openSignatureRecipes() {
+    location.href = "signature-recipes.html";
+  }
+
   const fallbackBuilderOptions = {
     proteins: ["Chicken breast", "Ground beef", "Eggs", "Canned chicken", "White beans"].map(name => ({name})),
     produce: ["Onions", "Carrots", "Mushrooms", "Spinach", "Tomatoes", "Broccoli", "Apples"].map(name => ({name, kind: name === "Apples" ? "fruit" : "vegetable"})),
@@ -641,13 +647,13 @@ const SNS = (() => {
     extras: ["Mayonnaise", "Salsa", "Mustard", "BBQ sauce", "Hot sauce", "Soy sauce", "Sour cream", "Cheddar cheese", "Chicken broth", "Tomato sauce"].map(name => ({name})),
     cuisines: ["Comfort Food", "American", "Italian", "Mexican", "Mediterranean"],
     methods: [
-      {id:"skillet", label:"Skillet", description:"One-pan stovetop meal."},
-      {id:"soup", label:"Soup", description:"A broth-based meal in one pot."},
-      {id:"casserole", label:"Casserole", description:"An oven-baked family-style meal."},
-      {id:"handheld", label:"Wrap or Sandwich", description:"A handheld meal with bread or a wrap."}
+      {id:"skillet", label:"Stovetop", description:"One or more stovetop vessels; meal structure decides whether components join or stay separate."},
+      {id:"soup", label:"Soup or Stew", description:"A liquid-led one-vessel meal; SNS chooses the suitable owned pot."},
+      {id:"casserole", label:"Oven Bake", description:"An oven-baked meal assembled in one baking dish."},
+      {id:"handheld", label:"Handheld", description:"Components cooked as needed, then assembled with bread or a wrap."}
     ],
     meal_structures: [
-      {id:"integrated", label:"Cooked Together", description:"A cohesive skillet, pot, soup, or casserole."},
+      {id:"integrated", label:"Cooked Together", description:"A cohesive one-vessel meal whose compatible ingredients join in stages."},
       {id:"composed_plate", label:"Composed Plate", description:"Restaurant-style separate components."},
       {id:"layered_bowl", label:"Layered Bowl", description:"Components arranged over a foundation."}
     ]
@@ -734,7 +740,7 @@ const SNS = (() => {
       const produceCount = form.querySelectorAll('input[name="produce"]:checked').length;
       const guidance = form.querySelector("[data-structure-guidance]");
       if (method !== "skillet") {
-        guidance.textContent = "This cooking method already determines how the meal comes together.";
+        guidance.textContent = "This cooking family currently determines how the components come together. More structures will appear as their cooking grammar is trained.";
       } else if (structure === "composed_plate" && produceCount > 2) {
         guidance.textContent = "Composed plates usually feature one or two vegetables. You can continue, or choose the ingredients you most want to taste separately.";
       } else if (structure === "composed_plate") {
@@ -888,6 +894,7 @@ const SNS = (() => {
           <p>${escapeHtml(recipe.summary || "")}</p>
           <div class="meta">
             <span class="pill">${escapeHtml(recipe.meal_shape || "meal")}</span>
+            <span class="pill">${escapeHtml(recipe.production_label || "Practical plan")}</span>
             <span class="pill">${escapeHtml(recipe.serving_temperature || "")}</span>
           </div>
           <button class="btn btn-primary" data-recipe-id="${escapeHtml(recipe.candidate_id || recipe.id)}">Make this recipe</button>
@@ -1020,6 +1027,7 @@ const SNS = (() => {
     document.querySelector("[data-save-kitchen]")?.addEventListener("click", saveKitchen);
     document.querySelector("[data-get-recipes]")?.addEventListener("click", generateRecipeList);
     document.querySelector("[data-build-meal]")?.addEventListener("click", openMealBuilder);
+    document.querySelector("[data-signature-recipes]")?.addEventListener("click", openSignatureRecipes);
     document.querySelectorAll("[data-checkout]").forEach(b => b.addEventListener("click", () => checkout(b.dataset.checkout)));
     document.querySelector("[data-billing-portal]")?.addEventListener("click", billingPortal);
   }

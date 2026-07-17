@@ -210,7 +210,10 @@ class APIServiceTests(unittest.TestCase):
             "produce": ["Mushrooms"], "foundation": "White rice",
             "cooking_method": "skillet", "serving_temperature": "hot",
         }
-        for structure, expected_shape in (("composed_plate", "plate"), ("layered_bowl", "bowl")):
+        for structure, expected_shape, expected_production in (
+            ("composed_plate", "plate", "multi_component"),
+            ("layered_bowl", "bowl", "component_assembly"),
+        ):
             request = {
                 "mode": "build_your_meal", "kitchen": kitchen,
                 "selections": {**base, "meal_structure": structure},
@@ -218,6 +221,8 @@ class APIServiceTests(unittest.TestCase):
             choice = get_recipe_list(request)["candidates"][0]
             self.assertEqual(choice["meal_structure"], structure)
             self.assertEqual(choice["meal_shape"], expected_shape)
+            self.assertEqual(choice["production_strategy"], expected_production)
+            self.assertEqual(choice["heat_source"], "stovetop")
             self.assertIn(structure, choice["candidate_id"])
 
     def test_builder_rejects_a_selected_household_exclusion(self):
@@ -269,6 +274,8 @@ class APIServiceTests(unittest.TestCase):
         for field in (
             "candidate_id", "meal_shape", "serving_temperature",
             "preparation_mode", "capability_status", "cost_estimate",
+            "production_strategy", "production_label", "heat_source",
+            "equipment_strategy",
         ):
             self.assertIn(field, first)
         self.assertEqual(first["serving_temperature"], "hot")
@@ -301,6 +308,30 @@ class APIServiceTests(unittest.TestCase):
         )
         self.assertFalse(any(item["candidate_id"].startswith("cold-meal") for item in candidates))
         self.assertTrue(all("Comfort Food" not in item["title"] for item in candidates))
+        self.assertTrue(any(item["meal_structure"] == "composed_plate" for item in candidates))
+        self.assertTrue(any(item["meal_structure"] == "layered_bowl" for item in candidates))
+        self.assertTrue(all(item["production_strategy"] for item in candidates))
+        self.assertTrue(all(item["equipment_strategy"] == "adaptive" for item in candidates))
+
+    def test_reordered_ingredients_do_not_create_duplicate_meal_ideas(self):
+        kitchen = diverse_kitchen_payload()
+        kitchen["inventory"].extend([
+            {"name": "Tomatoes", "form": "Fresh Raw", "amount": "plenty"},
+            {"name": "Garlic", "form": "Fresh Raw", "amount": "plenty"},
+            {"name": "Ground beef", "form": "Fresh Raw", "amount": "plenty"},
+        ])
+
+        candidates = get_recipe_list(kitchen)["candidates"]
+        # Candidate ids can differ, but a reordered component bundle may not
+        # occupy another card in the same family and structure.
+        signatures = [(
+                item["protein"].lower(),
+                tuple(sorted(part.strip().lower() for part in item["vegetable"].split(" & ") if part.strip())),
+                (item.get("foundation") or "").lower(),
+                item["dish_family"],
+                item["meal_structure"],
+            ) for item in candidates]
+        self.assertEqual(len(signatures), len(set(signatures)))
 
     def test_make_a_meal_assortment_uses_effort_and_real_variety(self):
         low_kitchen = diverse_kitchen_payload()
@@ -398,6 +429,7 @@ class APIServiceTests(unittest.TestCase):
     def test_opened_recipe_includes_forms_and_complete_seasoning(self):
         kitchen = diverse_kitchen_payload()
         kitchen["equipment"] = [{"name": "Microwave"}]
+        kitchen["effort"] = "High"
         candidate = next(
             item for item in get_recipe_list(kitchen)["candidates"]
             if item["candidate_id"].startswith("skillet-chicken-breast")

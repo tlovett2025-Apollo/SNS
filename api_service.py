@@ -39,10 +39,10 @@ _MEAL_SHAPES = {
 _LIVE_PLANNER_METHODS = {"skillet", "casserole", "soup", "handheld"}
 
 _BUILDER_METHODS = (
-    {"id": "skillet", "label": "Skillet", "description": "One-pan stovetop meal."},
-    {"id": "soup", "label": "Soup", "description": "A broth-based meal in one pot."},
-    {"id": "casserole", "label": "Casserole", "description": "An oven-baked family-style meal."},
-    {"id": "handheld", "label": "Wrap or Sandwich", "description": "A handheld meal with a bread or wrap foundation."},
+    {"id": "skillet", "label": "Stovetop", "description": "One or more stovetop vessels; meal structure decides whether components join or stay separate."},
+    {"id": "soup", "label": "Soup or Stew", "description": "A liquid-led one-vessel meal; SNS chooses the suitable owned pot."},
+    {"id": "casserole", "label": "Oven Bake", "description": "An oven-baked meal assembled in one baking dish."},
+    {"id": "handheld", "label": "Handheld", "description": "Components cooked as needed, then assembled with bread or a wrap."},
 )
 
 _BUILDER_EXTRA_NAMES = (
@@ -267,7 +267,7 @@ def get_meal_builder_options(payload: dict | None = None, db_path: str | Path = 
         "cuisines": [row["name"] for row in cuisines],
         "methods": list(_BUILDER_METHODS),
         "meal_structures": [
-            {"id": "integrated", "label": "Cooked Together", "description": "A cohesive skillet, pot, soup, or casserole."},
+            {"id": "integrated", "label": "Cooked Together", "description": "A cohesive one-vessel meal whose compatible ingredients join in stages."},
             {"id": "composed_plate", "label": "Composed Plate", "description": "Restaurant-style: protein, vegetable, and foundation prepared independently."},
             {"id": "layered_bowl", "label": "Layered Bowl", "description": "A foundation with components arranged or spooned over it."},
         ],
@@ -457,9 +457,15 @@ def _concept_requests(engine_request: dict, resolved: list[ResolvedIngredient]):
                 if foundations and variant != 1 else ""
             )
             request["cuisine_name"] = flavor_directions[(protein_index + variant) % len(flavor_directions)]
+            request["meal_structure"] = (
+                "composed_plate" if variant == 1
+                else "layered_bowl" if variant == 2 and request["foundation_name"]
+                else "integrated"
+            )
             signature = (
-                _key(protein.name), tuple(_key(item) for item in bundle),
+                _key(protein.name), tuple(sorted(_key(item) for item in bundle)),
                 _key(request["foundation_name"]), _key(request["cuisine_name"]),
+                request["meal_structure"],
             )
             if signature in seen:
                 continue
@@ -513,6 +519,11 @@ def _choose_concept_candidate(options, protein, used_methods):
 
 
 def _dish_family(candidate: dict) -> str:
+    structure = _clean(candidate.get("meal_structure")) or "integrated"
+    if structure == "composed_plate":
+        return "composed_plate"
+    if structure == "layered_bowl":
+        return "layered_bowl"
     method = _clean(candidate.get("cooking_method", candidate.get("strategy")))
     protein = _key(candidate.get("protein"))
     cuisine = _key(candidate.get("cuisine"))
@@ -522,10 +533,10 @@ def _dish_family(candidate: dict) -> str:
         if "steak" in protein:
             return "seared_dinner"
         if "ground" in protein:
-            return "skillet_hash"
+            return "hash"
         if "bean" in protein or candidate.get("protein_state") == "Canned":
-            return "pantry_skillet"
-        return "pan_supper"
+            return "pantry_supper"
+        return "one_pot_supper"
     if method == "soup":
         return "bean_soup" if "bean" in protein else "rustic_soup"
     if method == "casserole":
@@ -538,18 +549,49 @@ def _dish_family(candidate: dict) -> str:
 _FAMILY_LABELS = {
     "stir_fry": "Stir-Fry",
     "seared_dinner": "Seared Dinner",
-    "skillet_hash": "Skillet Hash",
-    "pantry_skillet": "Pantry Skillet",
-    "pan_supper": "Pan Supper",
+    "hash": "Hash",
+    "pantry_supper": "Pantry Supper",
+    "one_pot_supper": "One-Pot Supper",
     "bean_soup": "Bean Soup",
     "rustic_soup": "Rustic Soup",
     "baked_casserole": "Casserole",
     "wrap_or_sandwich": "Wrap or Sandwich",
+    "composed_plate": "Composed Plate",
+    "layered_bowl": "Layered Bowl",
 }
+
+
+_PRODUCTION_LABELS = {
+    "one_vessel": "One vessel",
+    "multi_component": "Multi-component",
+    "component_assembly": "Cook, then assemble",
+}
+
+
+def _production_strategy(candidate: dict) -> str:
+    structure = _clean(candidate.get("meal_structure")) or "integrated"
+    method = _clean(candidate.get("cooking_method", candidate.get("strategy")))
+    if structure == "composed_plate":
+        return "multi_component"
+    if structure == "layered_bowl" or method == "handheld":
+        return "component_assembly"
+    return "one_vessel"
+
+
+def _heat_source(candidate: dict) -> str:
+    method = _clean(candidate.get("cooking_method", candidate.get("strategy")))
+    if method == "casserole":
+        return "oven"
+    if method == "handheld":
+        return "mixed"
+    return "stovetop"
 
 
 def _selection_title(candidate: dict) -> str:
     ingredients = [candidate.get("protein"), *str(candidate.get("vegetable") or "").split(" & ")]
+    structure = _clean(candidate.get("meal_structure")) or "integrated"
+    if structure in {"composed_plate", "layered_bowl"}:
+        ingredients.append(candidate.get("foundation"))
     ingredients = [_clean(item) for item in ingredients if _clean(item)]
     if len(ingredients) > 1:
         components = f"{', '.join(ingredients[:-1])} & {ingredients[-1]}"
@@ -559,7 +601,11 @@ def _selection_title(candidate: dict) -> str:
     prefix = "" if cuisine in {"", "Comfort Food", "American"} else f"{cuisine} "
     family = _FAMILY_LABELS.get(candidate.get("dish_family"), _clean(candidate.get("label")) or "Meal")
     foundation = _clean(candidate.get("foundation"))
-    with_foundation = f" with {foundation}" if foundation and family not in {"Casserole", "Bean Soup", "Rustic Soup"} else ""
+    with_foundation = (
+        f" with {foundation}"
+        if foundation and structure == "integrated" and family not in {"Casserole", "Bean Soup", "Rustic Soup"}
+        else ""
+    )
     return f"{prefix}{components} {family}{with_foundation}"
 
 
@@ -684,9 +730,10 @@ def _select_assortment(pool: list[dict], limit: int) -> list[dict]:
     unique = {}
     for candidate in pool:
         signature = (
-            _key(candidate.get("protein")), _key(candidate.get("vegetable")),
+            _key(candidate.get("protein")),
+            tuple(sorted(_key(item) for item in str(candidate.get("vegetable") or "").split(" & ") if _key(item))),
             _key(candidate.get("foundation")), _key(candidate.get("dish_family")),
-            _key(candidate.get("cuisine")),
+            _key(candidate.get("cuisine")), _key(candidate.get("meal_structure")),
         )
         current = unique.get(signature)
         if current is None or candidate["selection_score"] > current["selection_score"]:
@@ -710,32 +757,65 @@ def _select_assortment(pool: list[dict], limit: int) -> list[dict]:
     use_soon = [item for item in remaining if any("uses soon:" in reason for reason in item.get("selection_reasons") or [])]
     if use_soon and len(selected) < limit:
         add(max(use_soon, key=lambda item: item["selection_score"]), "Use soon")
+    cooked_together_stovetop = [
+        item for item in remaining
+        if _clean(item.get("cooking_method", item.get("strategy"))) == "skillet"
+        and (_clean(item.get("meal_structure")) or "integrated") == "integrated"
+    ]
+    if cooked_together_stovetop and len(selected) < limit:
+        candidate = max(cooked_together_stovetop, key=lambda item: item["selection_score"])
+        add(candidate, _FAMILY_LABELS.get(candidate.get("dish_family"), "Cooked together"))
 
     while remaining and len(selected) < limit:
         family_counts = {}
         method_counts = {}
         protein_counts = {}
+        structure_counts = {}
         bundles = set()
         for item in selected:
             family_counts[item.get("dish_family")] = family_counts.get(item.get("dish_family"), 0) + 1
             method = item.get("cooking_method", item.get("strategy"))
             method_counts[method] = method_counts.get(method, 0) + 1
             protein_counts[_key(item.get("protein"))] = protein_counts.get(_key(item.get("protein")), 0) + 1
-            bundles.add((_key(item.get("protein")), _key(item.get("vegetable")), _key(item.get("foundation"))))
+            structure = _clean(item.get("meal_structure")) or "integrated"
+            structure_counts[structure] = structure_counts.get(structure, 0) + 1
+            bundles.add((
+                _key(item.get("protein")),
+                tuple(sorted(_key(part) for part in str(item.get("vegetable") or "").split(" & ") if _key(part))),
+                _key(item.get("foundation")),
+            ))
 
         def assortment_value(item):
             value = item["selection_score"]
             value -= family_counts.get(item.get("dish_family"), 0) * 28
             value -= method_counts.get(item.get("cooking_method", item.get("strategy")), 0) * 14
             value -= protein_counts.get(_key(item.get("protein")), 0) * 16
+            structure = _clean(item.get("meal_structure")) or "integrated"
+            value -= structure_counts.get(structure, 0) * 10
+            if structure not in structure_counts and structure != "integrated":
+                value += 20
             if _key(item.get("protein")) not in protein_counts:
                 value += 100
-            bundle = (_key(item.get("protein")), _key(item.get("vegetable")), _key(item.get("foundation")))
+            bundle = (
+                _key(item.get("protein")),
+                tuple(sorted(_key(part) for part in str(item.get("vegetable") or "").split(" & ") if _key(part))),
+                _key(item.get("foundation")),
+            )
             if bundle in bundles:
                 value -= 45
             return value
 
-        add(max(remaining, key=assortment_value), "Different direction")
+        candidate = max(remaining, key=assortment_value)
+        structure = _clean(candidate.get("meal_structure")) or "integrated"
+        used_badges = {item.get("selection_badge") for item in selected}
+        if structure == "composed_plate":
+            badge = "Composed plate" if "Composed plate" not in used_badges else f"{_clean(candidate.get('protein'))} plate"
+        elif structure == "layered_bowl":
+            badge = "Layered bowl" if "Layered bowl" not in used_badges else f"{_clean(candidate.get('protein'))} bowl"
+        else:
+            family = _FAMILY_LABELS.get(candidate.get("dish_family"), "Another idea")
+            badge = family if family not in used_badges else _clean(candidate.get("protein")) or "Another idea"
+        add(candidate, badge)
     return selected
 
 
@@ -853,6 +933,7 @@ def _candidate_view(candidate: dict) -> dict:
     method = _clean(candidate.get("cooking_method", candidate.get("strategy")))
     candidate_id = _clean(candidate.get("candidate_id")) or method or "candidate"
     meal_structure = _clean(candidate.get("meal_structure")) or "integrated"
+    production_strategy = _production_strategy(candidate)
     meal_shape = (
         "bowl" if meal_structure == "layered_bowl"
         else "plate" if meal_structure == "composed_plate"
@@ -864,6 +945,10 @@ def _candidate_view(candidate: dict) -> dict:
         "title": candidate.get("title") or candidate.get("label") or "Stock & Stir meal",
         "meal_shape": meal_shape,
         "meal_structure": meal_structure,
+        "production_strategy": production_strategy,
+        "production_label": _PRODUCTION_LABELS[production_strategy],
+        "heat_source": _heat_source(candidate),
+        "equipment_strategy": "adaptive",
         "serving_temperature": "cold" if method == "cold_meal" else "hot",
         "preparation_mode": "assembled" if method in {"cold_meal", "handheld"} else "cooked",
         "meal_occasion": candidate.get("meal_occasion") or "Any",
@@ -882,6 +967,8 @@ def _candidate_view(candidate: dict) -> dict:
         "selection_reasons": list(candidate.get("selection_reasons") or []),
         "dish_family": candidate.get("dish_family") or _dish_family(candidate),
         "protein": candidate.get("protein"),
+        "vegetable": candidate.get("vegetable"),
+        "foundation": candidate.get("foundation"),
         "cuisine": candidate.get("cuisine"),
         "cooking_method": method,
         "match": _match_text(int(candidate.get("selection_score", candidate.get("score", 0)))),
@@ -1013,7 +1100,8 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         _slug("-".join(produce)) or "no-produce",
         _slug(foundation) or "no-foundation",
     ))
-    candidate["title"] = _concept_title(candidate)
+    candidate["dish_family"] = _dish_family(candidate)
+    candidate["title"] = _selection_title(candidate)
     candidate["meal_occasion"] = _clean(selections.get("meal_occasion")) or "Any"
     candidate["serving_temperature"] = "hot"
     return snapshot, resolved, pending, [candidate], engine_request
@@ -1038,6 +1126,8 @@ def _raw_candidates(payload: dict, db_path: str | Path):
         for option_index, candidate in enumerate(options):
             method = candidate.get("cooking_method", candidate.get("strategy", "meal"))
             if method not in _LIVE_PLANNER_METHODS:
+                continue
+            if method != "skillet" and _clean(candidate.get("meal_structure")) not in {"", "integrated"}:
                 continue
             candidate["dish_family"] = _dish_family(candidate)
             candidate["title"] = _selection_title(candidate)
@@ -1132,6 +1222,10 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
         "total_minutes": classification["total_minutes"],
         "meal_shape": classification["meal_shape"],
         "meal_structure": classification["meal_structure"],
+        "production_strategy": classification["production_strategy"],
+        "production_label": classification["production_label"],
+        "heat_source": classification["heat_source"],
+        "equipment_strategy": classification["equipment_strategy"],
         "serving_temperature": classification["serving_temperature"],
         "preparation_mode": classification["preparation_mode"],
         "meal_occasion": classification["meal_occasion"],

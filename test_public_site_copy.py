@@ -54,7 +54,9 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     builder_page = (PUBLIC_FLOW.parent / "build-your-meal.html").read_text(encoding="utf-8")
 
     assert "data-build-meal" in kitchen_page
-    assert "Build Your Meal" in kitchen_page
+    assert "Help Me Build My Meal" in kitchen_page
+    assert "Give Me Meal Ideas" in kitchen_page
+    assert "Signature Recipes" in kitchen_page
     assert 'mode: "build_your_meal"' in flow
     assert "await requestRecipe(candidate.candidate_id" in flow
     assert "One protein for now" in builder_page
@@ -63,11 +65,12 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     assert "Composed Plate" in flow
     assert "Layered Bowl" in flow
     assert "Cooked Together" in flow
+    assert 'label:"Stovetop"' in flow
     assert "Protein form" in builder_page
     assert "<option>Canned</option>" in builder_page
     assert 'input[name="extras"]:checked' in flow
     assert "Cold <small>training next" in builder_page
-    assert "plate or in a bowl" in builder_page
+    assert "How should the finished meal come together?" in builder_page
 
 
 def test_quantity_and_form_controls_cover_packages_cans_appetites_and_garlic():
@@ -103,3 +106,16 @@ def test_make_a_meal_exposes_effort_and_selection_context():
     assert "selection_badge" in flow
     assert "effort_label" in flow
     assert "data-expiration-date" in flow
+
+
+def test_three_meal_paths_have_distinct_jobs():
+    kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
+    builder_page = (PUBLIC_FLOW.parent / "build-your-meal.html").read_text(encoding="utf-8")
+    signature_page = (PUBLIC_FLOW.parent / "signature-recipes.html").read_text(encoding="utf-8")
+
+    assert "Give Me Meal Ideas" in kitchen_page
+    assert "Help Me Build My Meal" in kitchen_page
+    assert "Signature Recipes" in kitchen_page
+    assert "Choose the cooking environment" in builder_page
+    assert "meal structure, effort, liquid, and ingredient behavior" in builder_page
+    assert "known recipe" in signature_page
