@@ -58,6 +58,95 @@ const SNS = (() => {
     Fresh: "Fresh"
   };
 
+  function currentPage() {
+    return location.pathname.split("/").pop() || "home.html";
+  }
+
+  function installAppShell() {
+    if (!document.body.hasAttribute("data-app-shell")) return;
+    document.body.classList.add("app-shell-page");
+    const page = currentPage();
+    const activeFor = href => {
+      if (href === "my-kitchen.html?start=ideas") return page === "choose-recipe.html";
+      if (href === "my-kitchen.html?start=builder") return page === "build-your-meal.html";
+      return page === href.split("?")[0];
+    };
+    const link = (href, label, className = "") => `
+      <a class="app-nav-link ${className}${activeFor(href) ? " active" : ""}" href="${href}"${activeFor(href) ? ' aria-current="page"' : ""}>${label}</a>`;
+    const onKitchenPage = page === "my-kitchen.html";
+    const sidebar = document.createElement("aside");
+    sidebar.className = "app-sidebar";
+    sidebar.setAttribute("aria-label", "Stock and Stir navigation");
+    sidebar.innerHTML = `
+      <a class="app-sidebar-brand" href="home.html">Stock <span>&amp;</span> Stir</a>
+      <nav class="app-sidebar-nav">
+        ${link("home.html", "Home")}
+        <div class="app-nav-label">Make dinner</div>
+        ${link("my-kitchen.html?start=ideas", "Give Me Meal Ideas", "meal-action")}
+        ${link("my-kitchen.html?start=builder", "Help Me Build My Meal", "meal-action")}
+        ${link("signature-recipes.html", "Signature Recipes", "meal-action")}
+        ${link("favorite-recipes.html", "My Favorite Recipes")}
+        <div class="app-nav-label">My household</div>
+        ${link("my-kitchen.html", "My Kitchen")}
+        ${link("household-preferences.html", "Household Preferences")}
+        <div class="app-nav-label">Learn</div>
+        ${link("kitchen-training.html", "Kitchen Training")}
+        ${link("pantry-101.html", "Pantry 101")}
+      </nav>
+      ${onKitchenPage ? `<div class="app-sidebar-save"><span data-save-status>Changes are stored in this browser.</span><button class="btn btn-primary" type="button" data-save-kitchen>Save My Kitchen</button></div>` : ""}
+      <a class="app-sidebar-account" href="login.html">Account</a>`;
+    const overlay = document.createElement("button");
+    overlay.type = "button";
+    overlay.className = "app-sidebar-overlay";
+    overlay.setAttribute("aria-label", "Close navigation");
+    document.body.prepend(overlay);
+    document.body.prepend(sidebar);
+
+    const header = document.querySelector(".site-header");
+    if (header) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "app-menu-toggle";
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.textContent = "Menu";
+      header.prepend(toggle);
+      const close = () => {
+        document.body.classList.remove("app-nav-open");
+        toggle.setAttribute("aria-expanded", "false");
+      };
+      toggle.addEventListener("click", () => {
+        const open = document.body.classList.toggle("app-nav-open");
+        toggle.setAttribute("aria-expanded", String(open));
+      });
+      overlay.addEventListener("click", close);
+      sidebar.querySelectorAll("a").forEach(item => item.addEventListener("click", close));
+    }
+  }
+
+  function renderHome() {
+    const target = document.querySelector("[data-welcome-name]");
+    if (!target) return;
+    let kitchen = {};
+    let auth = {};
+    try { kitchen = JSON.parse(localStorage.getItem(kitchenStorageKey) || "{}"); } catch {}
+    try { auth = JSON.parse(sessionStorage.getItem("snsAuthPrototype") || "{}"); } catch {}
+    const memberName = (kitchen.household_members || []).find(member => String(member.name || "").trim())?.name;
+    const emailName = String(auth.email || "").split("@")[0].replace(/[._-]+/g, " ").trim();
+    target.textContent = memberName || emailName || "Susie-Q";
+    const count = (kitchen.foods || []).filter(item => Number(item.quantity || 0) > 0).length;
+    const countTarget = document.querySelector("[data-home-kitchen-count]");
+    if (countTarget) countTarget.textContent = count ? `${count} foods remembered` : "My Kitchen is ready";
+  }
+
+  function runRequestedKitchenAction() {
+    if (currentPage() !== "my-kitchen.html") return;
+    const action = new URLSearchParams(location.search).get("start");
+    if (!action) return;
+    history.replaceState({}, "", "my-kitchen.html");
+    if (action === "ideas") generateRecipeList();
+    if (action === "builder") openMealBuilder();
+  }
+
   function quantityProfile(name) {
     return quantityProfiles[String(name || "").toLowerCase()] || { unit: "item", step: 1 };
   }
@@ -1016,6 +1105,7 @@ const SNS = (() => {
   }
 
   function init() {
+    installAppShell();
     upgradeQuantityEditors();
     restoreBrowserKitchen();
     bindAmounts();
@@ -1024,12 +1114,14 @@ const SNS = (() => {
     renderRecipeChoices();
     renderRecipe();
     renderMealBuilder();
+    renderHome();
     document.querySelector("[data-save-kitchen]")?.addEventListener("click", saveKitchen);
     document.querySelector("[data-get-recipes]")?.addEventListener("click", generateRecipeList);
     document.querySelector("[data-build-meal]")?.addEventListener("click", openMealBuilder);
     document.querySelector("[data-signature-recipes]")?.addEventListener("click", openSignatureRecipes);
     document.querySelectorAll("[data-checkout]").forEach(b => b.addEventListener("click", () => checkout(b.dataset.checkout)));
     document.querySelector("[data-billing-portal]")?.addEventListener("click", billingPortal);
+    runRequestedKitchenAction();
   }
 
   return { init, kitchenPayload, API };

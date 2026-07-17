@@ -9,7 +9,7 @@ const APP_URLS = {
   signup: "login.html?mode=signup",
   "signup-basic": "login.html?mode=signup&plan=basic",
   "signup-premium": "login.html?mode=signup&plan=premium",
-  kitchen: "my-kitchen.html",
+  kitchen: "home.html",
   demo: "my-kitchen.html"
 };
 
