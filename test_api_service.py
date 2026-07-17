@@ -142,6 +142,58 @@ class APIServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(APIContractError, "needs a little more time"):
             get_recipe_list(request)
 
+    def test_soup_places_selected_sauces_before_the_long_simmer(self):
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": {"inventory": [], "equipment": [{"name": "Stovetop"}]},
+            "selections": {
+                "protein": "Beef stew meat", "protein_state": "Fresh Raw",
+                "produce": ["Carrots", "Celery", "Onions", "Potatoes"],
+                "foundation": "", "extras": [
+                    "Beef broth", "Tomato sauce", "Soy sauce", "Worcestershire sauce",
+                ],
+                "cuisine": "Comfort Food", "cooking_method": "soup",
+                "meal_structure": "integrated", "serving_temperature": "hot",
+                "energy": "Low", "time_minutes": 240, "servings": 4,
+            },
+        }
+
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+        plan = " ".join(recipe["steps"])
+
+        self.assertIn(
+            "Tomato sauce & Soy sauce & Worcestershire sauce "
+            "into the cooking liquid before the long simmer",
+            plan,
+        )
+        self.assertNotIn("serve Soy sauce", plan)
+        self.assertNotIn("as part of the soup and heat it through", plan)
+        self.assertEqual(recipe["total_minutes"], 96)
+        self.assertEqual(recipe["active_minutes"], 21)
+        self.assertEqual(recipe["passive_minutes"], 75)
+
+    def test_recipe_ingredients_include_practical_vegetable_amounts(self):
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": {"inventory": [], "equipment": [{"name": "Stovetop"}]},
+            "selections": {
+                "protein": "Beef stew meat", "protein_state": "Fresh Raw",
+                "produce": ["Carrots", "Celery", "Onions", "Potatoes"],
+                "foundation": "", "extras": ["Beef broth"],
+                "cooking_method": "soup", "meal_structure": "integrated",
+                "serving_temperature": "hot", "time_minutes": 240, "servings": 4,
+            },
+        }
+
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+
+        self.assertIn("Carrots — about 2 cups", recipe["ingredients"])
+        self.assertIn("Celery — about 1 cup", recipe["ingredients"])
+        self.assertIn("Onions — about 1 cup", recipe["ingredients"])
+        self.assertIn("Potatoes — about 2 cups", recipe["ingredients"])
+
     def test_builder_catalog_marks_current_kitchen_ownership(self):
         options = get_meal_builder_options(kitchen_payload())
         proteins = {item["name"]: item["owned"] for item in options["proteins"]}
@@ -560,8 +612,8 @@ class APIServiceTests(unittest.TestCase):
         recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
 
         self.assertTrue(any(line.startswith("Chicken breast — Frozen Raw") for line in recipe["ingredients"]))
-        self.assertIn("Onions — Fresh Raw", recipe["ingredients"])
-        self.assertIn("Carrots — Fresh Raw", recipe["ingredients"])
+        self.assertTrue(any(line.startswith("Onions — Fresh Raw · about ") for line in recipe["ingredients"]))
+        self.assertTrue(any(line.startswith("Carrots — Fresh Raw · about ") for line in recipe["ingredients"]))
         self.assertNotIn("Garlic powder — 1/2 teaspoon", recipe["ingredients"])
         self.assertNotIn("Black pepper — 1/4 teaspoon", recipe["ingredients"])
         adjustments = {item["name"]: item for item in recipe["ingredient_adjustments"]}

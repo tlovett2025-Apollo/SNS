@@ -1375,6 +1375,8 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
         "instructions": list(recipe.get("instructions") or []),
         "plan_items": list(recipe.get("plan_items") or []),
         "total_minutes": classification["total_minutes"],
+        "active_minutes": classification["active_minutes"],
+        "passive_minutes": classification["passive_minutes"],
         "meal_shape": classification["meal_shape"],
         "meal_structure": classification["meal_structure"],
         "production_strategy": classification["production_strategy"],

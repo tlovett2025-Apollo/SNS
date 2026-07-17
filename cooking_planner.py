@@ -56,7 +56,7 @@ def _join(items):
     return " & ".join(cleaned)
 
 
-def _extras_instruction(candidate: dict, strategy: str) -> str:
+def _extras_instruction(candidate: dict, strategy: str, phase: str = "finish") -> str:
     """Give every user-selected pantry/fridge extra an explicit job."""
     sauce_profile = get_sauce_profile(_clean(candidate.get("sauce")))
     sauce_keys = {
@@ -65,6 +65,7 @@ def _extras_instruction(candidate: dict, strategy: str) -> str:
     extras = [
         _clean(item) for item in candidate.get("selected_extras") or [] if _clean(item)
         and _clean(item).lower() not in sauce_keys
+        and _clean(item).lower() != _clean(candidate.get("soup_liquid")).lower()
     ]
     if not extras:
         return ""
@@ -72,10 +73,12 @@ def _extras_instruction(candidate: dict, strategy: str) -> str:
         item: set(get_ingredient_profile(item, "ingredient").behavior_family_codes)
         for item in extras
     }
-    table = [
-        item for item in extras
-        if family_codes[item] & {"prepared_condiment", "cultured_creamy"}
-    ]
+    table_families = (
+        {"cultured_creamy"}
+        if strategy == "soup"
+        else {"prepared_condiment", "cultured_creamy"}
+    )
+    table = [item for item in extras if family_codes[item] & table_families]
     cooking = [
         item for item in extras
         if item not in table
@@ -85,9 +88,9 @@ def _extras_instruction(candidate: dict, strategy: str) -> str:
     if strategy == "handheld":
         return f"Spread, spoon, or layer {_join(extras)} into the handheld during assembly."
     if strategy == "soup":
-        if cooking:
-            parts.append(f"Stir in {_join(cooking)} as part of the soup and heat it through.")
-        if table:
+        if phase == "build" and cooking:
+            parts.append(f"Stir {_join(cooking)} into the cooking liquid before the long simmer.")
+        if phase == "finish" and table:
             parts.append(f"Take the pot off the heat, then serve {_join(table)} on top or alongside.")
     elif strategy == "casserole":
         if cooking:
@@ -546,6 +549,7 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             opening = (
                 f"Set the soup pot over medium heat and add {soup_liquid_measure} of {soup_liquid}. "
             )
+        soup_build_extras = _extras_instruction(candidate, strategy, "build")
         activities.append(_planner_activity(
             "build soup",
             (
@@ -557,6 +561,7 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
                     else (f"Keep {protein} in the pot. " if protein else "")
                 )
                 + f"Stir in {seasoning_text}. "
+                + (f"{soup_build_extras} " if soup_build_extras else "")
                 + "Bring everything to a gentle simmer."
             ),
             minutes=3,

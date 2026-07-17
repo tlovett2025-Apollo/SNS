@@ -481,6 +481,28 @@ FAMILY_LIBRARY: Dict[str, BehaviorFamily] = {
     ),
 }
 
+# Retail stew meat is already cut into small pieces and reaches its intended
+# tenderness sooner than a whole brisket or roast. It remains collagen-rich
+# long-cook meat, but owns a distinct verified time instead of forcing every
+# member of the broad tough-meat family onto one clock.
+FAMILY_LIBRARY["stew_cut"] = replace(
+    FAMILY_LIBRARY["tough_meat"],
+    code="stew_cut",
+    name="Stew-cut collagen-rich meat",
+    description="Small stew-ready pieces that become fork-tender through a moderate moist cook.",
+    methods=(
+        replace(
+            FAMILY_LIBRARY["tough_meat"].methods[0],
+            cook_minutes=75,
+            instruction_template=(
+                "Brown {name} in batches, add enough liquid for a braise, cover, "
+                "and simmer gently until the pieces are fork-tender."
+            ),
+        ),
+        READY_REHEAT,
+    ),
+)
+
 # Additional operational families discovered by auditing every selectable KO.
 # They use the same contract as the original library; ingredient names below
 # only classify membership and never contain the cooking instructions.
@@ -1242,7 +1264,7 @@ def _set_portion(family_code, basis, amount, label, rounding="practical", stretc
     )
 
 
-for _code in ("ground_meat", "tough_meat", "pork_roast", "whole_poultry"):
+for _code in ("ground_meat", "tough_meat", "stew_cut", "pork_roast", "whole_poultry"):
     _set_portion(_code, "weight_oz", 4, "pound", "quarter_pound_up", True)
 for _code in ("poultry_piece", "fish_fillet", "pork_cut", "tender_steak", "sausage"):
     _set_portion(_code, "pieces", 1, "piece", "whole_up", True)
@@ -1258,6 +1280,16 @@ for _code in ("soft_potato", "corn_porridge"):
 _set_portion("legume", "cans", .25, "can", "half_can_minimum", True)
 _set_portion("prepared_legume", "cans", .25, "can", "half_can_minimum", True)
 _set_portion("ready_cured_meat", "pieces", 1, "piece", "whole_up", True)
+# Vegetable amounts are planning estimates, expressed as practical prepared
+# volume so a cook knows whether "carrots" means one handful or a stockpot.
+for _code in (
+    "sturdy_root", "tender_watery", "tomato", "leafy_tender", "leafy_sturdy",
+    "mushroom", "quick_green", "cruciferous", "winter_squash", "cabbage",
+    "okra", "crisp_stir_fry", "sweet_kernel", "corn", "artichoke",
+):
+    _set_portion(_code, "prepared_cups", .5, "cup", "quarter_cup_up", True)
+for _code in ("aromatic_slow", "pepper"):
+    _set_portion(_code, "prepared_cups", .25, "cup", "quarter_cup_up", True)
 
 
 def _set_sensory(family_code, flavors=(), functions=(), texture="", color=""):
@@ -1274,7 +1306,7 @@ def _set_sensory(family_code, flavors=(), functions=(), texture="", color=""):
 for _code in (
     "ground_meat", "poultry_piece", "tender_steak", "pork_cut", "whole_poultry",
     "pork_roast", "fish_fillet", "shellfish_quick", "sausage", "bacon",
-    "ready_protein", "ready_cured_meat", "plant_protein", "tough_meat", "egg",
+    "ready_protein", "ready_cured_meat", "plant_protein", "tough_meat", "stew_cut", "egg",
 ):
     _set_sensory(_code, ("savory", "umami"), ("protein-anchor", "browning-source"), "substantial")
 for _code in ("white_rice", "brown_rice", "quinoa", "pasta", "bread_wrap", "soft_potato", "crisp_potato", "baked_potato", "corn_porridge"):
@@ -1312,7 +1344,8 @@ _set_sensory("dry_baking_helper", ("neutral",), ("formula-structure",), "")
 
 ASSIGNMENTS = {
     "ground_meat": {"ground beef", "ground chicken", "ground turkey"},
-    "tough_meat": {"beef stew meat", "chuck roast", "beef brisket", "pork shoulder"},
+    "tough_meat": {"chuck roast", "beef brisket", "pork shoulder"},
+    "stew_cut": {"beef stew meat"},
     "poultry_piece": {"chicken breast", "chicken thighs", "chicken drumsticks", "chicken wings"},
     "fish_fillet": {"cod", "tilapia", "salmon"},
     "shellfish_quick": {"shrimp"},

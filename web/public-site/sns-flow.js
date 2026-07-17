@@ -1265,7 +1265,15 @@ const SNS = (() => {
     if (!document.querySelector("[data-recipe-title]")) return;
     document.querySelector("[data-recipe-title]").textContent = recipe.title || "Your recipe";
     document.querySelector("[data-recipe-summary]").textContent = recipe.summary || "";
-    document.querySelector("[data-recipe-time]").textContent = recipe.total_minutes ? `${recipe.total_minutes} minutes` : "Flexible timing";
+    document.querySelector("[data-recipe-time]").textContent = recipe.total_minutes ? `${recipe.total_minutes} total minutes` : "Flexible timing";
+    const workTime = document.querySelector("[data-recipe-work-time]");
+    if (workTime) {
+      const active = Number(recipe.active_minutes || 0);
+      const passive = Number(recipe.passive_minutes || 0);
+      workTime.textContent = active || passive
+        ? `${active} active · ${passive} mostly waiting`
+        : "";
+    }
     document.querySelector("[data-ingredients]").innerHTML = (recipe.ingredients || []).map(x => `<li>${escapeHtml(x)}</li>`).join("");
     const kitchenItems = (recipe.inventory_requirements || [])
       .filter(item => ["Need", "Substitute", "Omit"].includes(item?.status))

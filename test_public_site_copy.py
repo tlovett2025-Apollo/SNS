@@ -46,6 +46,9 @@ def test_recipe_page_exposes_inventory_resolutions_and_preserves_substep_breaks(
     assert "item.omission_consequence" in flow
     assert "item.resolved_name" in flow
     assert "white-space: pre-wrap" in css
+    assert "data-recipe-work-time" in recipe_page
+    assert "total minutes" in flow
+    assert "mostly waiting" in flow
 
 
 def test_build_your_meal_is_a_direct_shared_engine_path():
