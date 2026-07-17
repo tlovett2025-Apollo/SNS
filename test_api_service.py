@@ -571,23 +571,19 @@ class APIServiceTests(unittest.TestCase):
 
         kinds = [item["kind"] for item in recipe["plan_items"]]
         self.assertEqual(kinds[:4], ["info", "info", "info", "action"])
-        self.assertTrue(any(
-            item["kind"] == "info" and "come to pressure" in item["text"]
+        self.assertFalse(any(
+            "come to pressure" in item["text"]
+            or "natural release" in item["text"]
+            or "Cook the rice at high pressure" in item["text"]
             for item in recipe["plan_items"]
         ))
         self.assertFalse(any(
             "come to pressure" in step for step in recipe["steps"]
         ))
-        self.assertTrue(any(
-            item["kind"] == "info"
-            and "timing the defrosting" in item["text"]
-            and "instead of sitting" in item["text"]
-            for item in recipe["plan_items"]
-        ))
         thaw_step = next(step for step in recipe["steps"] if "microwave defrost setting" in step)
-        prep_step = next(step for step in recipe["steps"] if "finishes defrosting" in step)
-        self.assertTrue(thaw_step.startswith("Minutes 5–12:"))
-        self.assertTrue(prep_step.startswith("Minutes 9–12:"))
+        prep_step = next(step for step in recipe["steps"] if "Ingredient Prep:" in step)
+        self.assertTrue(thaw_step.startswith("Minutes 16–23:"))
+        self.assertTrue(prep_step.startswith("Minutes 4–16:"))
         self.assertIn("\n\n", prep_step)
         self.assertEqual(recipe["missing_items"], [])
         adjustments = {item["name"]: item for item in recipe["ingredient_adjustments"]}

@@ -43,18 +43,35 @@ def build_rice_equipment_activities(rice_name: str, equipment_name: str) -> List
     if equipment == "pressure cooker":
         behavior = resolve_behavior(rice_name, "foundation", db_path=DB_PATH)
         pressure_minutes = int(behavior.attributes.get("pressure_minutes", 4))
+        cooked_elapsed_minutes = int(
+            behavior.attributes.get(
+                "pressure_cooked_elapsed_minutes",
+                10 + pressure_minutes,
+            )
+        )
         release_minutes = int(behavior.attributes.get("pressure_release_minutes", 10))
         return [
             KitchenActivity(rice_name, "prep", "Measure the rice and water for the pressure cooker.", 2, True,
                             equipment="counter", stage="early", activity_id=prep_id),
             KitchenActivity(rice_name, "start", "Load the rice and water, lock the lid, close the valve, and start high pressure.", 2, True,
                             equipment="pressure cooker", stage="early", depends_on=[prep_id], activity_id=f"start:{rice_name}"),
-            KitchenActivity(rice_name, "pressurize", "Allow approximately 10 minutes for the cooker to come to pressure.", 10, False,
-                            attention_load=0.0, equipment="pressure cooker", stage="early", depends_on=[f"start:{rice_name}"], activity_id=f"pressurize:{rice_name}"),
-            KitchenActivity(rice_name, "pressure cook", f"Cook the rice at high pressure for {pressure_minutes} minutes.", pressure_minutes, False,
-                            attention_load=0.0, equipment="pressure cooker", stage="early", depends_on=[f"pressurize:{rice_name}"], activity_id=f"pressure cook:{rice_name}"),
-            KitchenActivity(rice_name, "natural release", f"Leave the valve closed for a {release_minutes}-minute natural release, then vent any remaining pressure before opening safely.", release_minutes, False,
-                            attention_load=0.0, equipment="pressure cooker", stage="finish", depends_on=[f"pressure cook:{rice_name}"], activity_id=f"natural release:{rice_name}"),
+            # The appliance still owns this entire interval, so scheduling and
+            # service timing remain honest.  The cook already pressed Start;
+            # narrating pressurizing, cooking, and release as three more recipe
+            # steps only creates noise.
+            KitchenActivity(
+                rice_name,
+                "pressure cycle",
+                "Pressure-cooker rice cycle (including natural release).",
+                cooked_elapsed_minutes + release_minutes,
+                False,
+                attention_load=0.0,
+                equipment="pressure cooker",
+                stage="early",
+                depends_on=[f"start:{rice_name}"],
+                activity_id=f"pressure cycle:{rice_name}",
+                show_in_plan=False,
+            ),
         ]
     return []
 

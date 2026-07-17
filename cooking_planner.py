@@ -1653,6 +1653,20 @@ def _just_in_time_starts(
     prep_id = "prep:meal"
     if prep_id in targets:
         attention_multiplier = _energy_attention_multiplier(candidate or {})
+        hidden_pressure_cycles = [
+            (activity_id, activity)
+            for activity_id, activity in graph.items()
+            if activity.activity_type == "pressure cycle"
+            and not activity.show_in_plan
+            and activity_id in targets
+        ]
+        if hidden_pressure_cycles:
+            # Once the cook presses Start, the long appliance window becomes
+            # the relaxed prep window for everything that cooks afterward.
+            targets[prep_id] = min(
+                targets[prep_id],
+                min(targets[activity_id] for activity_id, _ in hidden_pressure_cycles),
+            )
         for activity_id, activity in graph.items():
             duration = max(0, int(activity.minutes or 0))
             if (
@@ -2169,10 +2183,35 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
     previous_action_end = None
     for item in schedule:
         activity = item.activity
-        if activity.activity_type == "gather" or not activity.instruction or item.end_minute <= item.start_minute:
+        if (
+            activity.activity_type == "gather"
+            or not activity.show_in_plan
+            or not activity.instruction
+            or item.end_minute <= item.start_minute
+        ):
             continue
 
         transition = transition_message(previous_activity, activity)
+
+        display_end_minute = item.end_minute
+        if activity.activity_type == "prep":
+            next_visible_action = next((
+                other for other in schedule
+                if other.start_minute >= item.end_minute
+                and other.activity.human_busy
+                and other.activity.show_in_plan
+                and other.activity.activity_type != "gather"
+            ), None)
+            if next_visible_action and next_visible_action.start_minute > item.end_minute:
+                hidden_appliance_window = any(
+                    not other.activity.show_in_plan
+                    and not other.activity.human_busy
+                    and other.start_minute <= item.end_minute
+                    and other.end_minute >= next_visible_action.start_minute
+                    for other in schedule
+                )
+                if hidden_appliance_window:
+                    display_end_minute = next_visible_action.start_minute
 
         if (
             activity.activity_type == "shared simmer"
@@ -2180,7 +2219,7 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
         ):
             time_window = "About 60–90 minutes"
         else:
-            time_window = f"Minutes {item.start_minute}–{item.end_minute}"
+            time_window = f"Minutes {item.start_minute}–{display_end_minute}"
 
         message = activity_message(
             activity,
@@ -2221,7 +2260,7 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
             "text": f"{time_window}: {(_format_action_substeps(message) if activity.human_busy else ' '.join(message.split()))}",
         })
         if activity.human_busy:
-            previous_action_end = max(previous_action_end or 0, item.end_minute)
+            previous_action_end = max(previous_action_end or 0, display_end_minute)
         previous_activity = activity
 
     items.append({"kind": "info", "text": completion_message(candidate)})

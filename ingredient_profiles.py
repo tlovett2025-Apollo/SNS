@@ -41,6 +41,7 @@ class KitchenActivity:
     parallel_ok: bool = True
     source: str = "ko"
     activity_id: str = ""
+    show_in_plan: bool = True
 
 
 @dataclass

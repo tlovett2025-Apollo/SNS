@@ -499,7 +499,7 @@ def test_slowest_branch_starts_first_and_shorter_branches_converge_at_service():
     by_id = {item.activity.activity_id: item for item in schedule}
 
     assert min(by_id["prep:launch"].start_minute, by_id["thaw:Chicken breast"].start_minute) == 0
-    rice_ready = by_id["natural release:Basmati rice"].end_minute
+    rice_ready = by_id["pressure cycle:Basmati rice"].end_minute
     service = by_id["finish and serve:meal"]
     chard = by_id["cook vegetables:meal"]
     assert service.start_minute >= rice_ready
@@ -557,7 +557,7 @@ def test_printed_recipe_uses_detailed_ko_instructions():
     assert "adjust seasoning" in instructions
 
 
-def test_pressure_cooker_rice_has_all_equipment_owned_phases():
+def test_pressure_cooker_rice_uses_one_silent_equipment_owned_cycle():
     from cooking_planner import build_activity_graph
 
     candidate = parallel_regression_candidate()
@@ -565,10 +565,13 @@ def test_pressure_cooker_rice_has_all_equipment_owned_phases():
     candidate["available_equipment"] = ["Pressure cooker"]
     graph = build_activity_graph(candidate)
 
-    assert graph["pressurize:Basmati rice"].minutes == 10
-    assert graph["pressure cook:Basmati rice"].minutes == 5
-    assert graph["natural release:Basmati rice"].minutes == 10
-    assert graph["natural release:Basmati rice"].equipment == "pressure cooker"
+    cycle = graph["pressure cycle:Basmati rice"]
+    assert cycle.minutes == 35
+    assert cycle.equipment == "pressure cooker"
+    assert cycle.show_in_plan is False
+    assert "pressurize:Basmati rice" not in graph
+    assert "pressure cook:Basmati rice" not in graph
+    assert "natural release:Basmati rice" not in graph
 
 
 def test_candidate_metrics_come_from_final_schedule():
@@ -670,8 +673,8 @@ def test_very_low_energy_soup_skips_optional_sear():
     assert graph["build soup:meal"].depends_on == ["prep:launch"]
 
 
-def test_pressure_cooker_wait_describes_long_window_without_false_phase_claim():
-    from cooking_planner import generate_human_instructions
+def test_pressure_cooker_rice_has_one_launch_instruction_and_no_progress_notes():
+    from cooking_planner import generate_human_instructions, generate_human_plan_items
 
     candidate = generate_candidates(
         "Canned chicken", "Onions", "White rice", "Comfort Food",
@@ -680,7 +683,31 @@ def test_pressure_cooker_wait_describes_long_window_without_false_phase_claim():
         available_equipment=["Pressure cooker"],
     )[0]
     text = generate_human_instructions(candidate)
+    all_text = " ".join(item["text"] for item in generate_human_plan_items(candidate))
 
-    assert "Cook the rice at high pressure for 4 minutes" in text
-    assert "10-minute natural release" in text
-    assert not ("Minutes 4–19" in text and "is coming to pressure" in text)
+    assert text.count("lock the lid, close the valve, and start high pressure") == 1
+    assert "come to pressure" not in all_text
+    assert "coming to pressure" not in all_text
+    assert "Cook the rice at high pressure" not in all_text
+    assert "natural release" not in all_text
+    assert "Ingredient Prep:" in text
+
+
+def test_pressure_cooker_white_rice_uses_25_minutes_to_cooked_plus_ten_release():
+    from cooking_planner import build_kitchen_lane_schedule, generate_human_instructions
+
+    candidate = generate_candidates(
+        "Ground beef", "Zucchini", "White rice", "Comfort Food",
+        "Low", "Budget", 60, 4, 1,
+        vegetable_names=["Zucchini"], protein_state="Fresh Raw",
+        available_equipment=["Pressure cooker"],
+    )[0]
+    schedule = build_kitchen_lane_schedule(candidate)
+    by_id = {item.activity.activity_id: item for item in schedule}
+
+    start = by_id["start:White rice"]
+    cycle = by_id["pressure cycle:White rice"]
+    assert cycle.end_minute - start.end_minute == 35
+    assert by_id["finish and serve:meal"].start_minute >= cycle.end_minute
+    text = generate_human_instructions(candidate)
+    assert "Minutes 4–25: Ingredient Prep:" in text
