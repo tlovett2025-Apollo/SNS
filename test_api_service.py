@@ -121,7 +121,7 @@ class APIServiceTests(unittest.TestCase):
                     {"name": "Beef brisket", "state": "Fresh Raw", "role": "main"},
                     {"name": "Kielbasa", "state": "Fresh Raw", "role": "supporting"},
                 ],
-                "produce": [], "foundation": "",
+                "produce": ["Limes"], "foundation": "",
                 "extras": ["Ketchup", "Mustard", "BBQ sauce", "Hot sauce", "Worcestershire sauce"],
                 "cuisine": "BBQ", "cooking_method": "skillet",
                 "meal_structure": "integrated", "serving_temperature": "hot",
@@ -137,9 +137,15 @@ class APIServiceTests(unittest.TestCase):
         self.assertNotIn("KO-approved", plan)
         self.assertNotIn("thaw before browning", plan.lower())
         self.assertNotIn("Thaw Kielbasa", plan)
+        self.assertNotIn("Plan on about", plan)
         self.assertIn("final", plan.lower())
+        self.assertIn("Limes juice or wedges", plan)
+        self.assertNotIn("distribute Kielbasa & Limes", plan)
+        self.assertNotIn("Plate Limes", plan)
         self.assertIn("165°F for poultry sausage; 160°F for pork or beef sausage", plan)
         self.assertNotIn("Serve Ketchup & Mustard & BBQ sauce", plan)
+        self.assertFalse(any("Shelf-stable" in line for line in recipe["ingredients"]))
+        self.assertTrue(any(line.startswith("Beef brisket — Fresh Raw") for line in recipe["ingredients"]))
         self.assertLess(recipe["active_minutes"], 30)
 
     def test_chicken_tomato_spaghetti_uses_every_ingredient_and_names_two_vessels_honestly(self):
@@ -785,7 +791,7 @@ class APIServiceTests(unittest.TestCase):
         self.assertNotIn("Plan on about", plan)
         self.assertNotIn("Gather the ingredients", plan)
         self.assertIn("Tonight we are making", all_statements)
-        self.assertIn("Plan on about", all_statements)
+        self.assertNotIn("Plan on about", all_statements)
         self.assertIn("gather the ingredients", all_statements)
         self.assertIn("microwave defrost setting", plan)
         self.assertIn("microwave defrost setting", plan)
@@ -802,7 +808,7 @@ class APIServiceTests(unittest.TestCase):
         self.assertLess(plan.index("microwave defrost setting"), plan.index("Heat the skillet"))
 
         kinds = [item["kind"] for item in recipe["plan_items"]]
-        self.assertEqual(kinds[:4], ["info", "info", "info", "action"])
+        self.assertEqual(kinds[:3], ["info", "info", "action"])
         self.assertFalse(any(
             "come to pressure" in item["text"]
             or "natural release" in item["text"]

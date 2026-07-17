@@ -18,7 +18,6 @@ from planner_voice import (
     activity_message,
     completion_message,
     meal_introduction,
-    time_summary,
     transition_message,
 )
 
@@ -651,9 +650,19 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             "finish braise", finish_text, minutes=3, human_busy=True, stage="finish",
             depends_on=[finish_dependency], equipment="burner" if strategy == "braise" else "counter",
         ))
+        service_components = [
+            *[_clean(item.get("name")) for item in supporting],
+            *[name for name in vegetables if name not in finish_components],
+            foundation,
+        ]
+        service_components = [name for name in service_components if name]
+        service_instruction = f"Slice or portion {protein}; "
+        if service_components:
+            service_instruction += f"distribute {_join(service_components)} through the meal, then "
+        service_instruction += "spoon the braising sauce over everything."
         activities.append(_planner_activity(
             "finish and serve",
-            f"Slice or portion {protein}; distribute {_join([*[_clean(item.get('name')) for item in supporting], *vegetables, foundation])} through the meal and spoon the braising sauce over everything.",
+            service_instruction,
             minutes=3, human_busy=True, stage="finish",
             depends_on=["finish braise:meal"], equipment="counter",
         ))
@@ -2333,13 +2342,6 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
     items = [
         {"kind": "info", "text": meal_introduction(candidate)},
     ]
-    summary = time_summary(
-        candidate.get("minutes"),
-        candidate.get("active_minutes"),
-        candidate.get("passive_minutes"),
-    )
-    if summary:
-        items.append({"kind": "info", "text": summary})
     if _clean(candidate.get("quantity_note")):
         items.append({"kind": "info", "text": _clean(candidate.get("quantity_note"))})
 

@@ -993,7 +993,9 @@ def _candidate_ingredient_lines(
         elif key == protein_key and _clean(candidate.get("protein_state")):
             details.append(_clean(candidate.get("protein_state")))
         elif resolved_item and _clean(resolved_item.form_name):
-            details.append(_clean(resolved_item.form_name))
+            form_name = _clean(resolved_item.form_name)
+            if form_name.lower().replace("-", " ") != "shelf stable":
+                details.append(form_name)
 
         requirement = requirements.get(key)
         planned = (candidate.get("quantity_plan") or {}).get(key, {})
