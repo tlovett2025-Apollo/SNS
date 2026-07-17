@@ -56,7 +56,7 @@ SIMPLE_COMFORT_PAN_SAUCE = SauceProfile(
         ),
         SauceIngredient(
             "Garlic powder", "1/2 teaspoon", pantry_optional=True,
-            substitutes=("Fresh garlic",),
+            substitutes=("Garlic", "Fresh garlic", "Garlic granules", "Dried minced garlic"),
             omission_consequence="The finished skillet will have less garlic flavor.",
         ),
         SauceIngredient(

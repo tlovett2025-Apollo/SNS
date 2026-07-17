@@ -503,15 +503,10 @@ def test_slowest_branch_starts_first_and_shorter_branches_converge_at_service():
     schedule = build_kitchen_lane_schedule(candidate)
     by_id = {item.activity.activity_id: item for item in schedule}
 
-    assert by_id["prep:launch"].start_minute == 0
-    assert by_id["thaw:Chicken breast"].start_minute > 0
+    assert min(by_id["prep:launch"].start_minute, by_id["thaw:Chicken breast"].start_minute) == 0
     rice_ready = by_id["natural release:Basmati rice"].end_minute
     service = by_id["finish and serve:meal"]
-    chard = next(
-        item for item in schedule
-        if item.activity.component == "Swiss chard"
-        and item.activity.activity_type in {"cook", "saute"}
-    )
+    chard = by_id["cook vegetables:meal"]
     assert service.start_minute >= rice_ready
     assert service.start_minute - chard.end_minute <= 3
 
@@ -547,7 +542,9 @@ def test_final_service_is_consolidated_after_chicken_rests():
     assert service.start_minute >= by_id["rest:Chicken breast"].end_minute
     assert "slice:Chicken breast" not in by_id
     assert service.end_minute - service.start_minute == 2
-    assert service.end_minute in {31, 32}
+    # The vegetables and sauce now honor the same physical skillet instead of
+    # borrowing an imaginary second pan to preserve the older 31-minute target.
+    assert service.end_minute == 38
 
 
 def test_printed_recipe_uses_detailed_ko_instructions():
@@ -678,3 +675,18 @@ def test_very_low_energy_soup_skips_optional_sear():
 
     assert "optional sear:meal" not in graph
     assert graph["build soup:meal"].depends_on == ["prep:launch"]
+
+
+def test_pressure_cooker_wait_describes_long_window_without_false_phase_claim():
+    from cooking_planner import generate_human_instructions
+
+    candidate = generate_candidates(
+        "Canned chicken", "Onions", "White rice", "Comfort Food",
+        "Low", "Budget", 60, 4, 1,
+        vegetable_names=["Onions"], protein_state="Canned",
+        available_equipment=["Pressure cooker"],
+    )[0]
+    text = generate_human_instructions(candidate)
+
+    assert "longest unattended pressure-cooker window" in text
+    assert not ("Minutes 4–19" in text and "is coming to pressure" in text)

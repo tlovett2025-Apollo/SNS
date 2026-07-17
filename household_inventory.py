@@ -64,6 +64,12 @@ def ensure_inventory_schema(con):
         con.execute("ALTER TABLE user_inventory ADD COLUMN quantity_band TEXT")
     if "origin" not in columns:
         con.execute("ALTER TABLE user_inventory ADD COLUMN origin TEXT DEFAULT 'manual'")
+    if "opened_at" not in columns:
+        con.execute("ALTER TABLE user_inventory ADD COLUMN opened_at TEXT")
+    if "refrigerated_after_opening" not in columns:
+        con.execute("ALTER TABLE user_inventory ADD COLUMN refrigerated_after_opening INTEGER")
+    if "package_weight_oz" not in columns:
+        con.execute("ALTER TABLE user_inventory ADD COLUMN package_weight_oz REAL")
     con.execute(
         "CREATE INDEX IF NOT EXISTS idx_user_inventory_household ON user_inventory(household_id)"
     )
@@ -133,6 +139,19 @@ def _validate_item(con, item):
             date.fromisoformat(str(expiration))
         except ValueError as exc:
             raise InventoryError("expiration_date must be YYYY-MM-DD") from exc
+    opened_at = item.get("opened_at")
+    if opened_at:
+        try:
+            date.fromisoformat(str(opened_at))
+        except ValueError as exc:
+            raise InventoryError("opened_at must be YYYY-MM-DD") from exc
+    package_weight_oz = item.get("package_weight_oz")
+    if package_weight_oz not in (None, ""):
+        package_weight_oz = float(package_weight_oz)
+        if package_weight_oz <= 0:
+            raise InventoryError("package_weight_oz must be positive")
+    else:
+        package_weight_oz = None
     if not con.execute("SELECT 1 FROM ingredients WHERE ingredient_id=?", (ingredient_id,)).fetchone():
         raise InventoryError(f"Unknown ingredient_id: {ingredient_id}")
     if form_id is not None and not con.execute(
@@ -150,6 +169,9 @@ def _validate_item(con, item):
         "expiration_date": expiration or None,
         "confidence_level": item.get("confidence_level") or "user_selected",
         "origin": item.get("origin") or "manual",
+        "opened_at": opened_at or None,
+        "refrigerated_after_opening": item.get("refrigerated_after_opening"),
+        "package_weight_oz": package_weight_oz,
     }
 
 
@@ -164,13 +186,15 @@ def replace_household_inventory(db_path, household_id, acting_user_id, items):
             con.executemany(
                 """INSERT INTO user_inventory
                    (household_id,user_id,ingredient_id,form_id,quantity,unit,
-                    storage_location,expiration_date,confidence_level,quantity_band,origin)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    storage_location,expiration_date,confidence_level,quantity_band,origin,
+                    opened_at,refrigerated_after_opening,package_weight_oz)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 [(
                     household_id, acting_user_id, item["ingredient_id"], item["form_id"],
                     item["quantity"], item["unit"], item["storage_location"],
                     item["expiration_date"], item["confidence_level"],
-                    item["quantity_band"], item["origin"],
+                    item["quantity_band"], item["origin"], item["opened_at"],
+                    item["refrigerated_after_opening"], item["package_weight_oz"],
                 ) for item in validated],
             )
             return len(validated)
@@ -184,7 +208,8 @@ def get_household_inventory(db_path, household_id, acting_user_id):
         return [dict(row) for row in con.execute(
             """SELECT ui.inventory_id,ui.household_id,ui.ingredient_id,ui.form_id,
                       i.name, f.form_name, ui.quantity,ui.unit,ui.storage_location,
-                      ui.expiration_date,ui.confidence_level,ui.quantity_band,ui.origin
+                      ui.expiration_date,ui.confidence_level,ui.quantity_band,ui.origin,
+                      ui.opened_at,ui.refrigerated_after_opening,ui.package_weight_oz
                FROM user_inventory ui
                JOIN ingredients i ON i.ingredient_id=ui.ingredient_id
                LEFT JOIN ingredient_forms f ON f.form_id=ui.form_id

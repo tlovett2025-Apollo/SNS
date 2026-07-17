@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
+from datetime import date
 
 from api_service import (
     APIContractError,
@@ -193,7 +194,7 @@ class APIServiceTests(unittest.TestCase):
         plan = " ".join(recipe["steps"])
 
         self.assertIn("Rotisserie chicken — Cooked", recipe["ingredients"])
-        self.assertIn("Navy beans — Canned", recipe["ingredients"])
+        self.assertTrue(any(line.startswith("Navy beans — Canned") for line in recipe["ingredients"]))
         self.assertIn("Drain and rinse Navy beans", plan)
         self.assertIn("slice or shred Rotisserie chicken", plan)
         self.assertIn("do not recook it", plan)
@@ -282,7 +283,7 @@ class APIServiceTests(unittest.TestCase):
         })
         self.assertEqual(recipe["candidate_id"], candidates[0]["candidate_id"])
         self.assertTrue(recipe["steps"])
-        self.assertIn("Chicken breast — Frozen Raw", recipe["ingredients"])
+        self.assertTrue(any(line.startswith("Chicken breast — Frozen Raw") for line in recipe["ingredients"]))
         self.assertEqual(recipe["capability_status"], "supported")
         provenance = recipe["build_provenance"]
         self.assertRegex(provenance["build_id"], r"^SNS-[0-9a-f]{12}$")
@@ -360,7 +361,7 @@ class APIServiceTests(unittest.TestCase):
 
         recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
 
-        self.assertIn("Chicken breast — Frozen Raw", recipe["ingredients"])
+        self.assertTrue(any(line.startswith("Chicken breast — Frozen Raw") for line in recipe["ingredients"]))
         self.assertIn("Onions — Fresh Raw", recipe["ingredients"])
         self.assertIn("Carrots — Fresh Raw", recipe["ingredients"])
         self.assertNotIn("Garlic powder — 1/2 teaspoon", recipe["ingredients"])
@@ -385,7 +386,7 @@ class APIServiceTests(unittest.TestCase):
         plan = " ".join(recipe["steps"])
         all_statements = " ".join(item["text"] for item in recipe["plan_items"])
 
-        self.assertIn("Ground beef — Frozen Raw", recipe["ingredients"])
+        self.assertTrue(any(line.startswith("Ground beef — Frozen Raw") for line in recipe["ingredients"]))
         self.assertTrue(recipe["steps"][0].startswith("Minutes 0–2:"))
         self.assertIn("Measure the rice", recipe["steps"][0])
         self.assertNotIn("Tonight we are making", plan)
@@ -434,7 +435,8 @@ class APIServiceTests(unittest.TestCase):
             adjustments["Cooking oil or butter"]["resolved_name"],
             "Rendered fat from the ground beef",
         )
-        self.assertEqual(adjustments["Onion powder"]["resolved_name"], "Onions")
+        self.assertEqual(adjustments["Onion powder"]["status"], "Omit")
+        self.assertIn("onion flavor", adjustments["Onion powder"]["omission_consequence"])
         self.assertEqual(adjustments["Cornstarch"]["status"], "Omit")
         self.assertNotIn("Chicken broth", recipe["missing_items"])
         self.assertNotIn("Milk", recipe["missing_items"])
@@ -505,6 +507,70 @@ class APIServiceTests(unittest.TestCase):
     def test_unknown_candidate_is_rejected(self):
         with self.assertRaises(APIContractError):
             get_recipe({"candidate_id": "not-real", "kitchen": kitchen_payload()})
+
+    def test_ribeye_uses_visible_flip_cue_thermometer_rest_and_separate_mash(self):
+        request = {
+            "mode": "build_your_meal", "kitchen": {"inventory": []},
+            "selections": {
+                "protein": "Ribeye steak", "protein_state": "Fresh Raw",
+                "produce": ["Broccoli"], "produce_forms": {"Broccoli": "Fresh"},
+                "foundation": "Mashed potatoes", "cuisine": "Comfort Food",
+                "cooking_method": "skillet", "meal_structure": "composed_plate",
+                "serving_temperature": "hot", "servings": 2,
+                "eater_profiles": {"standard": 2},
+            },
+        }
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+        plan = " ".join(item["text"] for item in recipe["plan_items"])
+
+        self.assertIn("halfway to two-thirds up the side", plan)
+        self.assertIn("145°F", plan)
+        self.assertIn("rest it for at least 3 minutes", plan)
+        self.assertIn("Keep them separate from the steak skillet", plan)
+        self.assertIn("bright green and fork-tender", plan)
+        self.assertNotIn("cook until ready", plan.lower())
+
+    def test_opened_partial_can_gets_age_and_safety_check_before_prep(self):
+        kitchen = {
+            "inventory": [
+                {"name": "Rotisserie chicken", "form": "Ready to Eat", "quantity": 1, "unit": "piece"},
+                {"name": "Navy beans", "form": "Canned", "quantity": 0.5, "unit": "can",
+                 "opened_at": date.today().isoformat(), "refrigerated_after_opening": True},
+            ]
+        }
+        request = {
+            "mode": "build_your_meal", "kitchen": kitchen,
+            "selections": {"protein": "Rotisserie chicken", "foundation": "Navy beans",
+                           "produce": [], "cooking_method": "skillet", "meal_structure": "integrated",
+                           "serving_temperature": "hot", "servings": 2},
+        }
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+        actions = [item["text"] for item in recipe["plan_items"] if item["kind"] == "action"]
+
+        check_index = next(i for i, text in enumerate(actions) if "opened Navy beans" in text)
+        prep_index = next(i for i, text in enumerate(actions) if "Drain and rinse Navy beans" in text)
+        self.assertLess(check_index, prep_index)
+        safety_text = " ".join(actions).lower()
+        self.assertIn("confirm it stayed refrigerated", safety_text)
+        self.assertIn("storage-time limit", safety_text)
+
+    def test_appetite_can_and_aromatic_roles_are_quantity_aware(self):
+        candidate = generate_candidates(
+            "Canned chicken", "Onions", "Navy beans", "Comfort Food",
+            "Low", "Budget", 60, 3, 1, vegetable_names=["Onions"],
+            protein_state="Canned", available_items=["Canned chicken", "Onions", "Navy beans", "Onion powder"],
+            component_forms={"Canned chicken": "Canned", "Onions": "Fresh", "Navy beans": "Canned"},
+            inventory_lots=[{"name": "Navy beans", "form": "Canned", "quantity": 3, "unit": "can"}],
+            eater_profiles={"light": 1, "standard": 1, "big": 1}, use_all_cans=True,
+        )[0]
+        statuses = {item["name"]: item["status"] for item in candidate["inventory_requirements"]}
+
+        self.assertEqual(candidate["effective_portions"], 3.25)
+        self.assertEqual(candidate["quantity_plan"]["navy beans"]["display"], "3 cans")
+        self.assertIn("entire meal larger", candidate["quantity_note"])
+        self.assertEqual(statuses["Onion powder"], "Omit")
 
     def test_save_kitchen_resolves_names_and_preserves_quantity_band(self):
         with tempfile.TemporaryDirectory() as tempdir:

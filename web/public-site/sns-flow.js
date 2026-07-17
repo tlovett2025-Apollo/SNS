@@ -62,7 +62,7 @@ const SNS = (() => {
   }
 
   function quantityStepForUnit(unit) {
-    return ({ lb: 0.25, cup: 0.25 }[unit] || 1);
+    return ({ lb: 0.25, cup: 0.25, package: 0.25, can: 0.5 }[unit] || 1);
   }
 
   function legacyQuantity(level) {
@@ -96,23 +96,32 @@ const SNS = (() => {
         storage: row.dataset.storage,
         form: row.dataset.form || "On hand",
         quantity,
-        unit: row.querySelector("[data-unit]")?.value || quantityProfile(row.dataset.food).unit
+        unit: row.querySelector("[data-unit]")?.value || quantityProfile(row.dataset.food).unit,
+        opened_at: row.querySelector("[data-opened-at]")?.value || null,
+        refrigerated_after_opening: row.querySelector("[data-refrigerated-after-opening]")?.checked ?? null,
+        package_weight_oz: Number(row.querySelector("[data-package-weight]")?.value || 0) || null
       };
     }).filter(item => item.quantity > 0);
+    const householdMembers = [...document.querySelectorAll("[data-household-member]")].map(row => ({
+      name: row.querySelector("[data-member-name]")?.value.trim() || "Household member",
+      appetite: row.querySelector("[data-member-appetite]")?.value || "standard"
+    }));
 
     return {
       api_version: "1.0",
       contract_version: "my-kitchen-v1",
       household_id: "local-demo-household",
       generated_at: new Date().toISOString(),
-      servings: 4,
+      servings: householdMembers.length || 4,
       energy: "Low",
       inventory: items,
       equipment: [...document.querySelectorAll("[data-equipment].active")].map(button => ({
         name: button.dataset.equipment,
         available: true
       })),
-      meal_preferences: {},
+      meal_preferences: {
+        household_members: householdMembers
+      },
       cost_filter: null
     };
   }
@@ -134,12 +143,19 @@ const SNS = (() => {
         form: row.dataset.form || "On hand",
         quantity: Number(row.querySelector("[data-quantity]")?.value || 0),
         unit: row.querySelector("[data-unit]")?.value || quantityProfile(row.dataset.food).unit,
+        opened_at: row.querySelector("[data-opened-at]")?.value || null,
+        refrigerated_after_opening: row.querySelector("[data-refrigerated-after-opening]")?.checked ?? null,
+        package_weight_oz: Number(row.querySelector("[data-package-weight]")?.value || 0) || null,
         custom: row.dataset.custom === "true"
       })),
       equipment: [...document.querySelectorAll("[data-equipment]")].map(button => ({
         name: button.dataset.equipment,
         active: button.classList.contains("active"),
         custom: button.dataset.custom === "true"
+      })),
+      household_members: [...document.querySelectorAll("[data-household-member]")].map(row => ({
+        name: row.querySelector("[data-member-name]")?.value || "",
+        appetite: row.querySelector("[data-member-appetite]")?.value || "standard"
       }))
     };
   }
@@ -148,7 +164,7 @@ const SNS = (() => {
     localStorage.setItem(kitchenStorageKey, JSON.stringify(browserKitchenState()));
   }
 
-  function quantityEditor(name, quantity = 1, unit = "") {
+  function quantityEditor(name, quantity = 1, unit = "", openedAt = "", refrigerated = false, packageWeightOz = "") {
     const profile = quantityProfile(name);
     const selectedUnit = unit || profile.unit;
     return `
@@ -160,10 +176,18 @@ const SNS = (() => {
       <label class="quantity-unit">
         <span class="sr-only">${escapeHtml(name)} unit</span>
         <select data-unit>${unitOptions(selectedUnit)}</select>
-      </label>`;
+      </label>
+      <details class="inventory-detail" data-inventory-detail>
+        <summary>Package or opened-can details</summary>
+        <div class="inventory-detail-fields">
+          <label data-can-field><span>Opened date</span><input type="date" data-opened-at value="${escapeHtml(openedAt)}"></label>
+          <label data-can-field><span>Refrigerated promptly</span><input type="checkbox" data-refrigerated-after-opening${refrigerated ? " checked" : ""}></label>
+          <label data-package-field class="wide"><span>Original package weight in ounces (optional)</span><input type="number" min="0.1" step="0.1" data-package-weight value="${escapeHtml(packageWeightOz)}"></label>
+        </div>
+      </details>`;
   }
 
-  function createFoodRow({ name, storage, form, quantity, unit = "", level = "little", custom = true }) {
+  function createFoodRow({ name, storage, form, quantity, unit = "", level = "little", custom = true, opened_at = "", refrigerated_after_opening = false, package_weight_oz = "" }) {
     const row = document.createElement("div");
     row.className = "food-row";
     row.dataset.food = name;
@@ -173,7 +197,7 @@ const SNS = (() => {
     const startingQuantity = quantity ?? legacyQuantity(level);
     row.innerHTML = `
       <div><div class="food-name">${escapeHtml(name)}</div><div class="food-note">${escapeHtml(row.dataset.form)}</div></div>
-      <div class="amount quantity-editor" aria-label="${escapeHtml(name)} quantity">${quantityEditor(name, startingQuantity, unit)}</div>`;
+      <div class="amount quantity-editor" aria-label="${escapeHtml(name)} quantity">${quantityEditor(name, startingQuantity, unit, opened_at, refrigerated_after_opening, package_weight_oz)}</div>`;
     return row;
   }
 
@@ -188,6 +212,23 @@ const SNS = (() => {
     return button;
   }
 
+  function createHouseholdMember(member = {}) {
+    const row = document.createElement("div");
+    row.className = "household-member-row";
+    row.dataset.householdMember = "true";
+    row.innerHTML = `
+      <label><span class="sr-only">Name</span><input data-member-name placeholder="Name" value="${escapeHtml(member.name || "")}"></label>
+      <label><span class="sr-only">Appetite</span><select data-member-appetite>
+        <option value="light"${member.appetite === "light" ? " selected" : ""}>Light · ¾ portion</option>
+        <option value="standard"${!member.appetite || member.appetite === "standard" ? " selected" : ""}>Standard · 1 portion</option>
+        <option value="big"${member.appetite === "big" ? " selected" : ""}>Big · 1½ portions</option>
+      </select></label>
+      <button type="button" data-remove-member>Remove</button>`;
+    row.querySelectorAll("input,select").forEach(input => input.addEventListener("change", markChanged));
+    row.querySelector("[data-remove-member]").addEventListener("click", () => { row.remove(); markChanged(); });
+    return row;
+  }
+
   function findFoodRow(name, storage) {
     return [...document.querySelectorAll("[data-food]")].find(row =>
       row.dataset.food.toLowerCase() === name.toLowerCase()
@@ -195,13 +236,26 @@ const SNS = (() => {
     );
   }
 
-  function setRowQuantity(row, quantity, unit) {
+  function setRowQuantity(row, quantity, unit, details = {}) {
     const input = row.querySelector("[data-quantity]");
     const select = row.querySelector("[data-unit]");
     if (input) input.value = Number(quantity) || 0;
     if (select && unit && [...select.options].some(option => option.value === unit)) {
       select.value = unit;
     }
+    if (row.querySelector("[data-opened-at]")) row.querySelector("[data-opened-at]").value = details.opened_at || "";
+    if (row.querySelector("[data-refrigerated-after-opening]")) row.querySelector("[data-refrigerated-after-opening]").checked = Boolean(details.refrigerated_after_opening);
+    if (row.querySelector("[data-package-weight]")) row.querySelector("[data-package-weight]").value = details.package_weight_oz || "";
+    syncInventoryDetails(row.querySelector(".amount"));
+  }
+
+  function syncInventoryDetails(group) {
+    if (!group) return;
+    const unit = group.querySelector("[data-unit]")?.value;
+    group.querySelectorAll("[data-can-field]").forEach(field => field.hidden = unit !== "can");
+    group.querySelectorAll("[data-package-field]").forEach(field => field.hidden = unit !== "package");
+    const details = group.querySelector("[data-inventory-detail]");
+    if (details) details.hidden = !["can", "package"].includes(unit);
   }
 
   function upgradeQuantityEditors() {
@@ -231,7 +285,7 @@ const SNS = (() => {
       }
       if (row) {
         const quantity = food.quantity ?? legacyQuantity(food.level);
-        setRowQuantity(row, quantity, food.unit || quantityProfile(food.name).unit);
+        setRowQuantity(row, quantity, food.unit || quantityProfile(food.name).unit, food);
       }
     });
 
@@ -248,6 +302,10 @@ const SNS = (() => {
         button.setAttribute("aria-pressed", String(Boolean(equipment.active)));
       }
     });
+    const memberHolder = document.querySelector("[data-household-members]");
+    if (memberHolder && (state.household_members || []).length) {
+      memberHolder.replaceChildren(...state.household_members.map(createHouseholdMember));
+    }
   }
 
   function ensureRemoveControl(row) {
@@ -278,8 +336,11 @@ const SNS = (() => {
     });
     group.querySelector("[data-unit]")?.addEventListener("change", event => {
       group.querySelector("[data-quantity]").step = quantityStepForUnit(event.target.value);
+      syncInventoryDetails(group);
       markChanged();
     });
+    group.querySelectorAll("[data-opened-at], [data-refrigerated-after-opening], [data-package-weight]").forEach(input => input.addEventListener("change", markChanged));
+    syncInventoryDetails(group);
   }
 
   function bindAmounts() {
@@ -377,6 +438,12 @@ const SNS = (() => {
       updateCount();
       markChanged();
     }));
+    document.querySelector("[data-add-household-member]")?.addEventListener("click", () => {
+      const row = createHouseholdMember();
+      document.querySelector("[data-household-members]")?.append(row);
+      row.querySelector("[data-member-name]")?.focus();
+      markChanged();
+    });
 
     const dialog = document.querySelector("[data-kitchen-dialog]");
     const dialogForm = document.querySelector("[data-kitchen-dialog-form]");
@@ -390,6 +457,12 @@ const SNS = (() => {
       const profile = quantityProfile(addName.value);
       addUnit.innerHTML = unitOptions(profile.unit);
       addQuantity.step = quantityStepForUnit(profile.unit);
+      const garlic = addName.value.trim().toLowerCase() === "garlic";
+      const note = document.querySelector("[data-dialog-form-note]");
+      if (note) note.textContent = garlic
+        ? "Tell SNS which garlic: fresh intact bulb, peeled/cut fresh, jarred minced, dried minced, granules, powder, garlic salt, or a seasoning blend."
+        : "Form changes how SNS stores, preps, and cooks an ingredient.";
+      if (garlic && ["", "shelf-stable", "fresh", "refrigerated", "on hand"].includes(addForm.value.trim().toLowerCase())) addForm.value = "";
     }
 
     function openAddDialog(sectionName) {
@@ -427,6 +500,12 @@ const SNS = (() => {
       event.preventDefault();
       const name = addName.value.trim();
       if (!name) return;
+      if (name.toLowerCase() === "garlic" && !addForm.value.trim()) {
+        addForm.setCustomValidity("Choose the kind of garlic so SNS knows how to store and use it.");
+        addForm.reportValidity();
+        return;
+      }
+      addForm.setCustomValidity("");
 
       if (addSection === "Equipment") {
         let button = [...document.querySelectorAll("[data-equipment]")].find(item =>
@@ -559,6 +638,13 @@ const SNS = (() => {
     if (!form) return;
     const kitchen = JSON.parse(sessionStorage.getItem("snsKitchenPayload") || "{}");
     const owned = ownedKitchenNames(kitchen);
+    const savedMembers = kitchen.meal_preferences?.household_members || [];
+    if (savedMembers.length) {
+      for (const appetite of ["light", "standard", "big"]) {
+        const input = form.querySelector(`[data-eaters-${appetite}]`);
+        if (input) input.value = savedMembers.filter(member => member.appetite === appetite).length;
+      }
+    }
     let options;
     try {
       options = await postJson(API.getMealBuilderOptions, kitchen);
@@ -641,7 +727,10 @@ const SNS = (() => {
       return `<label class="produce-choice" data-produce-choice data-search-name="${escapeHtml(item.name.toLowerCase())}">
         <input type="checkbox" name="produce" value="${escapeHtml(item.name)}">
         <span>${escapeHtml(item.name)}</span>
-        <small>${isOwned ? "In My Kitchen" : "Need to buy"}${item.kind === "fruit" ? " · Fruit" : ""}</small>
+        <small>${isOwned ? `In My Kitchen${item.form ? ` · ${escapeHtml(item.form)}` : ""}` : "Need to buy"}${item.kind === "fruit" ? " · Fruit" : ""}</small>
+        <select data-produce-form aria-label="${escapeHtml(item.name)} form"${isOwned ? " disabled" : ""}>
+          ${isOwned ? `<option value="${escapeHtml(item.form || "")}">Use My Kitchen form</option>` : '<option>Fresh</option><option>Frozen</option><option>Canned</option>'}
+        </select>
       </label>`;
     }).join("");
     produceHolder.addEventListener("change", syncStructureGuidance);
@@ -670,6 +759,17 @@ const SNS = (() => {
         choice.hidden = Boolean(query) && !choice.dataset.searchName.includes(query);
       });
     });
+    const syncPortions = () => {
+      const light = Number(form.querySelector("[data-eaters-light]")?.value || 0);
+      const standard = Number(form.querySelector("[data-eaters-standard]")?.value || 0);
+      const big = Number(form.querySelector("[data-eaters-big]")?.value || 0);
+      const people = light + standard + big;
+      const portions = light * 0.75 + standard + big * 1.5;
+      const portionText = Number.isInteger(portions) ? String(portions) : portions.toFixed(2).replace(/0$/, "");
+      form.querySelector("[data-portion-summary]").textContent = `${people} ${people === 1 ? "person" : "people"} · ${portionText} planning portions`;
+    };
+    form.querySelectorAll("[data-eaters-light], [data-eaters-standard], [data-eaters-big]").forEach(input => input.addEventListener("input", syncPortions));
+    syncPortions();
     form.addEventListener("submit", generateBuiltMeal);
     form.querySelector("[data-builder-loading]").hidden = true;
     form.querySelector("[data-builder-fields]").hidden = false;
@@ -681,6 +781,12 @@ const SNS = (() => {
     const status = form.querySelector("[data-builder-status]");
     const button = form.querySelector("button[type=submit]");
     const kitchen = JSON.parse(sessionStorage.getItem("snsKitchenPayload") || "{}");
+    const eaterProfiles = {
+      light: Number(form.querySelector("[data-eaters-light]")?.value || 0),
+      standard: Number(form.querySelector("[data-eaters-standard]")?.value || 0),
+      big: Number(form.querySelector("[data-eaters-big]")?.value || 0)
+    };
+    const people = eaterProfiles.light + eaterProfiles.standard + eaterProfiles.big;
     const payload = {
       mode: "build_your_meal",
       kitchen,
@@ -688,6 +794,9 @@ const SNS = (() => {
         protein: form.querySelector("[data-builder-protein]").value,
         protein_state: form.querySelector("[data-protein-state]").value,
         produce: [...form.querySelectorAll('input[name="produce"]:checked')].map(item => item.value),
+        produce_forms: Object.fromEntries([...form.querySelectorAll('input[name="produce"]:checked')].map(item => [
+          item.value, item.closest("[data-produce-choice]")?.querySelector("[data-produce-form]")?.value || ""
+        ])),
         extras: [...form.querySelectorAll('input[name="extras"]:checked')].map(item => item.value),
         foundation: form.querySelector("[data-builder-foundation]").value,
         cuisine: form.querySelector("[data-builder-cuisine]").value,
@@ -697,12 +806,19 @@ const SNS = (() => {
         meal_occasion: form.querySelector("[data-meal-occasion]").value,
         energy: form.querySelector("[data-builder-energy]").value,
         time_minutes: Number(form.querySelector("[data-builder-time]").value),
-        servings: Number(form.querySelector("[data-builder-servings]").value)
+        servings: people,
+        eater_profiles: eaterProfiles,
+        use_all_cans: Boolean(form.querySelector("[data-use-all-cans]")?.checked)
       }
     };
     if (!payload.selections.protein) {
       status.textContent = "Choose one protein first.";
       form.querySelector("[data-builder-protein]").focus();
+      return;
+    }
+    if (people < 1) {
+      status.textContent = "Add at least one person to the meal.";
+      form.querySelector("[data-eaters-standard]")?.focus();
       return;
     }
     button.disabled = true;

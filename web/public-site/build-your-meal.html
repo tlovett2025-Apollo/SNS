@@ -61,11 +61,19 @@
           <label class="segment-choice"><input type="radio" name="temperature" value="hot" checked><span>Hot</span></label>
           <label class="segment-choice unavailable"><input type="radio" name="temperature" value="cold" disabled><span>Cold <small>training next</small></span></label>
         </div>
+        <h3 class="builder-subheading">Who is eating?</h3>
+        <p class="builder-help">Use an appetite estimate; SNS converts this to practical amounts and still rounds food to sensible pieces, quarter-pounds, or cans.</p>
+        <div class="builder-three-column appetite-grid">
+          <label class="builder-field"><span>Light eaters <em>¾ portion</em></span><input type="number" min="0" step="1" value="0" data-eaters-light></label>
+          <label class="builder-field"><span>Standard eaters <em>1 portion</em></span><input type="number" min="0" step="1" value="4" data-eaters-standard></label>
+          <label class="builder-field"><span>Big eaters <em>1½ portions</em></span><input type="number" min="0" step="1" value="0" data-eaters-big></label>
+        </div>
+        <p class="structure-guidance" data-portion-summary>4 people · 4 planning portions</p>
+        <label class="builder-checkbox"><input type="checkbox" data-use-all-cans><span><strong>Use all available cans when they fit</strong><small>This may make the entire meal larger; SNS will not promise a precise extra portion.</small></span></label>
         <div class="builder-four-column">
           <label class="builder-field"><span>Meal</span><select data-meal-occasion><option>Breakfast</option><option>Lunch</option><option selected>Dinner</option><option>Any</option></select></label>
           <label class="builder-field"><span>Energy</span><select data-builder-energy><option>Very Low</option><option selected>Low</option><option>Medium</option><option>High</option></select></label>
           <label class="builder-field"><span>Time available</span><select data-builder-time><option value="20">20 minutes</option><option value="30">30 minutes</option><option value="45" selected>45 minutes</option><option value="60">60 minutes</option><option value="90">90 minutes</option></select></label>
-          <label class="builder-field"><span>Servings</span><select data-builder-servings><option>1</option><option>2</option><option selected>4</option><option>6</option><option>8</option></select></label>
         </div>
       </section>
 

@@ -144,6 +144,9 @@ def normalize_kitchen_snapshot(payload: dict) -> dict:
             "unit": _clean(item.get("unit")) or None,
             "quantity_band": band,
             "origin": _clean(item.get("origin")) or "manual",
+            "opened_at": _clean(item.get("opened_at")) or None,
+            "refrigerated_after_opening": item.get("refrigerated_after_opening"),
+            "package_weight_oz": item.get("package_weight_oz"),
         })
     return {
         "api_version": CONTRACT_VERSION,
@@ -292,6 +295,9 @@ def save_my_kitchen(
         "storage_location": item.source.get("storage_location"),
         "quantity_band": item.source.get("quantity_band"),
         "origin": item.source.get("origin") or "manual",
+        "opened_at": item.source.get("opened_at"),
+        "refrigerated_after_opening": item.source.get("refrigerated_after_opening"),
+        "package_weight_oz": item.source.get("package_weight_oz"),
     } for item in resolved]
     saved = replace_household_inventory(
         db_path, household_id, acting_user_id, items
@@ -377,6 +383,7 @@ def _engine_request(payload: dict, db_path: str | Path):
         "available_items": names,
         "available_equipment": [name for name in equipment if name],
         "excluded_items": excluded_items,
+        "inventory_lots": snapshot["inventory_lots"],
     }
 
 
@@ -480,6 +487,11 @@ def _concept_title(candidate: dict) -> str:
         component_text = f"{', '.join(components[:-1])} & {components[-1]}"
     else:
         component_text = components[0] if components else "My Kitchen"
+    structure = _clean(candidate.get("meal_structure"))
+    if structure == "composed_plate":
+        return component_text
+    if structure == "layered_bowl":
+        return f"{component_text} Bowl"
     method = candidate.get("cooking_method", candidate.get("strategy", "meal"))
     endings = {
         "skillet": "Skillet",
@@ -562,7 +574,8 @@ def _candidate_ingredient_lines(
             details.append(_clean(resolved_item.form_name))
 
         requirement = requirements.get(key)
-        quantity = _clean(requirement.get("quantity")) if requirement else ""
+        planned = (candidate.get("quantity_plan") or {}).get(key, {})
+        quantity = _clean(planned.get("display")) or (_clean(requirement.get("quantity")) if requirement else "")
         if quantity:
             details.append(quantity)
 
@@ -604,6 +617,7 @@ def _candidate_view(candidate: dict) -> dict:
             item for item in candidate.get("inventory_requirements") or []
             if item.get("status") in {"Substitute", "Omit"}
         ],
+        "quantity_note": candidate.get("quantity_note"),
         "cost_estimate": None,
         "capability_status": "supported",
     }
@@ -619,6 +633,7 @@ def _builder_candidates(payload: dict, db_path: str | Path):
     if isinstance(produce, str):
         produce = [produce]
     produce = [_clean(item) for item in produce if _clean(item)]
+    produce_forms = selections.get("produce_forms") if isinstance(selections.get("produce_forms"), dict) else {}
     foundation = _clean(selections.get("foundation"))
     extras = selections.get("extras") or []
     if isinstance(extras, str):
@@ -683,6 +698,9 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         for name in [protein, *produce, foundation]
         if name and _key(name) in resolved_by_name and resolved_by_name[_key(name)].form_name
     }
+    for name in produce:
+        if _key(name) not in resolved_by_name and _clean(produce_forms.get(name)):
+            component_forms[name] = _clean(produce_forms.get(name))
     engine_request.update({
         "protein_name": protein,
         "protein_state": _protein_state(owned_protein) if owned_protein else (_clean(selections.get("protein_state")) or "Fresh Raw"),
@@ -693,6 +711,8 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         "energy_level": _clean(selections.get("energy")) or "Low",
         "time_minutes": selections.get("time_minutes") or 45,
         "servings": selections.get("servings") or 4,
+        "eater_profiles": selections.get("eater_profiles") or {},
+        "use_all_cans": bool(selections.get("use_all_cans")),
         "max_results": 1,
         "requested_method": method,
         "planned_purchase_items": planned_purchases,
@@ -841,6 +861,7 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
             item for item in recipe.get("inventory_requirements") or []
             if item.get("status") in {"Substitute", "Omit"}
         ],
+        "quantity_note": recipe.get("quantity_note") or "",
         "serving_styles": list(recipe.get("serving_styles") or []),
         "serving_style": candidate.get("serving_style"),
         "build_provenance": provenance,

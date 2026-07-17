@@ -172,6 +172,16 @@
         <button class="show-absent" type="button" data-show-absent>Show items not on hand</button>
       </div>
     </section>
+    <section class="inventory-section household-appetite-section">
+      <div class="section-heading static-heading">
+        <span class="section-icon" aria-hidden="true">☺</span>
+        <span class="section-title"><span>Household appetites</span><small>Optional. Save each person as a light, standard, or big eater.</small></span>
+      </div>
+      <div class="section-body">
+        <div class="household-member-list" data-household-members></div>
+        <button class="add-kitchen-item" type="button" data-add-household-member>+ Add household member</button>
+      </div>
+    </section>
     <section class="inventory-section equipment-section" data-section="Equipment">
       <button class="section-heading" type="button" aria-expanded="true">
         <span class="section-icon" aria-hidden="true">⚙</span>
@@ -210,6 +220,7 @@
     <label data-dialog-form-field>
       <span>Form</span>
       <input type="text" data-dialog-form autocomplete="off" placeholder="Canned, dry, frozen, fresh…">
+      <small class="field-note" data-dialog-form-note>Form changes how SNS stores, preps, and cooks an ingredient.</small>
     </label>
     <div class="dialog-quantity" data-dialog-amount-field>
       <label>

@@ -11,6 +11,7 @@ from cooking_planner import (
 )
 from culinary_opportunities import discover_opportunities, serialize_opportunities
 from sauce_profiles import SauceIngredient, get_sauce_profile
+from math import ceil
 
 
 def _clean(value):
@@ -102,6 +103,91 @@ def _component_check(name, available, excluded):
         "substitutions": [],
         "omission_consequence": None,
     }
+
+
+def _effective_portions(servings, eater_profiles):
+    """Translate appetite choices into planning portions without inventing people."""
+    profiles = eater_profiles if isinstance(eater_profiles, dict) else {}
+    if not profiles:
+        return float(servings or 4)
+    weights = {"light": 0.75, "standard": 1.0, "big": 1.5}
+    total = sum(max(0, int(profiles.get(name) or 0)) * weight for name, weight in weights.items())
+    return total or float(servings or 4)
+
+
+def _quarter_pound_up(ounces):
+    return ceil(max(0, ounces) / 4.0) / 4.0
+
+
+def _quantity_plan(components, component_forms, inventory_lots, servings, eater_profiles, use_all_cans):
+    """Build practical cook amounts; package fractions stay estimates, never fake exact counts."""
+    effective = _effective_portions(servings, eater_profiles)
+    lots = {_key(item.get("name")): item for item in (inventory_lots or []) if isinstance(item, dict)}
+    forms = {_key(name): _key(form) for name, form in (component_forms or {}).items()}
+    plan = {}
+    notes = []
+    for name in components:
+        key = _key(name)
+        if not key:
+            continue
+        lot = lots.get(key, {})
+        form = forms.get(key) or _key(lot.get("form"))
+        unit = _key(lot.get("unit"))
+        available = float(lot.get("quantity") or 0)
+        if "canned" in form or unit == "can" or key.startswith("canned "):
+            is_protein = any(word in key for word in ("chicken", "tuna", "salmon"))
+            planned = max(1, ceil(effective / (2 if is_protein else 4)))
+            if 0 < available < 0.5:
+                display = f"{planned} can{'s' if planned != 1 else ''} needed; less than 1/2 can is on hand"
+                notes.append(f"Less than half a can of {name} is not being counted as enough for this meal.")
+            else:
+                use = available if 0.5 <= available < planned else planned
+                if use_all_cans and available > planned:
+                    use = available
+                    notes.append("Using all available cans will make the entire meal larger; adjust sauce and seasoning as needed.")
+                display = f"{use:g} can{'s' if use != 1 else ''}"
+            plan[key] = {"display": display, "unit": "can", "planned": planned, "available": available}
+            if is_protein and available and available < planned:
+                notes.append(
+                    f"The {name} on hand appears short for the planned amount. Stretch it by distributing it through the selected vegetables or foundation."
+                )
+        elif any(word in key for word in ("ribeye", "sirloin", "steak")):
+            pieces = max(1, ceil(effective))
+            pounds = _quarter_pound_up(pieces * 8)
+            plan[key] = {"display": f"{pieces} steak{'s' if pieces != 1 else ''} (about {pounds:g} lb total)"}
+            if unit in {"piece", "pieces"} and available and available < pieces:
+                notes.append(
+                    f"Only {available:g} steak{'s are' if available != 1 else ' is'} recorded for {pieces} planned. Slice after resting and divide it across the meal."
+                )
+        elif key == "eggs":
+            eggs = max(1, ceil(effective * 2))
+            plan[key] = {"display": f"{eggs} eggs"}
+        elif any(word in key for word in ("sausage", "chicken breast", "chicken thigh")):
+            pieces = max(1, ceil(effective))
+            plan[key] = {"display": f"{pieces} pieces"}
+        elif key.endswith("rice"):
+            cups = ceil(effective) / 4.0
+            plan[key] = {"display": f"{cups:g} cup{'s' if cups != 1 else ''} dry"}
+        elif "mashed potato" in key:
+            cups = ceil(effective * 2) / 4.0
+            plan[key] = {"display": f"about {cups:g} cup{'s' if cups != 1 else ''}"}
+        elif any(word in key for word in ("ground beef", "ground turkey", "ground chicken", "pork")):
+            pounds = _quarter_pound_up(effective * 4)
+            plan[key] = {"display": f"{pounds:g} lb"}
+            available_pounds = available if unit in {"lb", "pound", "pounds"} else 0
+            package_weight = float(lot.get("package_weight_oz") or 0)
+            if unit in {"package", "packages"} and package_weight:
+                available_pounds = available * package_weight / 16.0
+            if available_pounds and available_pounds < pounds:
+                notes.append(
+                    f"About {available_pounds:g} lb of {name} is recorded for {pounds:g} lb planned. Stretch it through the selected vegetables or foundation."
+                )
+            elif unit in {"package", "packages"} and available and not package_weight:
+                notes.append(
+                    f"The {available:g}-package estimate for {name} is approximate because the original package weight is unknown."
+                )
+    note = " ".join(dict.fromkeys(notes))
+    return effective, plan, note
 
 
 def _score_strategy(strategy, energy, budget, time_limit):
@@ -255,6 +341,9 @@ def generate_candidates(
     selected_extras=None,
     component_forms=None,
     meal_structure="integrated",
+    inventory_lots=None,
+    eater_profiles=None,
+    use_all_cans=False,
     cooking_for_kids=False,
     kid_theme="",
 ):
@@ -338,6 +427,18 @@ def generate_candidates(
         ]
         ingredient_checks = component_checks + requirement_checks
 
+        # A named fresh aromatic is a structural ingredient. Powder may layer
+        # flavor, but it is not silently required a second time.
+        selected_keys = {_key(item) for item in selected_components}
+        for check in requirement_checks:
+            check_key = _key(check.get("name"))
+            if check_key == "onion powder" and any("onion" in item for item in selected_keys):
+                check.update(status="Omit", required=False, resolved_name=None,
+                             omission_consequence="The onions already provide onion flavor, sweetness, and texture.")
+            if check_key == "garlic powder" and any(item in {"garlic", "fresh garlic"} for item in selected_keys):
+                check.update(status="Omit", required=False, resolved_name=None,
+                             omission_consequence="The garlic already provides the intended garlic flavor.")
+
         # Culinary validity and household safety are gates, not score penalties.
         # Excluded ingredients must never reach ranking. Missing ingredients
         # remain explicit Needs so the UI can offer trained substitutes or a
@@ -356,6 +457,14 @@ def generate_candidates(
         c["serving_styles"] = _serving_styles(method["cooking_method"])
         c["serving_style"] = c["serving_styles"][0]
         c["experience_overlays"] = _experience_overlays(cooking_for_kids, kid_theme)
+        effective, quantity_plan, quantity_note = _quantity_plan(
+            selected_components, component_forms, inventory_lots, servings,
+            eater_profiles, use_all_cans,
+        )
+        c["effective_portions"] = effective
+        c["quantity_plan"] = quantity_plan
+        c["quantity_note"] = quantity_note
+        c["inventory_lots"] = list(inventory_lots or [])
 
         protein_profile = get_ingredient_profile(protein, "protein") if protein else None
         vegetable_profiles = [
@@ -468,6 +577,7 @@ def build_recipe_from_candidate(candidate):
         "cooking_method": candidate.get("cooking_method", candidate.get("strategy", "")),
         "serving_styles": list(candidate.get("serving_styles") or []),
         "experience_overlays": list(candidate.get("experience_overlays") or []),
+        "quantity_note": candidate.get("quantity_note") or "",
         "summary": f"{candidate.get('label')} · {candidate.get('energy')} energy · {candidate.get('budget')} · {candidate.get('minutes')} min · serves {candidate.get('servings', 4)}",
     }
 

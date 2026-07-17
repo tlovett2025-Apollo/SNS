@@ -68,3 +68,25 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     assert 'input[name="extras"]:checked' in flow
     assert "Cold <small>training next" in builder_page
     assert "plate or in a bowl" in builder_page
+
+
+def test_quantity_and_form_controls_cover_packages_cans_appetites_and_garlic():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
+    builder_page = (PUBLIC_FLOW.parent / "build-your-meal.html").read_text(encoding="utf-8")
+
+    assert "data-opened-at" in flow
+    assert "data-package-weight" in flow
+    assert "refrigerated_after_opening" in flow
+    assert "package: 0.25" in flow
+    assert "can: 0.5" in flow
+    assert "data-eaters-light" in builder_page
+    assert "data-eaters-standard" in builder_page
+    assert "data-eaters-big" in builder_page
+    assert "data-use-all-cans" in builder_page
+    assert "data-produce-form" in flow
+    assert "which garlic" in flow.lower()
+    assert "data-dialog-form-note" in kitchen_page
+    assert "data-household-members" in kitchen_page
+    assert "data-add-household-member" in kitchen_page
+    assert "household_members: householdMembers" in flow

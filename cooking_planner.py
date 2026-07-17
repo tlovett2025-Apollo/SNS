@@ -9,6 +9,7 @@ then deepen the cooking intelligence as more CKB fields become available.
 from dataclasses import dataclass, field
 from math import ceil
 import re
+from datetime import date
 from typing import Dict, List, Optional
 from ingredient_profiles import KitchenActivity, get_ingredient_profile
 from equipment_profiles import build_rice_equipment_activities, choose_rice_equipment
@@ -383,6 +384,51 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
                 strategy, component_forms.get(vegetable.lower(), "")
             )
         )
+
+    selected_keys = {_clean(item).lower() for item in components}
+    for lot in candidate.get("inventory_lots") or []:
+        if not isinstance(lot, dict) or _clean(lot.get("name")).lower() not in selected_keys:
+            continue
+        form = _clean(lot.get("form")).lower()
+        unit = _clean(lot.get("unit")).lower()
+        quantity = float(lot.get("quantity") or 0)
+        opened_at = _clean(lot.get("opened_at"))
+        is_opened_can = bool(opened_at) or (unit in {"can", "cans"} and quantity % 1 != 0)
+        if not is_opened_can or not ("canned" in form or unit in {"can", "cans"}):
+            continue
+        name = _clean(lot.get("name"))
+        high_acid = any(word in name.lower() for word in ("tomato", "fruit", "pineapple", "peach", "pear", "citrus"))
+        limit = 7 if high_acid else 4
+        age = None
+        try:
+            age = (date.today() - date.fromisoformat(opened_at)).days if opened_at else None
+        except ValueError:
+            age = None
+        refrigerated = lot.get("refrigerated_after_opening")
+        if refrigerated is False:
+            instruction = f"Do not use the opened {name}; it was not refrigerated promptly. Choose another can or a substitution."
+        elif age is not None and age > limit:
+            instruction = f"Do not use the opened {name}; it has been refrigerated for {age} days, beyond the {limit}-day window for this food."
+        elif age is None:
+            instruction = (
+                f"Before using the opened {name}, confirm when it was opened and that it was refrigerated promptly. "
+                f"Use it only within {limit} refrigerated days. Discard it for mold, discoloration, an unusual odor, or if you are unsure; appearance and smell alone cannot prove safety."
+            )
+        else:
+            instruction = (
+                f"The opened {name} is recorded as {age} day{'s' if age != 1 else ''} old. Confirm it stayed refrigerated. "
+                "Discard it for mold, discoloration, or an unusual odor; passing that check does not replace the storage-time limit."
+            )
+        check_id = f"check opened can:{name}"
+        activities.append(_planner_activity(
+            "check opened can", instruction, minutes=1, human_busy=True,
+            stage="early", depends_on=["gather:meal"], equipment="counter",
+        ))
+        activities[-1].component = name
+        activities[-1].activity_id = check_id
+        for activity in activities:
+            if activity.component == name and activity.activity_type == "prep" and check_id not in activity.depends_on:
+                activity.depends_on.append(check_id)
 
     component_finishes = [
         f"{activity.activity_type}:{activity.component}"
@@ -857,7 +903,16 @@ def consolidate_kitchen_activities(
         else (f"measure and mix {sauce}" if sauce else "")
     )
     if general_prep or sauce_instruction:
-        general_dependencies = launch_starts or ["gather:meal"]
+        external_prep_dependencies = [
+            dependency
+            for activity in general_prep
+            for dependency in activity.depends_on
+            if dependency not in general_ids and dependency not in launch_ids
+        ]
+        general_dependencies = list(dict.fromkeys([
+            *(launch_starts or ["gather:meal"]),
+            *external_prep_dependencies,
+        ]))
         replacements.append(consolidated_prep(
             "prep", general_prep, general_dependencies,
             extra_instruction=sauce_instruction,
@@ -1111,13 +1166,21 @@ def consolidate_skillet_vegetables(
         later = [activity for activity in vegetable_activities if activity.component not in aromatics]
     else:
         opening = heat_fat + f"{vessel_opening} {first.component} to the skillet and cook for {head_start} minutes. "
+    outcome_parts = []
+    if any("asparagus" in name for name in names):
+        outcome_parts.append("the asparagus is bright green and crisp-tender")
+    if any("swiss chard" in name for name in names):
+        outcome_parts.append("the chard stems are tender and the leaves are wilted")
+    if any("mushroom" in name for name in names):
+        outcome_parts.append("the mushrooms are browned")
+    outcome = "; ".join(outcome_parts) or "the vegetables are tender and ready for the sauce"
     shared = _planner_activity(
         "cook vegetables",
         (
             opening
             + f"Add {_join([item.component for item in later])}, then "
             f"cook everything together for about {together_minutes} more minutes, stirring as needed, "
-            "until the vegetables are tender and ready for the sauce."
+            f"until {outcome}."
         ),
         minutes=total_minutes,
         human_busy=True,
@@ -1250,10 +1313,21 @@ def constrain_single_skillet_environment(
         stage_order.get(activity.stage, 1), position[id(activity)]
     ))
     previous_id = None
+    protein = _clean(candidate.get("protein"))
+    protein_verify = next((
+        _activity_id(activity) for activity in activities
+        if activity.component == protein and activity.activity_type == "verify"
+    ), None)
     for activity in skillet_work:
+        activity.equipment = "skillet"
         activity_id = _activity_id(activity)
-        if previous_id and previous_id not in activity.depends_on:
-            activity.depends_on.append(previous_id)
+        dependency = (
+            protein_verify
+            if previous_id == f"cook:{protein}" and "steak" in protein.lower() and protein_verify
+            else previous_id
+        )
+        if dependency and dependency not in activity.depends_on:
+            activity.depends_on.append(dependency)
         previous_id = activity_id
     return activities
 
@@ -1428,6 +1502,22 @@ def _just_in_time_starts(
         activity_id: max(0, meal_duration - remaining_minutes(activity_id))
         for activity_id in ancestors
     }
+
+    # A component cannot pause between continuous state transitions merely to
+    # make the branches look symmetrical. Verification follows cooking, rest
+    # follows removal from heat, and pressure release follows pressure cooking.
+    for activity_id in ancestors:
+        activity = graph[activity_id]
+        if activity.activity_type not in {"verify", "rest", "natural release"}:
+            continue
+        same_component_dependencies = [
+            dependency for dependency in activity.depends_on
+            if graph[dependency].component == activity.component
+        ]
+        if same_component_dependencies:
+            dependency = same_component_dependencies[-1]
+            continuous_start = targets[dependency] + max(0, int(graph[dependency].minutes or 0))
+            targets[activity_id] = min(targets[activity_id], continuous_start)
 
     # A low-attention state change such as microwave defrosting owns its
     # appliance for the full duration but does not own the cook. Pull general
@@ -1883,10 +1973,13 @@ def _wait_explanation(
     ]
     progress = ""
     if ongoing:
-        current = ongoing[0].activity
+        phases = {_clean(item.activity.activity_type).lower() for item in ongoing}
+        current = ongoing[-1].activity
         component = _clean(current.component)
         activity_type = _clean(current.activity_type).lower()
-        if activity_type == "pressurize":
+        if len(phases & {"pressurize", "pressure cook", "natural release"}) > 1:
+            progress = f"The {component.lower()} is in its longest unattended pressure-cooker window. "
+        elif activity_type == "pressurize":
             progress = f"The {component.lower()} is coming to pressure. "
         elif activity_type == "pressure cook":
             progress = f"The {component.lower()} is pressure-cooking. "
@@ -1926,6 +2019,8 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
     )
     if summary:
         items.append({"kind": "info", "text": summary})
+    if _clean(candidate.get("quantity_note")):
+        items.append({"kind": "info", "text": _clean(candidate.get("quantity_note"))})
 
     components = _join([
         candidate.get("protein"),

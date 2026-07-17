@@ -268,6 +268,9 @@ CREATE TABLE IF NOT EXISTS user_inventory (
     expiration_date TEXT,
     confidence_level TEXT,
     origin TEXT DEFAULT 'manual',
+    opened_at TEXT,
+    refrigerated_after_opening INTEGER,
+    package_weight_oz REAL,
     FOREIGN KEY (user_id) REFERENCES users(user_id),
     FOREIGN KEY (household_id) REFERENCES households(household_id),
     FOREIGN KEY (ingredient_id) REFERENCES ingredients(ingredient_id),
@@ -390,6 +393,9 @@ MIGRATIONS = [
     ("user_inventory", "household_id", "ALTER TABLE user_inventory ADD COLUMN household_id INTEGER"),
     ("user_inventory", "quantity_band", "ALTER TABLE user_inventory ADD COLUMN quantity_band TEXT"),
     ("user_inventory", "origin", "ALTER TABLE user_inventory ADD COLUMN origin TEXT DEFAULT 'manual'"),
+    ("user_inventory", "opened_at", "ALTER TABLE user_inventory ADD COLUMN opened_at TEXT"),
+    ("user_inventory", "refrigerated_after_opening", "ALTER TABLE user_inventory ADD COLUMN refrigerated_after_opening INTEGER"),
+    ("user_inventory", "package_weight_oz", "ALTER TABLE user_inventory ADD COLUMN package_weight_oz REAL"),
 ]
 
 

@@ -752,6 +752,93 @@ def _citrus_activities(self, strategy="", state_name=""):
         ),
     ]
 
+
+def _steak_activities(self, strategy="", state_name=""):
+    """Give intact steaks visible cues, temperature verification, and a real rest."""
+    prep_id = f"prep:{self.name}"
+    cook_id = f"cook:{self.name}"
+    verify_id = f"verify:{self.name}"
+    return [
+        KitchenActivity(
+            component=self.name, activity_type="prep",
+            instruction=(
+                f"Pat {self.name} dry without rinsing it. Season both sides and let the surface lose its refrigerator chill while the skillet heats."
+            ),
+            minutes=3, human_busy=True, stage="early", parallel_ok=True,
+            equipment="counter", activity_id=prep_id,
+        ),
+        KitchenActivity(
+            component=self.name, activity_type="cook",
+            instruction=(
+                f"Heat a lightly oiled heavy skillet over medium-high heat. Add {self.name} and leave the first side undisturbed to sear. "
+                "When the cooked color has climbed roughly halfway to two-thirds up the side, flip it once. "
+                "Sear the second side; use the visible band as a flip cue, not as proof of doneness."
+            ),
+            minutes=8, human_busy=True, attention_load=0.5,
+            stage="middle", parallel_ok=False, depends_on=[prep_id],
+            equipment="burner", activity_id=cook_id,
+        ),
+        KitchenActivity(
+            component=self.name, activity_type="verify",
+            instruction=(
+                "Check the center with an instant-read thermometer. For the USDA minimum, cook whole beef steak to 145°F, then rest it for at least 3 minutes."
+            ),
+            minutes=1, human_busy=True, stage="finish", parallel_ok=False,
+            depends_on=[cook_id], equipment="counter", activity_id=verify_id,
+        ),
+        KitchenActivity(
+            component=self.name, activity_type="rest",
+            instruction=f"Move {self.name} to a clean plate and rest it for at least 3 minutes before slicing or serving.",
+            minutes=3, human_busy=False, stage="finish", parallel_ok=True,
+            depends_on=[verify_id], equipment="counter", activity_id=f"rest:{self.name}",
+        ),
+    ]
+
+
+def _mashed_potato_activities(self, strategy="", state_name=""):
+    """Mashed potatoes are a prepared foundation, not loose food for the steak pan."""
+    prep_id = f"prep:{self.name}"
+    return [
+        KitchenActivity(
+            component=self.name, activity_type="prep",
+            instruction=f"Measure {self.name}; add a splash of milk or a small pat of butter if they seem stiff.",
+            minutes=1, human_busy=True, stage="middle", parallel_ok=True,
+            equipment="counter", activity_id=prep_id,
+        ),
+        KitchenActivity(
+            component=self.name, activity_type="reheat",
+            instruction=(
+                f"Warm {self.name} gently in a small saucepan, stirring occasionally, or use the microwave in short intervals. "
+                "Keep them separate from the steak skillet and cover when hot."
+            ),
+            minutes=5, human_busy=True, attention_load=0.35,
+            stage="middle", parallel_ok=True, depends_on=[prep_id],
+            equipment="burner", activity_id=f"reheat:{self.name}",
+        ),
+    ]
+
+
+def _broccoli_activities(self, strategy="", state_name=""):
+    prep_id = f"prep:{self.name}"
+    return [
+        KitchenActivity(
+            component=self.name, activity_type="prep",
+            instruction="Prep Broccoli: cut the crown into evenly sized florets; peel and slice the tender stem if using it.",
+            minutes=2, human_busy=True, stage="middle", parallel_ok=True,
+            equipment="counter", activity_id=prep_id,
+        ),
+        KitchenActivity(
+            component=self.name, activity_type="saute",
+            instruction=(
+                "Add the broccoli to the hot skillet and sauté for about 2 minutes. Add 2 tablespoons of water, "
+                "cover, and steam for 3–4 minutes. Uncover and cook off any remaining water; stop when it is bright green and fork-tender with a little bite."
+            ),
+            minutes=6, human_busy=True, attention_load=0.55,
+            stage="middle", parallel_ok=False, depends_on=[prep_id],
+            equipment="burner", activity_id=f"saute:{self.name}",
+        ),
+    ]
+
 # Prototype per-KO overrides. These will eventually be supplied by CKB activity data.
 CHICKEN_BREAST.publish_activities = _chicken_activities.__get__(CHICKEN_BREAST, IngredientProfile)
 SWISS_CHARD.publish_activities = _chard_activities.__get__(SWISS_CHARD, IngredientProfile)
@@ -766,6 +853,18 @@ def get_ingredient_profile(name, role="ingredient"):
     k = _key(cleaned_name)
     if not cleaned_name:
         return IngredientProfile(name=cleaned_name, role=role)
+    if role == "protein" and any(word in k for word in ("ribeye", "sirloin steak", "flank steak", "steak")):
+        profile = IngredientProfile(name=cleaned_name, role=role, prep_minutes=3, cook_minutes=8, rest_minutes=3)
+        profile.publish_activities = _steak_activities.__get__(profile, IngredientProfile)
+        return profile
+    if role == "foundation" and "mashed potato" in k:
+        profile = IngredientProfile(name=cleaned_name, role=role, prep_minutes=1, cook_minutes=5, holdability="good")
+        profile.publish_activities = _mashed_potato_activities.__get__(profile, IngredientProfile)
+        return profile
+    if role == "vegetable" and k == "broccoli":
+        profile = IngredientProfile(name=cleaned_name, role=role, prep_minutes=2, cook_minutes=6, holdability="fair")
+        profile.publish_activities = _broccoli_activities.__get__(profile, IngredientProfile)
+        return profile
     ckb_profile = _ckb_profile(cleaned_name, role)
     if ckb_profile is not None:
         # The verified CKB still contains the older cook-from-frozen activity
