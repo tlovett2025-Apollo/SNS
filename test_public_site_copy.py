@@ -72,6 +72,9 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     assert 'input[name="extras"]:checked' in flow
     assert "Cold <small>training next" in builder_page
     assert "How should the finished meal come together?" in builder_page
+    assert 'label="Planning ahead"' in builder_page
+    assert '<option value="240">4 hours</option>' in builder_page
+    assert "body.detail || body.message" in flow
 
 
 def test_quantity_and_form_controls_cover_packages_cans_appetites_and_garlic():

@@ -571,12 +571,16 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         protein_physical = set(getattr(protein_profile, "physical_traits", ()))
         protein_families = set(getattr(protein_profile, "behavior_family_codes", ()))
         if "long-lead" in protein_traits and "collagen-rich" in protein_physical:
-            simmer_minutes = 75
+            simmer_minutes = max(1, int(getattr(protein_profile, "cook_minutes", 0) or 0))
+            tenderness_cue = (
+                getattr(protein_profile, "desired_outcome", "")
+                or "The meat is fork-tender and yields without springing back."
+            )
             simmer_instruction = (
                 f"Cover the pot and keep {protein or 'the soup ingredients'}, "
                 f"{_join(vegetables)}, and {foundation or 'the remaining ingredients'} "
-                "together in the same pot. Gently simmer Begin checking the beef "
-                "at 60 minutes and continue until it is fork-tender, usually 60–90 minutes. "
+                f"together in the same pot. Gently simmer for about {simmer_minutes} minutes, "
+                f"then check the KO tenderness cue: {tenderness_cue} "
                 "Crack the lid only if the soup needs to reduce."
             )
         elif raw_protein and "safety-critical" in protein_physical:

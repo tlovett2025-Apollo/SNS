@@ -207,6 +207,19 @@ FAMILY_LIBRARY: Dict[str, BehaviorFamily] = {
             rest_template="Rest {name} briefly before slicing links.",
             frozen_thaw_minutes=25,
             frozen_thaw_template="Keep {name} sealed and thaw it in cold water; cook immediately.",
+        ), method(
+            "simmer", ("fresh raw", "frozen raw"), "gentle simmering liquid",
+            "seasoned cooking liquid", 2, 15, 4, .3, "burner", "late",
+            "Thaw {name} when frozen. Leave links whole so the center can be checked before slicing.",
+            "Add {name} during the final simmer and cook gently until safely cooked through; rest briefly, then slice when the meal needs smaller pieces.",
+            "Juicy, safely cooked sausage that seasons the surrounding liquid.",
+            "160°F for pork/beef sausage or 165°F for poultry sausage.",
+            "Adding raw sausage too late can leave the center unsafe; simmering it for the entire long cook can make it dry.",
+            "Continue the gentle simmer until the center reaches the correct temperature; add liquid if the pot becomes too concentrated.", "fair",
+            verification_required=True, rest_minutes=3,
+            rest_template="Rest {name} briefly before slicing links.",
+            frozen_thaw_minutes=25,
+            frozen_thaw_template="Keep {name} sealed and thaw it in cold water; cook immediately.",
         ), READY_REHEAT),
         ("can-flavor-fat",),
     ),
@@ -1554,6 +1567,10 @@ def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> Res
             "brief_heat", "reheat", "assemble",
         }
         casserole_methods = {"roast", "bake", "reheat", "assemble", "simmer"}
+        braise_methods = {
+            "braise", "simmer", "saute", "saute_steam", "bloom", "wilt",
+            "brief_heat", "reheat", "assemble", "skillet",
+        }
         grill_side_methods = {"simmer", "boil", "warm", "reheat", "saute", "assemble"}
         for candidate in primary.methods:
             form_matches = not form_key or not candidate.forms or any(value in form_key for value in candidate.forms)
@@ -1563,6 +1580,8 @@ def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> Res
                 strategy_key == "soup" and candidate.method in soup_methods
             ) or (
                 strategy_key == "casserole" and candidate.method in casserole_methods
+            ) or (
+                strategy_key == "braise" and candidate.method in braise_methods
             ) or (
                 strategy_key == "grill" and role == "foundation" and candidate.method in grill_side_methods
             )

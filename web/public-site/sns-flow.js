@@ -202,7 +202,17 @@ const SNS = (() => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     }).then(async response => {
-      if (!response.ok) throw new Error(await response.text() || `Request failed: ${response.status}`);
+      if (!response.ok) {
+        const raw = await response.text();
+        let message = raw;
+        try {
+          const body = JSON.parse(raw);
+          message = body.detail || body.message || raw;
+        } catch {
+          // Keep a plain-text service response as-is.
+        }
+        throw new Error(message || `Request failed: ${response.status}`);
+      }
       return response.json();
     });
   }

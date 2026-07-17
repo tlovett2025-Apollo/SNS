@@ -342,6 +342,10 @@ def _method_is_eligible(method, available, foundation, equipment):
             available, physical_traits=("collagen-rich",), relationship_traits=("wet-cook",)
         )
         return has_liquid_path or inherently_stewable
+    if method == "braise":
+        return _inventory_has_ko(
+            available, physical_traits=("collagen-rich",), relationship_traits=("wet-cook",)
+        )
     if method == "casserole":
         return bool(foundation) or _inventory_has_ko(
             available, culinary_functions=("sauce-builder", "thickens", "adds-richness")
@@ -362,6 +366,8 @@ def _serving_styles(method):
     """Return presentation choices independently from cooking method."""
     if method == "soup":
         return ["bowl", "cup"]
+    if method == "braise":
+        return ["plate", "bowl"]
     if method == "handheld":
         return ["handheld", "plate"]
     if method == "cold_meal":
@@ -454,11 +460,19 @@ def generate_candidates(
         {"strategy": "handheld", "cooking_method": "handheld", "label": "Handheld", "title": f"{cuisine} {base} Wrap or Sandwich", "minutes": 18, "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "portable and easy to serve"},
         {"strategy": "grill", "cooking_method": "grill", "label": "Grill", "title": f"Grilled {cuisine} {base}", "minutes": 25, "energy": "Medium", "energy_rank": 2, "budget": "Moderate", "budget_rank": 2, "why": "direct high-heat cooking with simple sides"},
         {"strategy": "cold_meal", "cooking_method": "cold_meal", "label": "Cold Meal", "title": f"Cold {cuisine} {base} Meal", "minutes": 12, "energy": "Very Low", "energy_rank": 0, "budget": "Budget", "budget_rank": 1, "why": "no-cook or low-cook assembly"},
+        {"strategy": "braise", "cooking_method": "braise", "label": "Stovetop Braise", "title": f"{cuisine} {base} Stovetop Braise", "minutes": 120, "energy": "Low", "energy_rank": 1, "budget": "Moderate", "budget_rank": 2, "why": "a patient covered cook makes a collagen-rich cut tender"},
     ]
+    requested = _clean(requested_method)
+    requested_methods = {requested} if requested else set()
+    # The public builder asks for a broad Stovetop environment. A
+    # collagen-rich protein turns it into a covered braise instead of being
+    # forced through quick-skillet grammar.
+    if requested == "skillet":
+        requested_methods.add("braise")
     methods = [
         method for method in methods
         if _method_is_eligible(method["cooking_method"], method_resources, foundation, equipment)
-        and (not _clean(requested_method) or method["cooking_method"] == _clean(requested_method))
+        and (not requested_methods or method["cooking_method"] in requested_methods)
     ]
 
     candidates = []
@@ -482,11 +496,12 @@ def generate_candidates(
         if incompatible:
             continue
         is_soup = method["cooking_method"] == "soup"
+        is_braise = method["cooking_method"] == "braise"
         is_grill = method["cooking_method"] == "grill"
         method_sauce = "rustic broth soup" if is_soup else "simple sauce" if is_grill else sauce
         method_ingredients = (
             _soup_ingredients(method_resources)
-            if is_soup
+            if is_soup or is_braise
             else (
                 get_sauce_profile(method_sauce).ingredients
                 if get_sauce_profile(method_sauce)

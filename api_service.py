@@ -35,9 +35,12 @@ _MEAL_SHAPES = {
     "kid_adventure": "plate",
     "cold_meal": "plate",
     "grill": "plate",
+    "braise": "plate",
 }
 
-_LIVE_PLANNER_METHODS = {"skillet", "casserole", "soup", "handheld", "grill"}
+_LIVE_PLANNER_METHODS = {
+    "skillet", "casserole", "soup", "handheld", "grill", "braise"
+}
 
 _BUILDER_METHODS = (
     {"id": "skillet", "label": "Stovetop", "description": "One or more stovetop vessels; meal structure decides whether components join or stay separate."},
@@ -578,6 +581,8 @@ def _dish_family(candidate: dict) -> str:
         return "one_pot_supper"
     if method == "soup":
         return "bean_soup" if family_code in {"legume", "prepared_legume"} else "rustic_soup"
+    if method == "braise":
+        return "slow_braise"
     if method == "casserole":
         return "baked_casserole"
     if method == "handheld":
@@ -593,6 +598,7 @@ _FAMILY_LABELS = {
     "one_pot_supper": "One-Pot Supper",
     "bean_soup": "Bean Soup",
     "rustic_soup": "Rustic Soup",
+    "slow_braise": "Slow Braise",
     "baked_casserole": "Casserole",
     "wrap_or_sandwich": "Wrap or Sandwich",
     "composed_plate": "Composed Plate",
@@ -897,6 +903,7 @@ def _concept_title(candidate: dict) -> str:
         "casserole": "Casserole",
         "soup": "Soup",
         "handheld": "Wrap or Sandwich",
+        "braise": "Stovetop Braise",
     }
     return f"{component_text} {endings.get(method, 'Meal')}"
 
@@ -1199,12 +1206,52 @@ def _builder_candidates(payload: dict, db_path: str | Path):
     ]))
     candidates = generate_candidates(**_generator_request(engine_request))
     if not candidates:
+        method_label = next(
+            (item["label"] for item in _BUILDER_METHODS if item["id"] == method),
+            "selected cooking environment",
+        )
+        conflicts = []
+        for name, role, form in [
+            *[(item["name"], "protein", protein_states[item["name"]]) for item in protein_selections],
+            *[(name, "vegetable", component_forms.get(name, "Fresh")) for name in produce],
+            *([(foundation, "foundation", component_forms.get(foundation, ""))] if foundation else []),
+        ]:
+            behavior = resolve_behavior(name, role, form, method, db_path)
+            if behavior.primary_family and behavior.method is None:
+                conflicts.append(name)
+        if conflicts:
+            names = ", ".join(conflicts)
+            raise APIContractError(
+                f"This meal needs a little adjustment. {names} does not yet have a trained "
+                f"{method_label} route in the selected form. Choose another cooking environment "
+                "or change that ingredient."
+            )
+        excluded = {_key(item) for item in engine_request.get("excluded_items", [])}
+        blocked = [name for name in selected_components if name and _key(name) in excluded]
+        if blocked:
+            raise APIContractError(
+                f"This meal includes {', '.join(blocked)}, which is listed in My Kitchen exclusions. "
+                "Remove it or choose a suitable replacement."
+            )
         raise APIContractError(
-            "Those choices conflict with My Kitchen exclusions or the selected method."
+            "This combination does not have a complete trained cooking route yet. "
+            "Try changing the cooking environment or one ingredient."
         )
     candidate = candidates[0]
+    # Small scheduling overruns are estimates and should not reject an
+    # otherwise valid ordinary meal. A material shortfall (the long-cook case
+    # this guard exists for) needs an explicit planning-ahead resolution.
+    if not candidate.get("time_feasible", True) and int(candidate.get("time_shortfall_minutes") or 0) >= 15:
+        required = int(candidate.get("required_lead_minutes") or candidate.get("minutes") or 0)
+        available = int(engine_request["time_minutes"])
+        raise APIContractError(
+            f"This meal needs a little more time. It requires about {required} minutes, "
+            f"but you selected {available} minutes. Choose a Planning ahead time, use a "
+            "trained faster method, or select a quicker-cooking protein."
+        )
     candidate["candidate_id"] = "-".join((
-        "build", _slug(engine_request["meal_structure"]), _slug(method), _slug(protein),
+        "build", _slug(engine_request["meal_structure"]),
+        _slug(candidate.get("cooking_method") or method), _slug(protein),
         _slug("-".join(produce)) or "no-produce",
         _slug(foundation) or "no-foundation",
     ))

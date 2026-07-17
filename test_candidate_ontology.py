@@ -9,6 +9,7 @@ def test_plate_and_bowl_are_serving_styles_not_cooking_methods():
     assert _serving_styles("skillet") == ["plate", "bowl"]
     assert _serving_styles("casserole") == ["plate", "bowl"]
     assert _serving_styles("soup") == ["bowl", "cup"]
+    assert _serving_styles("braise") == ["plate", "bowl"]
 
 
 def test_handheld_requires_a_wrapper_or_bread():
@@ -24,6 +25,11 @@ def test_soup_requires_a_liquid_path_or_an_inherently_stewable_protein():
     assert _method_is_eligible(
         "soup", ["Beef stew meat", "Potatoes", "Carrots"], "", []
     )
+
+
+def test_long_braise_requires_a_collagen_rich_protein():
+    assert _method_is_eligible("braise", ["Beef brisket", "Pinto beans"], "", [])
+    assert not _method_is_eligible("braise", ["Chicken breast", "Pinto beans"], "", [])
 
 
 def test_casserole_requires_structure():

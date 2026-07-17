@@ -104,6 +104,44 @@ def cooked_bean_soup_payload(energy="Low", equipment=None):
 
 
 class APIServiceTests(unittest.TestCase):
+    def test_builder_brisket_supports_planning_ahead_stovetop_braise(self):
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": {"inventory": [], "equipment": [{"name": "Stovetop"}]},
+            "selections": {
+                "proteins": [
+                    {"name": "Beef brisket", "state": "Fresh Raw", "role": "main"},
+                    {"name": "Kielbasa", "state": "Fresh Raw", "role": "supporting"},
+                ],
+                "foundation": "Pinto beans", "produce": [], "extras": [],
+                "cuisine": "BBQ", "cooking_method": "skillet",
+                "meal_structure": "integrated", "serving_temperature": "hot",
+                "energy": "High", "time_minutes": 240, "servings": 4,
+            },
+        }
+
+        choice = get_recipe_list(request)["candidates"][0]
+
+        self.assertEqual(choice["cooking_method"], "braise")
+        self.assertLessEqual(choice["total_minutes"], 240)
+        self.assertIn("Braise", choice["title"])
+
+    def test_builder_brisket_explains_when_selected_time_is_too_short(self):
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": {"inventory": [], "equipment": [{"name": "Stovetop"}]},
+            "selections": {
+                "protein": "Beef brisket", "protein_state": "Fresh Raw",
+                "foundation": "Pinto beans", "produce": [], "extras": [],
+                "cuisine": "BBQ", "cooking_method": "soup",
+                "meal_structure": "integrated", "serving_temperature": "hot",
+                "energy": "High", "time_minutes": 90, "servings": 4,
+            },
+        }
+
+        with self.assertRaisesRegex(APIContractError, "needs a little more time"):
+            get_recipe_list(request)
+
     def test_builder_catalog_marks_current_kitchen_ownership(self):
         options = get_meal_builder_options(kitchen_payload())
         proteins = {item["name"]: item["owned"] for item in options["proteins"]}
@@ -323,7 +361,7 @@ class APIServiceTests(unittest.TestCase):
             },
         }
 
-        with self.assertRaisesRegex(APIContractError, "conflict"):
+        with self.assertRaisesRegex(APIContractError, "listed in My Kitchen exclusions"):
             get_recipe_list(request)
 
     def test_snapshot_normalizes_current_browser_payload(self):
