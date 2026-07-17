@@ -372,6 +372,15 @@ CREATE TABLE IF NOT EXISTS ko_behavior_families (
     role TEXT NOT NULL,
     description TEXT NOT NULL,
     physical_traits TEXT,
+    portion_basis TEXT DEFAULT 'flexible',
+    portion_per_standard REAL DEFAULT 1.0,
+    portion_label TEXT DEFAULT 'portion',
+    portion_rounding TEXT DEFAULT 'practical',
+    stretchable INTEGER DEFAULT 0,
+    flavor_domains TEXT,
+    culinary_functions TEXT,
+    texture_contribution TEXT,
+    color_contribution TEXT,
     verified INTEGER DEFAULT 0
 );
 
@@ -395,6 +404,12 @@ CREATE TABLE IF NOT EXISTS ko_family_methods (
     failure_mode TEXT NOT NULL,
     recovery_hint TEXT NOT NULL,
     holdability TEXT,
+    verification_required INTEGER DEFAULT 0,
+    rest_minutes INTEGER DEFAULT 0,
+    rest_template TEXT,
+    frozen_thaw_minutes INTEGER DEFAULT 0,
+    frozen_thaw_equipment TEXT,
+    frozen_thaw_template TEXT,
     verified INTEGER DEFAULT 0,
     UNIQUE(family_id, method_name, form_name),
     FOREIGN KEY (family_id) REFERENCES ko_behavior_families(family_id)
@@ -441,6 +456,20 @@ CREATE TABLE IF NOT EXISTS ko_ingredient_exceptions (
     FOREIGN KEY (ingredient_id) REFERENCES ingredients(ingredient_id)
 );
 
+-- Item-specific facts that do not justify a new behavior family.  Planner
+-- code queries attributes generically; ingredient names never become branches.
+CREATE TABLE IF NOT EXISTS ko_ingredient_attributes (
+    attribute_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ingredient_id INTEGER NOT NULL,
+    form_name TEXT NOT NULL DEFAULT '',
+    attribute_name TEXT NOT NULL,
+    attribute_value TEXT NOT NULL,
+    notes TEXT,
+    verified INTEGER DEFAULT 0,
+    UNIQUE(ingredient_id, form_name, attribute_name),
+    FOREIGN KEY (ingredient_id) REFERENCES ingredients(ingredient_id)
+);
+
 CREATE TABLE IF NOT EXISTS ckb_change_log (
     change_id INTEGER PRIMARY KEY AUTOINCREMENT,
     change_type TEXT NOT NULL,
@@ -474,6 +503,21 @@ MIGRATIONS = [
     ("user_inventory", "opened_at", "ALTER TABLE user_inventory ADD COLUMN opened_at TEXT"),
     ("user_inventory", "refrigerated_after_opening", "ALTER TABLE user_inventory ADD COLUMN refrigerated_after_opening INTEGER"),
     ("user_inventory", "package_weight_oz", "ALTER TABLE user_inventory ADD COLUMN package_weight_oz REAL"),
+    ("ko_family_methods", "verification_required", "ALTER TABLE ko_family_methods ADD COLUMN verification_required INTEGER DEFAULT 0"),
+    ("ko_family_methods", "rest_minutes", "ALTER TABLE ko_family_methods ADD COLUMN rest_minutes INTEGER DEFAULT 0"),
+    ("ko_family_methods", "rest_template", "ALTER TABLE ko_family_methods ADD COLUMN rest_template TEXT"),
+    ("ko_family_methods", "frozen_thaw_minutes", "ALTER TABLE ko_family_methods ADD COLUMN frozen_thaw_minutes INTEGER DEFAULT 0"),
+    ("ko_family_methods", "frozen_thaw_equipment", "ALTER TABLE ko_family_methods ADD COLUMN frozen_thaw_equipment TEXT"),
+    ("ko_family_methods", "frozen_thaw_template", "ALTER TABLE ko_family_methods ADD COLUMN frozen_thaw_template TEXT"),
+    ("ko_behavior_families", "portion_basis", "ALTER TABLE ko_behavior_families ADD COLUMN portion_basis TEXT DEFAULT 'flexible'"),
+    ("ko_behavior_families", "portion_per_standard", "ALTER TABLE ko_behavior_families ADD COLUMN portion_per_standard REAL DEFAULT 1.0"),
+    ("ko_behavior_families", "portion_label", "ALTER TABLE ko_behavior_families ADD COLUMN portion_label TEXT DEFAULT 'portion'"),
+    ("ko_behavior_families", "portion_rounding", "ALTER TABLE ko_behavior_families ADD COLUMN portion_rounding TEXT DEFAULT 'practical'"),
+    ("ko_behavior_families", "stretchable", "ALTER TABLE ko_behavior_families ADD COLUMN stretchable INTEGER DEFAULT 0"),
+    ("ko_behavior_families", "flavor_domains", "ALTER TABLE ko_behavior_families ADD COLUMN flavor_domains TEXT"),
+    ("ko_behavior_families", "culinary_functions", "ALTER TABLE ko_behavior_families ADD COLUMN culinary_functions TEXT"),
+    ("ko_behavior_families", "texture_contribution", "ALTER TABLE ko_behavior_families ADD COLUMN texture_contribution TEXT"),
+    ("ko_behavior_families", "color_contribution", "ALTER TABLE ko_behavior_families ADD COLUMN color_contribution TEXT"),
 ]
 
 

@@ -899,7 +899,8 @@ const SNS = (() => {
       {id:"skillet", label:"Stovetop", description:"One or more stovetop vessels; meal structure decides whether components join or stay separate."},
       {id:"soup", label:"Soup or Stew", description:"A liquid-led one-vessel meal; SNS chooses the suitable owned pot."},
       {id:"casserole", label:"Oven Bake", description:"An oven-baked meal assembled in one baking dish."},
-      {id:"handheld", label:"Handheld", description:"Components cooked as needed, then assembled with bread or a wrap."}
+      {id:"handheld", label:"Handheld", description:"Components cooked as needed, then assembled with bread or a wrap."},
+      {id:"grill", label:"Grill", description:"Direct and indirect grill zones with KO-specific doneness, flare-up, basket, and resting guidance."}
     ],
     meal_structures: [
       {id:"integrated", label:"Cooked Together", description:"A cohesive one-vessel meal whose compatible ingredients join in stages."},
@@ -938,17 +939,12 @@ const SNS = (() => {
 
     const proteinHolder = form.querySelector("[data-protein-options]");
     const inferProteinState = item => {
-      const name = String(item.name || "").toLowerCase();
-      const savedForm = String(item.form || "").toLowerCase();
-      if (name.startsWith("canned ") || savedForm.includes("canned")) return "Canned";
-      if (name.includes("rotisserie") || ["cooked", "prepared", "ready to eat", "leftover"].some(term => savedForm.includes(term))) return "Cooked";
-      if (savedForm.includes("frozen")) return "Frozen Raw";
-      return "Fresh Raw";
+      return item.default_state || "Fresh Raw";
     };
     proteinHolder.innerHTML = (options.proteins || []).map(item => {
       const isOwned = item.owned ?? owned.has(String(item.name).toLowerCase());
       const state = inferProteinState(item);
-      return `<label class="produce-choice protein-choice" data-protein-choice data-search-name="${escapeHtml(item.name.toLowerCase())}">
+      return `<label class="produce-choice protein-choice" data-protein-choice data-protein-role-kind="${escapeHtml(item.suggested_role || "supporting")}" data-search-name="${escapeHtml(item.name.toLowerCase())}">
         <input type="checkbox" name="protein" value="${escapeHtml(item.name)}">
         <span>${escapeHtml(item.name)}</span>
         <small data-protein-role>${isOwned ? `In My Kitchen${item.form ? ` · ${escapeHtml(item.form)}` : ""}` : "Need to buy"}</small>
@@ -964,10 +960,10 @@ const SNS = (() => {
       const selected = [...proteinHolder.querySelectorAll('input[name="protein"]:checked')];
       selected.forEach((input, index) => {
         const role = input.closest("[data-protein-choice]").querySelector("[data-protein-role]");
-        const name = input.value.toLowerCase();
+        const kind = input.closest("[data-protein-choice]").dataset.proteinRoleKind;
         const inferred = index === 0 ? "Main protein" :
-          /bean|lentil|chickpea/.test(name) ? "Stretch protein" :
-          /bacon|sausage|ham|chorizo/.test(name) ? "Flavor accent" : "Supporting protein";
+          kind === "stretch" ? "Stretch protein" :
+          kind === "accent" ? "Flavor accent" : "Supporting protein";
         role.textContent = `${inferred} · ${role.textContent.replace(/^(Main protein|Stretch protein|Flavor accent|Supporting protein) · /, "")}`;
       });
     };
@@ -989,9 +985,9 @@ const SNS = (() => {
     ).join("");
 
     form.querySelector("[data-method-options]").innerHTML = (options.methods || fallbackBuilderOptions.methods).map((item, index) => `
-      <label class="builder-choice-card">
-        <input type="radio" name="cooking-method" value="${escapeHtml(item.id)}"${index === 0 ? " checked" : ""}>
-        <span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.description)}</small></span>
+      <label class="builder-choice-card${item.available === false ? " unavailable" : ""}">
+        <input type="radio" name="cooking-method" value="${escapeHtml(item.id)}"${index === 0 ? " checked" : ""}${item.available === false ? " disabled" : ""}>
+        <span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.note || item.description)}</small></span>
       </label>`).join("");
     form.querySelector("[data-structure-options]").innerHTML = (options.meal_structures || fallbackBuilderOptions.meal_structures).map((item, index) => `
       <label class="builder-choice-card">
@@ -1002,7 +998,7 @@ const SNS = (() => {
       const method = form.querySelector('input[name="cooking-method"]:checked')?.value;
       const structureInputs = [...form.querySelectorAll('input[name="meal-structure"]')];
       structureInputs.forEach(input => {
-        input.disabled = method !== "skillet" && input.value !== "integrated";
+        input.disabled = !["skillet", "grill"].includes(method) && input.value !== "integrated";
       });
       if (structureInputs.find(input => input.checked)?.disabled) {
         structureInputs.find(input => input.value === "integrated").checked = true;
@@ -1010,7 +1006,7 @@ const SNS = (() => {
       const structure = structureInputs.find(input => input.checked)?.value;
       const produceCount = form.querySelectorAll('input[name="produce"]:checked').length;
       const guidance = form.querySelector("[data-structure-guidance]");
-      if (method !== "skillet") {
+      if (!["skillet", "grill"].includes(method)) {
         guidance.textContent = "This cooking family currently determines how the components come together. More structures will appear as their cooking grammar is trained.";
       } else if (structure === "composed_plate" && produceCount > 2) {
         guidance.textContent = "Composed plates usually feature one or two vegetables. You can continue, or choose the ingredients you most want to taste separately.";
@@ -1099,11 +1095,10 @@ const SNS = (() => {
       selections: {
         proteins: [...form.querySelectorAll('input[name="protein"]:checked')].map((input, index) => {
           const name = input.value;
-          const key = name.toLowerCase();
           return {
             name,
             state: input.closest("[data-protein-choice]")?.querySelector("[data-protein-state]")?.value || "Fresh Raw",
-            role: index === 0 ? "main" : /bean|lentil|chickpea/.test(key) ? "stretch" : /bacon|sausage|ham|chorizo/.test(key) ? "accent" : "supporting"
+            role: index === 0 ? "main" : ""
           };
         }),
         produce: [...form.querySelectorAll('input[name="produce"]:checked')].map(item => item.value),
@@ -1127,11 +1122,6 @@ const SNS = (() => {
     if (!payload.selections.proteins.length) {
       status.textContent = "Choose at least one protein first.";
       form.querySelector('input[name="protein"]')?.focus();
-      return;
-    }
-    if (payload.selections.proteins.length > 1 && payload.selections.cooking_method !== "skillet") {
-      status.textContent = "Multiple-protein planning is trained for Stovetop Meal first. Choose Stovetop Meal for this combination.";
-      form.querySelector('input[name="cooking-method"][value="skillet"]')?.focus();
       return;
     }
     if (people < 1) {

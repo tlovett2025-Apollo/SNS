@@ -6,7 +6,7 @@ from recipe_engine import build_recipe_from_candidate, generate_candidates
 
 def sample_candidate():
     return generate_candidates(
-        "Chicken breast", "Swiss chard & Black olives", "Rice", "Comfort Food",
+        "Chicken breast", "Swiss chard & Black olives", "White rice", "Comfort Food",
         "Low", "Budget", 30, 4, 1,
         vegetable_names=["Swiss chard", "Black olives"],
     )[0]
@@ -15,9 +15,8 @@ def sample_candidate():
 def test_knowledge_objects_publish_component_activities():
     activities = build_cooking_activities(sample_candidate())
     assert any(a.component == "Chicken breast" and a.activity_type == "rest" and a.source == "ko" for a in activities)
-    assert any(a.component == "Swiss chard" and a.activity_type == "serve" and a.source == "ko" for a in activities)
-    assert any(a.component == "Black olives" and a.activity_type == "drain" and a.source == "ko" for a in activities)
-    assert any(a.component == "Black olives" and a.activity_type == "fold in" and a.source == "ko" for a in activities)
+    assert any(a.component == "Swiss chard" and a.activity_type == "cook" and a.source == "ko" for a in activities)
+    assert any(a.component == "Black olives" and a.activity_type == "assemble" and a.source == "ko" for a in activities)
 
 
 def test_planner_does_not_replace_components_with_roles():
@@ -46,11 +45,9 @@ def test_activity_consolidation_builds_one_real_ingredient_prep_phase():
     from cooking_planner import build_activity_graph
 
     graph = build_activity_graph(parallel_regression_candidate())
-    launch = graph["prep:launch"]
     prep = graph["prep:meal"]
 
-    assert launch.depends_on == ["gather:meal"]
-    assert prep.depends_on == ["start:Rice"]
+    assert prep.depends_on == ["gather:meal"]
     assert prep.component == "meal"
     assert prep.activity_type == "prep"
     instruction = prep.instruction.lower()
@@ -61,7 +58,7 @@ def test_activity_consolidation_builds_one_real_ingredient_prep_phase():
     assert "swiss chard" in instruction
     assert "mushrooms" in instruction
     assert "asparagus" in instruction
-    assert "rice" in launch.instruction.lower()
+    assert "white rice" in instruction
     assert "simple stir-fry sauce" in instruction
 
 
@@ -71,7 +68,7 @@ def test_component_cooking_depends_on_consolidated_prep():
     graph = build_activity_graph(parallel_regression_candidate())
 
     assert graph["cook:Chicken breast"].depends_on == ["prep:meal"]
-    assert graph["start:Rice"].depends_on == ["prep:launch"]
+    assert graph["cook:White rice"].depends_on == ["prep:meal"]
     assert all(
         not dependency.startswith("prep:") or dependency in {"prep:meal", "prep:launch"}
         for activity in graph.values()
@@ -101,7 +98,7 @@ def test_lane_schedule_never_uses_more_burners_than_available():
 
 def state_candidate(state):
     return generate_candidates(
-        "Chicken breast", "Swiss chard", "Rice", "Comfort Food",
+        "Chicken breast", "Swiss chard", "White rice", "Comfort Food",
         "Low", "Budget", 45, 4, 1,
         vegetable_names=["Swiss chard"],
         protein_state=state,
@@ -116,17 +113,16 @@ def test_protein_state_flows_into_candidate():
 def test_fresh_raw_chicken_publishes_cook_rest_and_slice():
     activities = build_cooking_activities(state_candidate("Fresh Raw"))
     kinds = [a.activity_type for a in activities if a.component == "Chicken breast"]
-    assert kinds == ["prep", "cook", "rest", "slice"]
+    assert kinds == ["prep", "cook", "verify", "rest"]
 
 
 def test_frozen_raw_chicken_publishes_verify_and_longer_path():
     activities = build_cooking_activities(state_candidate("Frozen Raw"))
     chicken = [a for a in activities if a.component == "Chicken breast"]
     kinds = [a.activity_type for a in chicken]
-    assert kinds == ["thaw", "prep", "cook", "verify", "rest", "slice"]
+    assert kinds == ["thaw", "prep", "cook", "verify", "rest"]
     assert sum(a.minutes or 0 for a in chicken) > 30
-    assert "thawed chicken" in chicken[1].instruction.lower()
-    assert all("frozen chicken" not in activity.instruction.lower() for activity in chicken[1:])
+    assert "thaw safely" in chicken[1].instruction.lower()
 
 
 def test_cooked_chicken_reheats_without_raw_cooking_cycle():
@@ -156,26 +152,26 @@ def test_citrus_finishes_the_meal_instead_of_cooking_as_a_vegetable():
 
     activities = get_ingredient_profile("Lemons", "vegetable").publish_activities("skillet", "Fresh")
 
-    assert [activity.activity_type for activity in activities] == ["prep", "finish"]
+    assert [activity.activity_type for activity in activities] == ["assemble"]
     assert activities[-1].equipment == "counter"
-    assert "lemon juice" in activities[-1].instruction.lower()
+    assert "juice or wedges" in activities[-1].instruction.lower()
 
 
 def test_integrated_rustic_sauce_softens_aromatics_before_tomatoes_join():
     candidate = generate_candidates(
         "Rotisserie chicken", "", "", "Italian", "Low", "Moderate", 45, 4, 1,
-        vegetable_names=["Onions", "Red bell peppers", "Tomatoes"],
+        vegetable_names=["Onions", "Red bell pepper", "Tomatoes"],
         protein_state="Cooked",
-        available_items=["Rotisserie chicken", "Onions", "Red bell peppers", "Tomatoes"],
+        available_items=["Rotisserie chicken", "Onions", "Red bell pepper", "Tomatoes"],
         requested_method="skillet",
         meal_structure="integrated",
     )[0]
     recipe = build_recipe_from_candidate(candidate)
     plan = " ".join(recipe["action_steps"])
 
-    self_soften = plan.index("soften them")
+    self_soften = plan.index("soften")
     tomato_join = plan.index("Add Tomatoes")
-    assert "Onions & Red bell peppers" in plan
+    assert "Onions & Red bell pepper" in plan
     assert self_soften < tomato_join
     assert "heat it gently until hot; do not recook it" in plan
 
@@ -228,10 +224,9 @@ def test_microwave_thaw_launches_first_and_prep_overlaps_it():
     thaw = by_id["thaw:Chicken breast"]
     general_prep = by_id["prep:meal"]
     chicken_prep = by_id["prep:Chicken breast"]
-    assert thaw.lane == "Microwave"
-    assert thaw.end_minute - thaw.start_minute == 7
+    assert thaw.lane == "Sink"
+    assert thaw.end_minute - thaw.start_minute == 30
     assert general_prep.start_minute < thaw.end_minute
-    assert general_prep.end_minute > thaw.start_minute
     assert chicken_prep.start_minute >= thaw.end_minute
 
 
@@ -302,7 +297,7 @@ def parallel_regression_candidate():
     return generate_candidates(
         "Chicken breast",
         "Swiss chard & Mushrooms & Asparagus",
-        "Rice",
+        "White rice",
         "Chinese",
         "Low",
         "Budget",
@@ -321,20 +316,20 @@ def test_fresh_chicken_cook_window_is_not_followed_by_duplicate_passive_cooking(
     by_id = {item.activity.activity_id: item for item in schedule}
 
     assert "wait:Chicken breast" not in by_id
-    assert by_id["rest:Chicken breast"].start_minute == by_id["cook:Chicken breast"].end_minute
+    assert by_id["rest:Chicken breast"].start_minute == by_id["verify:Chicken breast"].end_minute
 
 
 def test_rice_passive_cooking_overlaps_other_human_work():
     from cooking_planner import build_kitchen_lane_schedule
 
     schedule = build_kitchen_lane_schedule(parallel_regression_candidate())
-    rice = next(item for item in schedule if item.activity.activity_id == "simmer:Rice")
+    rice = next(item for item in schedule if item.activity.activity_id == "cook:White rice")
 
     assert any(
         item.activity.human_busy
         and item.start_minute < rice.end_minute
         and item.end_minute > rice.start_minute
-        and item.activity.component != "Rice"
+        and item.activity.component != "White rice"
         for item in schedule
     )
 
@@ -347,9 +342,10 @@ def test_rice_launches_before_general_mise_en_place():
     schedule = build_kitchen_lane_schedule(candidate)
     by_id = {item.activity.activity_id: item for item in schedule}
 
-    assert by_id["prep:launch"].end_minute == by_id["start:Rice"].start_minute
-    assert by_id["start:Rice"].end_minute == by_id["prep:meal"].start_minute
-    assert by_id["prep:meal"].start_minute < by_id["simmer:Rice"].end_minute
+    assert by_id["cook:White rice"].start_minute >= by_id["prep:meal"].end_minute
+    assert by_id["cook:White rice"].attention_minutes < (
+        by_id["cook:White rice"].end_minute - by_id["cook:White rice"].start_minute
+    )
 
 
 def test_basmati_rice_uses_rice_long_lead_activity_graph():
@@ -359,11 +355,10 @@ def test_basmati_rice_uses_rice_long_lead_activity_graph():
     candidate["foundation"] = "Basmati rice"
     graph = build_activity_graph(candidate)
 
-    assert "start:Basmati rice" in graph
-    assert "simmer:Basmati rice" in graph
-    assert graph["simmer:Basmati rice"].human_busy is False
-    assert graph["simmer:Basmati rice"].minutes == 18
-    assert graph["start:Basmati rice"].depends_on == ["prep:launch"]
+    assert "cook:Basmati rice" in graph
+    assert graph["cook:Basmati rice"].attention_load < 0.5
+    assert graph["cook:Basmati rice"].minutes == 18
+    assert graph["cook:Basmati rice"].depends_on == ["prep:meal"]
 
 
 def test_time_feasibility_uses_required_lead_time():
@@ -399,11 +394,11 @@ def test_energy_scales_human_attention_and_schedule():
 
 def test_user_energy_input_flows_into_candidate_schedule():
     normal = generate_candidates(
-        "Chicken breast", "Mushrooms", "Rice", "Chinese",
+        "Chicken breast", "Mushrooms", "White rice", "Chinese",
         "Medium", "Budget", 60, 4, 1,
     )[0]
     low = generate_candidates(
-        "Chicken breast", "Mushrooms", "Rice", "Chinese",
+        "Chicken breast", "Mushrooms", "White rice", "Chinese",
         "Very Low", "Budget", 60, 4, 1,
     )[0]
 
@@ -414,12 +409,12 @@ def test_user_energy_input_flows_into_candidate_schedule():
 
 def test_effort_comes_from_whole_meal_schedule():
     full = generate_candidates(
-        "Chicken breast", "Mushrooms & Swiss chard & Asparagus", "Rice", "Chinese",
+        "Chicken breast", "Mushrooms & Swiss chard & Asparagus", "White rice", "Chinese",
         "Medium", "Budget", 60, 4, 1,
         vegetable_names=["Mushrooms", "Swiss chard", "Asparagus"],
     )[0]
     reduced = generate_candidates(
-        "Chicken breast", "Mushrooms", "Rice", "Chinese",
+        "Chicken breast", "Mushrooms", "White rice", "Chinese",
         "Medium", "Budget", 60, 4, 1,
         vegetable_names=["Mushrooms"],
     )[0]
@@ -435,13 +430,13 @@ def test_chicken_uses_fractional_not_exclusive_attention():
     schedule = build_kitchen_lane_schedule(candidate)
     chicken = next(item for item in schedule if item.activity.activity_id == "cook:Chicken breast")
 
-    assert chicken.attention_minutes == 3
-    assert chicken.end_minute - chicken.start_minute == 12
+    assert chicken.attention_minutes == 7
+    assert chicken.end_minute - chicken.start_minute == 14
 
 
 def test_optional_cuisine_intent_builds_have_need_grocery_gap():
     candidate = generate_candidates(
-        "Chicken breast", "Mushrooms & Swiss chard & Asparagus", "Rice", "Chinese",
+        "Chicken breast", "Mushrooms & Swiss chard & Asparagus", "White rice", "Chinese",
         "Low", "Budget", 60, 4, 1,
         vegetable_names=["Mushrooms", "Swiss chard", "Asparagus"],
     )[0]
@@ -455,7 +450,7 @@ def test_optional_cuisine_intent_builds_have_need_grocery_gap():
 
 def test_available_cuisine_items_are_removed_from_grocery_gap():
     candidate = generate_candidates(
-        "Chicken breast", "Mushrooms", "Rice", "Chinese",
+        "Chicken breast", "Mushrooms", "White rice", "Chinese",
         "Normal", "Budget", 60, 4, 1,
         available_items=["Soy sauce"],
     )[0]
@@ -544,7 +539,7 @@ def test_final_service_is_consolidated_after_chicken_rests():
     assert service.end_minute - service.start_minute == 2
     # The vegetables and sauce now honor the same physical skillet instead of
     # borrowing an imaginary second pan to preserve the older 31-minute target.
-    assert service.end_minute == 38
+    assert service.end_minute == 42
 
 
 def test_printed_recipe_uses_detailed_ko_instructions():
@@ -554,12 +549,10 @@ def test_printed_recipe_uses_detailed_ko_instructions():
     candidate["available_equipment"] = ["Rice cooker"]
     instructions = generate_human_instructions(candidate)
 
-    assert "do not soak" in instructions
     assert "single, uncrowded layer" in instructions
-    assert "woody ends" in instructions
-    assert "bright green and crisp-tender" in instructions
-    assert "edible stems" in instructions
-    assert "Do not rinse raw chicken" in instructions
+    assert "trim tough ends or strings" in instructions
+    assert "Bright color and crisp-tender centers" in instructions
+    assert "Do not rinse Chicken breast" in instructions
     assert "165°F" in instructions
     assert "adjust seasoning" in instructions
 

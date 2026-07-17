@@ -34,6 +34,12 @@ class MethodRule:
     failure_mode: str
     recovery_hint: str
     holdability: str = "fair"
+    verification_required: bool = False
+    rest_minutes: int = 0
+    rest_template: str = ""
+    frozen_thaw_minutes: int = 0
+    frozen_thaw_equipment: str = "counter"
+    frozen_thaw_template: str = ""
 
 
 @dataclass(frozen=True)
@@ -45,6 +51,15 @@ class BehaviorFamily:
     physical_traits: Tuple[str, ...]
     methods: Tuple[MethodRule, ...]
     relationship_traits: Tuple[str, ...] = ()
+    portion_basis: str = "flexible"
+    portion_per_standard: float = 1.0
+    portion_label: str = "portion"
+    portion_rounding: str = "practical"
+    stretchable: bool = False
+    flavor_domains: Tuple[str, ...] = ()
+    culinary_functions: Tuple[str, ...] = ()
+    texture_contribution: str = ""
+    color_contribution: str = ""
 
 
 @dataclass
@@ -57,6 +72,7 @@ class ResolvedBehavior:
     method: MethodRule | None = None
     source: str = "unclassified"
     incompatibility_reason: str = ""
+    attributes: dict[str, str] = field(default_factory=dict)
 
     @property
     def family_codes(self):
@@ -66,12 +82,16 @@ class ResolvedBehavior:
 def method(
     name, forms, environment, creates, prep, cook, active, attention,
     equipment, stage, handling, instruction, outcome, cue, failure, recovery,
-    holdability="fair",
+    holdability="fair", verification_required=False, rest_minutes=0,
+    rest_template="", frozen_thaw_minutes=0,
+    frozen_thaw_equipment="counter", frozen_thaw_template="",
 ):
     return MethodRule(
         name, tuple(forms), environment, creates, prep, cook, active, attention,
         equipment, stage, handling, instruction, outcome, cue, failure,
-        recovery, holdability,
+        recovery, holdability, verification_required, rest_minutes,
+        rest_template, frozen_thaw_minutes, frozen_thaw_equipment,
+        frozen_thaw_template,
     )
 
 
@@ -99,6 +119,8 @@ FAMILY_LIBRARY: Dict[str, BehaviorFamily] = {
             "Evenly browned, moist crumbles.", "The center of the thickest clump reaches the ingredient's safe temperature.",
             "Large clumps can brown outside while remaining undercooked inside.",
             "Break apart large clumps and continue cooking; add sauce if it becomes dry.", "fair",
+            frozen_thaw_minutes=7, frozen_thaw_equipment="microwave",
+            frozen_thaw_template="Remove all packaging, place {name} on a microwave-safe plate, and use the microwave defrost setting in short intervals, turning and scraping away softened portions; cook immediately.",
         ), READY_REHEAT),
         ("early-browning", "can-share-skillet-after-safe"),
     ),
@@ -130,6 +152,10 @@ FAMILY_LIBRARY: Dict[str, BehaviorFamily] = {
             "Brown outside and juicy inside.", "The thickest edible portion reaches 165°F.",
             "Uneven thickness can leave the center raw while thinner areas dry out.",
             "Lower the heat, cover briefly if necessary, and continue until 165°F; serve dry pieces with sauce.", "fair",
+            verification_required=True, rest_minutes=5,
+            rest_template="Rest {name} off heat before slicing or serving.",
+            frozen_thaw_minutes=30, frozen_thaw_equipment="counter",
+            frozen_thaw_template="Keep {name} sealed and thaw it in cold water, changing the water every 30 minutes; cook immediately.",
         ), READY_REHEAT),
         ("requires-rest-when-intact", "keep-raw-separate"),
     ),
@@ -145,6 +171,8 @@ FAMILY_LIBRARY: Dict[str, BehaviorFamily] = {
             "Moist flakes with a lightly browned surface.", "The thickest portion reaches 145°F and flakes easily.",
             "Overcooking makes fish dry and chalky; turning too early tears it.",
             "Stop promptly and serve with sauce or a bright finish if it becomes dry.", "poor",
+            verification_required=True, frozen_thaw_minutes=20,
+            frozen_thaw_template="Keep {name} sealed and thaw it in cold water until flexible; cook immediately.",
         ), READY_REHEAT),
         ("late-cooking", "fragile-turn"),
     ),
@@ -175,6 +203,10 @@ FAMILY_LIBRARY: Dict[str, BehaviorFamily] = {
             "Brown exterior with a moist, safely cooked center.", "160°F for pork/beef sausage or 165°F for poultry sausage.",
             "High heat can burn the casing while the center remains raw.",
             "Lower the heat and cover briefly; slice only after the center is safely cooked.", "fair",
+            verification_required=True, rest_minutes=3,
+            rest_template="Rest {name} briefly before slicing links.",
+            frozen_thaw_minutes=25,
+            frozen_thaw_template="Keep {name} sealed and thaw it in cold water; cook immediately.",
         ), READY_REHEAT),
         ("can-flavor-fat",),
     ),
@@ -200,7 +232,7 @@ FAMILY_LIBRARY: Dict[str, BehaviorFamily] = {
         (method(
             "saute", ("fresh", "fresh raw"), "moderate skillet with fat",
             "soft aromatic base", 3, 7, 6, .6, "burner", "early",
-            "Trim and peel {name} as needed, then cut into even pieces.",
+            "Trim and peel {name} as needed, then cut it into an even 1/2-inch dice for a skillet meal.",
             "Cook {name} in a light coating of fat, stirring occasionally, until soft and beginning to color.",
             "Soft, sweet, aromatic pieces with light browning.", "Translucent or tender with lightly colored edges.",
             "Too much heat burns the outside before the pieces soften.",
@@ -230,7 +262,7 @@ FAMILY_LIBRARY: Dict[str, BehaviorFamily] = {
         (method(
             "saute", ("fresh", "fresh raw", "frozen"), "moderate skillet with fat and optional steam",
             "softened browned vegetable", 4, 10, 7, .55, "burner", "early",
-            "Scrub or peel {name} as appropriate and cut into small, even pieces.",
+            "Scrub or peel {name} as appropriate and cut it into an even 1/4-inch dice for a quick skillet meal.",
             "Cook {name} with a light coating of fat. Add a splash of water and cover briefly when needed, then uncover to finish.",
             "Tender pieces with some browned edges.", "A fork enters the center with the intended amount of resistance.",
             "Large pieces stay hard while the outside over-browns.",
@@ -393,8 +425,16 @@ FAMILY_LIBRARY: Dict[str, BehaviorFamily] = {
             "Creamy-tender legumes with no hard or chalky center.", "A bean crushes creamy throughout when tasted.",
             "Acid or old beans can delay softening; an eight-minute generic cook leaves dry legumes inedible.",
             "Continue with hot liquid until tender; add acidic ingredients after softening when possible.", "excellent",
-        ), READY_REHEAT),
-        ("dry-versus-canned-critical", "can-stretch-protein"),
+        ), method(
+            "reheat", ("canned", "cooked", "ready to eat"), "gentle moist heat",
+            "creamy thickening foundation", 2, 4, 4, .5, "burner", "late",
+            "Drain and rinse {name}. Leave it whole, or mash some for a creamier texture.",
+            "Stir in {name}, mash or purée some if desired, and heat gently until steaming hot.",
+            "Hot creamy-tender legumes without recooking.", "Steaming hot throughout.",
+            "Prolonged heat can turn cooked legumes pasty or scorch a thickened base.",
+            "Add liquid to loosen and stop heating as soon as it is hot.", "good",
+        )),
+        ("dry-versus-canned-critical", "can-stretch-protein", "soup-friendly"),
     ),
     "bread_wrap": BehaviorFamily(
         "bread_wrap", "Bread or wrap foundation", "foundation",
@@ -440,11 +480,15 @@ FAMILY_LIBRARY.update({
             "skillet", ("fresh raw", "frozen raw", "refrigerated"), "very hot skillet",
             "browned fond", 4, 9, 7, .7, "burner", "middle",
             "Thaw {name} when frozen, pat it dry, and season both sides.",
-            "Sear {name} without moving it until well browned and it releases readily; turn once, cook to the chosen doneness, then rest before slicing.",
+            "Sear {name} without moving it. When the cooked color has climbed roughly halfway to two-thirds up the side and the steak releases readily, turn once; cook to the chosen doneness, then rest before slicing.",
             "A deeply browned exterior and the requested interior doneness.",
-            "Use an instant-read thermometer: about 125–130°F medium-rare or 135–140°F medium before a short rest; follow household safety needs.",
+            "For the verified safety endpoint, the center reaches 145°F followed by at least a 3-minute rest.",
             "Turning too early prevents browning; cooking only by the clock can over- or undercook a thick steak.",
             "Lower the heat if the crust darkens too quickly; rest and serve a more-done steak with sauce.", "fair",
+            verification_required=True, rest_minutes=5,
+            rest_template="Rest {name} for at least 5 minutes before slicing across the grain.",
+            frozen_thaw_minutes=30,
+            frozen_thaw_template="Keep {name} sealed and thaw it in cold water, changing the water every 30 minutes; cook immediately.",
         ), READY_REHEAT), ("rest-required", "temperature-led"),
     ),
     "pork_cut": BehaviorFamily(
@@ -459,12 +503,32 @@ FAMILY_LIBRARY.update({
             "Brown outside and juicy inside.", "The thickest part reaches 145°F, followed by at least a 3-minute rest.",
             "High heat can dry the outside before a thick center reaches temperature.",
             "Lower the heat and cover briefly; serve dry pork with sauce or pan juices.", "fair",
+            verification_required=True, rest_minutes=3,
+            rest_template="Rest {name} for at least 3 minutes before slicing or serving.",
+            frozen_thaw_minutes=30,
+            frozen_thaw_template="Keep {name} sealed and thaw it in cold water; cook immediately.",
         ), READY_REHEAT), ("rest-required",),
     ),
     "ready_protein": BehaviorFamily(
         "ready_protein", "Ready-to-eat protein", "protein",
         "A cooked or canned protein needing preparation and gentle reheating, never recooking.",
-        ("ready-to-eat", "form-sensitive"), (READY_REHEAT,), ("late-entry",),
+        ("ready-to-eat", "form-sensitive"), (method(
+            "reheat", ("canned", "pantry"), "gentle moist heat",
+            "warm finishing environment", 2, 4, 4, .5, "burner", "late",
+            "Drain {name} and break it into serving-size pieces.",
+            "Fold in {name} near the end and heat gently until steaming hot; do not recook it.",
+            "Hot moist protein.", "Steaming hot throughout.",
+            "Prolonged heat dries an already-cooked protein.",
+            "Add moisture or sauce and stop heating promptly.", "good",
+        ), method(
+            "reheat", ("cooked", "ready to eat", "refrigerated"), "gentle moist heat",
+            "warm finishing environment", 2, 4, 4, .5, "burner", "late",
+            "Remove unwanted bones or skin from {name}, then slice or shred it as the meal needs.",
+            "Fold in {name} near the end and heat gently until steaming hot; do not recook it.",
+            "Hot moist protein.", "Steaming hot throughout.",
+            "Prolonged heat dries an already-cooked protein.",
+            "Add moisture or sauce and stop heating promptly.", "good",
+        )), ("late-entry",),
     ),
     "egg": BehaviorFamily(
         "egg", "Egg", "protein",
@@ -534,7 +598,7 @@ FAMILY_LIBRARY.update({
             "Sweetened pepper with the intended crisp or soft texture.", "Edges color and the pieces bend easily while retaining the chosen bite.",
             "Crowding releases water; very high heat can scorch thin pieces.",
             "Cook uncovered to evaporate water or lower the heat when edges darken too quickly.", "good",
-        ), READY_REHEAT), ("joins-aromatics",),
+        ), READY_REHEAT), ("joins-aromatics", "joins-sauce-base"),
     ),
     "winter_squash": BehaviorFamily(
         "winter_squash", "Dense winter squash", "vegetable",
@@ -621,6 +685,127 @@ FAMILY_LIBRARY.update({
         ), READY_REHEAT), ("form-critical",),
     ),
 })
+
+
+def _add_family_method(family_code, rule):
+    family = FAMILY_LIBRARY[family_code]
+    FAMILY_LIBRARY[family_code] = replace(family, methods=(*family.methods, rule))
+
+
+def grill_method(
+    forms, prep, cook, active, stage, handling, instruction, outcome, cue,
+    failure, recovery, holdability="poor", verification_required=False,
+    rest_minutes=0, rest_template="",
+):
+    return method(
+        "grill", forms, "preheated outdoor grill", "grilled dry-heat environment",
+        prep, cook, active, .65, "grill", stage, handling, instruction, outcome,
+        cue, failure, recovery, holdability,
+        verification_required=verification_required, rest_minutes=rest_minutes,
+        rest_template=rest_template,
+    )
+
+
+_add_family_method("ground_meat", grill_method(
+    ("fresh raw", "frozen raw"), 5, 10, 7, "middle",
+    "Thaw {name}, keep it cold, and shape even patties without compacting them heavily.",
+    "Grill {name} patties over direct heat, turning once after they release cleanly; do not press out the juices.",
+    "Brown grill marks and a moist safely cooked center.",
+    "The center reaches the safe temperature for the specific ground meat.",
+    "Thick or tightly packed patties can char outside while remaining raw inside.",
+    "Move to a cooler zone and continue to temperature; serve dry patties with a moist topping.",
+    verification_required=True, rest_minutes=3,
+    rest_template="Rest {name} patties briefly before serving.",
+))
+_add_family_method("poultry_piece", grill_method(
+    ("fresh raw", "frozen raw"), 5, 16, 9, "middle",
+    "Thaw {name}, do not rinse it, pat dry, make thickness even, and season.",
+    "Grill {name} over medium direct heat with the lid closed as appropriate, turning after it releases; move to indirect heat if the exterior browns too quickly.",
+    "Brown grill marks and juicy safely cooked poultry.", "The thickest edible portion reaches 165°F.",
+    "Flare-ups burn the exterior and uneven pieces cook at different rates.",
+    "Move to indirect heat and continue to 165°F; serve dry pieces with sauce.",
+    verification_required=True, rest_minutes=5,
+    rest_template="Rest {name} for 5 minutes before slicing or serving.",
+))
+_add_family_method("fish_fillet", grill_method(
+    ("fresh raw", "frozen raw"), 4, 8, 6, "late",
+    "Thaw {name}, pat dry, remove obvious bones, oil the fish and clean grates lightly, and season.",
+    "Grill {name} over medium-high heat without moving it until it releases, then turn carefully or finish skin-side down with the lid closed.",
+    "Moist flakes, intact shape, and light grill marks.", "The thickest portion reaches 145°F and flakes easily.",
+    "Delicate fish sticks to dirty grates and dries rapidly when overcooked.",
+    "Use a grill basket or foil for fragile fillets and remove promptly at temperature.",
+    verification_required=True,
+))
+_add_family_method("shellfish_quick", grill_method(
+    ("fresh raw", "frozen raw"), 5, 5, 5, "late",
+    "Thaw, clean, drain, and dry {name}; thread small pieces on skewers or use a grill basket.",
+    "Grill {name} over direct heat, turning once, and remove immediately when opaque.",
+    "Juicy opaque shellfish with light charring.", "Opaque and pearly throughout; 145°F when measurable.",
+    "Small shellfish fall through grates and become rubbery within minutes.",
+    "Use skewers or a basket and remove promptly; severe overcooking cannot be reversed.",
+    verification_required=True,
+))
+_add_family_method("sausage", grill_method(
+    ("fresh raw", "frozen raw", "refrigerated"), 3, 12, 7, "middle",
+    "Thaw {name}; keep links intact and lightly oil clean grates.",
+    "Grill {name} over medium heat, turning to brown all sides; use a cooler zone to finish the center without splitting the casing.",
+    "Brown casing and a moist safely cooked center.", "160°F for pork/beef sausage or 165°F for poultry sausage.",
+    "High direct heat splits or burns the casing before the center is safe.",
+    "Move to indirect heat and continue to temperature.", verification_required=True,
+))
+_add_family_method("plant_protein", grill_method(
+    ("fresh", "refrigerated", "fresh raw"), 6, 8, 7, "middle",
+    "Drain and press {name}, cut thick sturdy slabs or use skewers, then oil and season.",
+    "Grill {name} over medium-high heat until it releases and has marks on both sides; brush on sugary sauce only near the finish.",
+    "Brown grill marks and a seasoned tender center.", "Several surfaces are browned and the center is hot.",
+    "Wet pieces stick and steam; sugary marinades burn over direct heat.",
+    "Dry the surface, move to a clean grate area, and add sauce late.", "fair",
+))
+_add_family_method("tender_steak", grill_method(
+    ("fresh raw", "frozen raw", "refrigerated"), 4, 10, 7, "middle",
+    "Thaw {name}, pat dry, and season both sides.",
+    "Grill {name} over high direct heat until it releases and is well marked; turn once, finish to the chosen temperature, and rest.",
+    "Deep grill marks and the requested interior doneness.",
+    "For the verified safety endpoint, the center reaches 145°F followed by at least a 3-minute rest.",
+    "Cooking only by time overcooks thin steaks and undercooks thick ones.",
+    "Use a cooler grill zone when the exterior browns before the center is ready.",
+    verification_required=True, rest_minutes=5,
+    rest_template="Rest {name} for at least 5 minutes before slicing across the grain.",
+))
+_add_family_method("pork_cut", grill_method(
+    ("fresh raw", "frozen raw", "refrigerated"), 4, 12, 7, "middle",
+    "Thaw {name}, pat dry, make portions even, and season.",
+    "Grill {name} over medium-high direct heat, turning after it releases; finish over a cooler zone when needed.",
+    "Brown grill marks and a juicy center.", "The thickest portion reaches 145°F, followed by at least a 3-minute rest.",
+    "Lean pork dries when held over high heat after reaching temperature.",
+    "Move to indirect heat to finish gently and serve overdone pork with sauce.",
+    verification_required=True, rest_minutes=3,
+    rest_template="Rest {name} for at least 3 minutes before serving.",
+))
+
+for _family_code in (
+    "mushroom", "quick_green", "cruciferous", "pepper", "winter_squash",
+    "cabbage", "okra", "tender_watery", "sturdy_root", "bread_wrap",
+):
+    _add_family_method(_family_code, grill_method(
+        ("fresh", "fresh raw", "frozen"), 5, 10, 6, "middle",
+        "Prepare {name} in pieces large enough for the grates, or use skewers or a grill basket; dry, oil lightly, and season.",
+        "Grill {name} over medium to medium-high heat, turning after clear marks form, until its KO endpoint is reached.",
+        "Defined pieces with browned grill marks and an appropriately tender center.",
+        "The thickest pieces are tender at the center while still holding their intended shape.",
+        "Small pieces fall through grates; excess oil causes flare-ups; sugary finishes burn.",
+        "Use a basket or skewers, move to a cooler zone, and add sweet sauce only near the finish.",
+        "fair",
+    ))
+
+_add_family_method("tomato", grill_method(
+    ("fresh", "fresh raw"), 4, 6, 5, "late",
+    "Cut {name} into sturdy halves or thick pieces, remove only loose seeds, dry the cut surfaces, and oil lightly.",
+    "Grill {name} cut-side down until marked, turn carefully, and stop while the pieces still hold their shape.",
+    "Smoky warm pieces that remain recognizable.", "Surfaces are marked and softened while the pieces remain intact.",
+    "Thin pieces collapse through the grates and prolonged heat turns them into sauce.",
+    "Use a grill basket and remove promptly; use collapsed pieces deliberately as a smoky sauce.",
+))
 
 FAMILY_LIBRARY.update({
     "citrus_finish": BehaviorFamily(
@@ -736,6 +921,8 @@ FAMILY_LIBRARY.update({
             "Brown skin and juicy safely cooked meat.", "Every checked location reaches at least 165°F, followed by a rest before carving.",
             "Partial thawing causes dangerously uneven cooking; overcooking the breast while waiting on the thigh dries it out.",
             "Shield browned areas with foil and continue roasting until every location is safe; serve dry portions with pan juices.", "good",
+            verification_required=True, rest_minutes=15,
+            rest_template="Rest {name} for 15 minutes before carving.",
         ), READY_REHEAT), ("oven-required", "rest-required"),
     ),
     "pork_roast": BehaviorFamily(
@@ -750,9 +937,364 @@ FAMILY_LIBRARY.update({
             "Even slices with a browned exterior and juicy center.", "The center reaches 145°F, followed by at least a 3-minute rest.",
             "Cooking only by time can leave a thick roast raw or a small one dry.",
             "Use temperature as the endpoint; serve an overdone roast thinly sliced with sauce.", "excellent",
+            verification_required=True, rest_minutes=10,
+            rest_template="Rest {name} for at least 10 minutes before slicing.",
         ), READY_REHEAT), ("oven-required", "rest-required"),
     ),
 })
+
+
+_add_family_method("whole_poultry", grill_method(
+    ("fresh raw", "frozen raw", "refrigerated"), 12, 80, 18, "early",
+    "Thaw {name} completely, remove packaging or giblets, do not rinse, pat dry, and season.",
+    "Grill {name} with indirect heat and the lid closed, rotating as needed for even browning; keep it away from direct flare-ups.",
+    "Brown skin and juicy safely cooked meat.",
+    "The thickest breast and innermost thigh both reach at least 165°F without touching bone.",
+    "Direct flame burns the skin before the interior is safe.",
+    "Move fully to indirect heat, shield dark areas with foil, and continue until every location is safe.",
+    "good", verification_required=True, rest_minutes=15,
+    rest_template="Rest {name} for 15 minutes before carving.",
+))
+_add_family_method("pork_roast", grill_method(
+    ("fresh raw", "frozen raw", "refrigerated"), 8, 50, 12, "early",
+    "Thaw {name}, pat dry, shape it evenly, and season.",
+    "Grill {name} over indirect heat with the lid closed, turning occasionally for even browning.",
+    "Brown exterior and a juicy evenly cooked center.",
+    "The center reaches 145°F, followed by at least a 3-minute rest.",
+    "Direct high heat dries and burns the exterior before a large center is ready.",
+    "Move to indirect heat and use temperature as the endpoint.",
+    "excellent", verification_required=True, rest_minutes=10,
+    rest_template="Rest {name} for at least 10 minutes before slicing.",
+))
+
+FAMILY_LIBRARY["corn"] = BehaviorFamily(
+    "corn", "Corn", "vegetable",
+    "A sweet kernel vegetable that can be briefly heated off the cob or grilled on the cob.",
+    ("sweet", "kernel", "grillable-on-cob"),
+    (method(
+        "brief_heat", ("fresh", "frozen", "canned"), "brief moist heat",
+        "sweet finishing component", 3, 5, 3, .4, "burner", "late",
+        "Husk {name} when on the cob, or drain canned kernels and break up frozen clumps.",
+        "Heat {name} only until tender and hot.", "Sweet plump kernels.",
+        "Hot and tender without shriveling.", "Prolonged cooking dulls sweetness.",
+        "Stop heating and finish with fat or a bright seasoning.", "fair",
+    ), grill_method(
+        ("fresh",), 5, 12, 7, "middle",
+        "Remove the husk and silk from {name}, or pull the husk back and retie it when a steamed result is preferred; oil lightly.",
+        "Grill {name} over medium-high heat, turning every few minutes, until hot and browned in spots.",
+        "Juicy kernels with smoky browned spots.", "Kernels are tender, hot, and browned on several sides.",
+        "Very high heat can blacken kernels before the cob heats through.",
+        "Move to a cooler zone and continue turning.", "fair",
+    )), ("grill-whole", "late-entry"),
+)
+
+
+def support_method(
+    name, environment, creates, prep, cook, equipment, stage, handling,
+    instruction, outcome, cue, failure, recovery, holdability="good",
+):
+    """Describe a supporting ingredient without pretending it is a meal component.
+
+    These methods let sauces, seasonings, fats, dairy, and baking helpers carry
+    their own handling and failure knowledge.  They are deliberately different
+    from protein/produce/foundation methods: a bottle of vinegar is not assigned
+    a generic eight-minute cooking step merely because it entered the pantry.
+    """
+    return method(
+        name, (), environment, creates, prep, cook, min(prep + cook, 3), .45,
+        equipment, stage, handling, instruction, outcome, cue, failure, recovery,
+        holdability,
+    )
+
+
+FAMILY_LIBRARY.update({
+    "dry_seasoning": BehaviorFamily(
+        "dry_seasoning", "Dry seasoning", "ingredient",
+        "A concentrated dry seasoning measured to taste and added at a stage that protects its aroma.",
+        ("concentrated", "dry", "seasoning"),
+        (support_method(
+            "season", "mixing or brief heat", "seasoned cooking environment", 1, 1,
+            "counter", "middle", "Measure {name}; begin with less when its strength is unfamiliar.",
+            "Add {name} in a measured amount, bloom it briefly in fat when appropriate, and taste before adding more.",
+            "Integrated seasoning without a raw dusty taste.", "Its aroma is present and the food tastes balanced.",
+            "Too much concentrated seasoning can dominate the whole meal; dry spices scorch quickly.",
+            "Dilute with more unseasoned food or liquid; replace badly burned spices.",
+        ),), ("layers-flavor",),
+    ),
+    "salt_seasoning": BehaviorFamily(
+        "salt_seasoning", "Salt seasoning", "ingredient",
+        "A seasoning whose total must account for broth, cheese, cured food, and condiments already in the meal.",
+        ("salty", "concentrated", "seasoning"),
+        (support_method(
+            "season", "layered seasoning", "salt-balanced meal", 1, 0, "counter", "finish",
+            "Keep {name} available but do not measure the full amount before accounting for salty ingredients.",
+            "Taste the assembled food first, then add {name} a small amount at a time only as needed.",
+            "Seasoned food whose other flavors remain distinct.", "The meal tastes complete rather than distinctly salty.",
+            "Salt cannot be removed once dissolved.", "Increase the unsalted bulk or liquid and rebalance acidity and fat.",
+        ),), ("taste-before-adding",),
+    ),
+    "fresh_herb": BehaviorFamily(
+        "fresh_herb", "Fresh herb", "ingredient",
+        "A tender aromatic whose fresh character is strongest late in cooking or at service.",
+        ("fresh", "aromatic", "delicate"),
+        (support_method(
+            "finish", "off heat", "fresh aromatic finish", 3, 0, "counter", "finish",
+            "Rinse and dry {name}; remove tough stems and chop or tear it just before use.",
+            "Fold in {name} near the end or scatter it over the finished meal.",
+            "Bright fresh aroma and color.", "The herb smells fresh and remains visibly green.",
+            "Long heat dulls its aroma and color.", "Add a fresh portion off heat.", "poor",
+        ),), ("late-aromatic",),
+    ),
+    "cooking_fat": BehaviorFamily(
+        "cooking_fat", "Cooking fat", "ingredient",
+        "Fat chosen for heat level, browning, flavor, and flare-up risk.",
+        ("fat", "heat-transfer", "concentrated"),
+        (support_method(
+            "incorporate", "controlled heat", "lubricated cooking surface", 1, 1, "burner", "early",
+            "Measure {name}; use only enough to coat the cooking surface or ingredients lightly.",
+            "Heat {name} only to the temperature needed for the next operation; reduce heat if it smokes.",
+            "Even browning without greasiness.", "The surface is lightly coated and the fat is not smoking.",
+            "Overheated fat smokes; excess fat makes food greasy and can cause grill flare-ups.",
+            "Remove from heat, replace scorched fat, and drain excess before continuing.",
+        ),), ("supports-browning", "grill-flare-risk"),
+    ),
+    "broth_liquid": BehaviorFamily(
+        "broth_liquid", "Broth or stock", "ingredient",
+        "A seasoned cooking liquid that supplies moisture, savory depth, and often significant salt.",
+        ("liquid", "savory", "often-salty"),
+        (support_method(
+            "build_sauce", "gentle simmer", "moist savory environment", 1, 4, "burner", "middle",
+            "Measure {name} and note whether it is salted.",
+            "Add {name} to build the cooking liquid or loosen browned flavor; simmer only as long as the meal needs.",
+            "Savory moisture at the intended concentration.", "The food is moist and the liquid tastes balanced.",
+            "Reducing salted broth too far makes the meal overly salty.",
+            "Dilute with water or unsalted liquid and delay any added salt.",
+        ),), ("supplies-liquid", "taste-before-salt"),
+    ),
+    "cultured_creamy": BehaviorFamily(
+        "cultured_creamy", "Cultured creamy dairy", "ingredient",
+        "A tangy creamy ingredient normally used cool, off heat, or gently tempered.",
+        ("creamy", "tangy", "heat-sensitive"),
+        (support_method(
+            "finish", "off heat or gentle heat", "creamy tangy finish", 1, 1, "counter", "finish",
+            "Portion {name} and keep it cool until the meal is nearly finished.",
+            "Serve {name} on top or alongside, or temper it with warm liquid before stirring it in off heat.",
+            "Smooth creamy tang without curdling.", "It remains smooth and visibly creamy.",
+            "Boiling can split or curdle cultured dairy.", "Remove from heat and whisk in a fresh spoonful gradually.", "poor",
+        ),), ("cooling-contrast", "finish-off-heat"),
+    ),
+    "milk_cream": BehaviorFamily(
+        "milk_cream", "Milk or cream", "ingredient",
+        "A dairy liquid that adds richness but needs moderate heat to avoid scorching or separation.",
+        ("liquid", "creamy", "heat-sensitive"),
+        (support_method(
+            "build_sauce", "gentle heat", "creamy sauce environment", 1, 4, "burner", "late",
+            "Measure {name} and bring very cold dairy closer to room temperature when practical.",
+            "Add {name} over moderate or low heat and stir until hot and integrated; do not boil aggressively.",
+            "Smooth creamy liquid or sauce.", "Steaming and smooth, without scorching or separation.",
+            "High heat scorches milk and can split a sauce.", "Lower the heat and whisk in a small amount of fresh dairy.",
+        ),), ("adds-richness", "gentle-heat"),
+    ),
+    "melting_cheese": BehaviorFamily(
+        "melting_cheese", "Melting cheese", "ingredient",
+        "Cheese used for salty richness, melting, or a browned topping.",
+        ("salty", "fatty", "protein-rich"),
+        (support_method(
+            "melt", "low heat or residual heat", "melted cheese finish", 2, 3, "burner", "finish",
+            "Shred, crumble, or portion {name} so it melts evenly.",
+            "Add {name} near the finish and melt it with gentle or residual heat.",
+            "Evenly melted or intentionally softened cheese.", "Soft and integrated without releasing excess oil.",
+            "Excess heat makes many cheeses oily, stringy, or grainy.", "Remove from direct heat and stir in more liquid if the sauce tightens.",
+        ),), ("adds-salt", "adds-richness"),
+    ),
+    "acid_condiment": BehaviorFamily(
+        "acid_condiment", "Culinary acid", "ingredient",
+        "Vinegar or another concentrated acid used to balance richness and brighten flavor.",
+        ("acidic", "liquid", "concentrated"),
+        (support_method(
+            "finish", "off heat or brief simmer", "bright balanced finish", 1, 0, "counter", "finish",
+            "Measure a small amount of {name}; more can be added after tasting.",
+            "Add {name} near the finish, stir, and taste before adding more.",
+            "Brighter flavor without obvious harsh sourness.", "Richness is balanced and the acid does not dominate.",
+            "Too much acid tastes harsh and can delay dry beans softening when added early.",
+            "Dilute with more food or liquid and rebalance with fat or a small amount of sweetness.",
+        ),), ("late-with-dry-legumes", "balances-richness"),
+    ),
+    "prepared_condiment": BehaviorFamily(
+        "prepared_condiment", "Prepared condiment or sauce", "ingredient",
+        "A ready sauce whose salt, sugar, acid, heat, and thickness must be considered before adding more seasoning.",
+        ("ready-to-eat", "concentrated", "form-sensitive"),
+        (support_method(
+            "finish", "off heat or gentle heat", "seasoned sauce finish", 1, 2, "counter", "finish",
+            "Taste {name} and check its salt, sweetness, heat, and thickness before measuring more seasoning.",
+            "Stir in {name} near the finish, or serve it alongside when its fresh texture matters.",
+            "A balanced recognizable sauce contribution.", "The sauce coats or accompanies the food without overwhelming it.",
+            "Sugary sauces burn over high heat and concentrated condiments can oversalt a meal.",
+            "Move off direct heat, dilute, and reserve additional sauce for the table.",
+        ),), ("account-before-seasoning", "sweet-sauce-add-late-on-grill"),
+    ),
+    "tomato_product": BehaviorFamily(
+        "tomato_product", "Prepared tomato product", "ingredient",
+        "A form-sensitive tomato base: paste needs blooming and dilution; sauce and diced forms build a wet simmer.",
+        ("acidic", "wet", "sauce-building"),
+        (support_method(
+            "build_sauce", "sauté then simmer", "tomato sauce environment", 1, 10, "burner", "middle",
+            "Open and measure {name}; inspect an already-open container before use.",
+            "Add {name} after dry browning is complete and simmer it with compatible ingredients until the raw canned edge softens.",
+            "A cohesive savory tomato base.", "The sauce tastes integrated and has the intended thickness.",
+            "Adding it too early stops dry browning; prolonged reduction can scorch or over-concentrate acid.",
+            "Add liquid and lower the heat; restore brightness with a fresh finish.",
+        ),), ("ends-dry-browning", "builds-wet-environment"),
+    ),
+    "thickener": BehaviorFamily(
+        "thickener", "Starch thickener", "ingredient",
+        "A dry starch that must be dispersed correctly before it thickens liquid.",
+        ("dry", "starch", "thickening"),
+        (support_method(
+            "thicken", "simmering liquid", "thickened sauce environment", 2, 3, "burner", "late",
+            "Measure {name}; make a cold slurry when required so it disperses without lumps.",
+            "Whisk in {name} gradually and simmer only until the liquid reaches the intended body.",
+            "A smooth sauce at the intended thickness.", "The liquid coats a spoon without raw starch flavor or lumps.",
+            "Adding dry starch directly to hot liquid creates lumps; too much becomes gluey.",
+            "Strain stubborn lumps or whisk in more liquid to loosen.",
+        ),), ("requires-dispersion",),
+    ),
+    "dry_baking_helper": BehaviorFamily(
+        "dry_baking_helper", "Dry baking helper", "ingredient",
+        "Flour, leavener, or sugar whose function depends on a measured formula rather than improvisational stovetop cooking.",
+        ("dry", "formula-sensitive", "baking"),
+        (support_method(
+            "incorporate", "measured mixing", "structured batter or dough", 2, 0, "counter", "early",
+            "Measure {name} accurately using the recipe's specified unit and technique.",
+            "Incorporate {name} only according to a trained batter, dough, coating, or thickening formula.",
+            "The intended structure, sweetness, or lift.", "It is evenly dispersed in the measured mixture.",
+            "Unmeasured substitution can prevent thickening, lift, or proper texture.",
+            "Correct the formula before cooking; do not guess with additional leavener.",
+        ),), ("requires-formula",),
+    ),
+    "sweetener": BehaviorFamily(
+        "sweetener", "Culinary sweetener", "ingredient",
+        "A concentrated sweet ingredient used for balance, browning, or a deliberate sweet profile.",
+        ("sweet", "concentrated", "browning-prone"),
+        (support_method(
+            "finish", "low heat or off heat", "sweet-balanced finish", 1, 1, "counter", "finish",
+            "Measure {name}; start with less when balancing a savory dish.",
+            "Stir in {name} gradually and taste; keep it away from intense direct heat unless deliberate caramelization is trained.",
+            "Balanced sweetness without a burnt edge.", "Sweetness supports rather than masks the other flavors.",
+            "Sugar burns readily over direct heat and excess sweetness is difficult to remove.",
+            "Dilute and rebalance with acid or salt; discard a scorched glaze.",
+        ),), ("burns-over-direct-heat",),
+    ),
+    "creamy_soup_base": BehaviorFamily(
+        "creamy_soup_base", "Condensed creamy soup base", "ingredient",
+        "A thick seasoned canned base that supplies liquid binding, salt, and creaminess.",
+        ("canned", "creamy", "salty", "thick"),
+        (support_method(
+            "build_sauce", "gentle simmer", "creamy bound environment", 1, 5, "burner", "middle",
+            "Open and inspect {name}; measure any added liquid before combining.",
+            "Stir {name} into the cooking liquid over moderate heat until smooth and steaming.",
+            "A smooth cohesive creamy base.", "Hot and smooth at the intended consistency.",
+            "It scorches when undiluted over high heat and may make added salt unnecessary.",
+            "Lower the heat, add liquid gradually, and taste before salting.",
+        ),), ("supplies-liquid", "taste-before-salt"),
+    ),
+    "prepared_legume": BehaviorFamily(
+        "prepared_legume", "Prepared bean or legume", "foundation",
+        "A fully cooked seasoned legume product that needs only safe gentle reheating.",
+        ("cooked", "ready-to-eat", "starchy", "protein-contributing"),
+        (method(
+            "reheat", ("canned", "cooked", "ready to eat", "shelf stable"), "gentle moist heat",
+            "warm thick foundation", 1, 5, 4, .45, "burner", "late",
+            "Open {name}, inspect it, and portion at least half a can when practical.",
+            "Heat {name} gently, stirring often enough to prevent sticking; do not recook it.",
+            "Steaming hot beans at their intended consistency.", "Steaming throughout without a scorched bottom.",
+            "Thick prepared beans scorch with high heat or prolonged holding.",
+            "Lower the heat and loosen with a little water or broth.", "good",
+        ),), ("can-stretch-protein", "gentle-reheat", "soup-friendly"),
+    ),
+    "ready_cured_meat": BehaviorFamily(
+        "ready_cured_meat", "Ready cured meat", "protein",
+        "A cured or fully cooked meat used as a main item or concentrated savory accent.",
+        ("ready-to-eat", "salty", "fat-rendering"),
+        (READY_REHEAT,), ("accent-capable", "taste-before-salt"),
+    ),
+})
+
+
+def _set_portion(family_code, basis, amount, label, rounding="practical", stretchable=False):
+    FAMILY_LIBRARY[family_code] = replace(
+        FAMILY_LIBRARY[family_code], portion_basis=basis,
+        portion_per_standard=amount, portion_label=label,
+        portion_rounding=rounding, stretchable=stretchable,
+    )
+
+
+for _code in ("ground_meat", "tough_meat", "pork_roast", "whole_poultry"):
+    _set_portion(_code, "weight_oz", 4, "pound", "quarter_pound_up", True)
+for _code in ("poultry_piece", "fish_fillet", "pork_cut", "tender_steak", "sausage"):
+    _set_portion(_code, "pieces", 1, "piece", "whole_up", True)
+_set_portion("shellfish_quick", "weight_oz", 4, "pound", "quarter_pound_up", True)
+_set_portion("plant_protein", "weight_oz", 4, "pound", "quarter_pound_up", True)
+_set_portion("ready_protein", "cans", .5, "can", "half_can_minimum", True)
+_set_portion("egg", "pieces", 2, "egg", "whole_up")
+_set_portion("bacon", "pieces", 2, "strip", "whole_up")
+for _code in ("white_rice", "brown_rice", "quinoa"):
+    _set_portion(_code, "dry_cups", .25, "cup", "quarter_cup_up", True)
+for _code in ("soft_potato", "corn_porridge"):
+    _set_portion(_code, "prepared_cups", .5, "cup", "quarter_cup_up", True)
+_set_portion("legume", "cans", .25, "can", "half_can_minimum", True)
+_set_portion("prepared_legume", "cans", .25, "can", "half_can_minimum", True)
+_set_portion("ready_cured_meat", "pieces", 1, "piece", "whole_up", True)
+
+
+def _set_sensory(family_code, flavors=(), functions=(), texture="", color=""):
+    FAMILY_LIBRARY[family_code] = replace(
+        FAMILY_LIBRARY[family_code], flavor_domains=tuple(flavors),
+        culinary_functions=tuple(functions), texture_contribution=texture,
+        color_contribution=color,
+    )
+
+
+# Combination intelligence is family knowledge.  The selector can recognize
+# an unusual but coherent meal from functions and contrasts without knowing an
+# ingredient's name or consulting a list of conventional recipes.
+for _code in (
+    "ground_meat", "poultry_piece", "tender_steak", "pork_cut", "whole_poultry",
+    "pork_roast", "fish_fillet", "shellfish_quick", "sausage", "bacon",
+    "ready_protein", "ready_cured_meat", "plant_protein", "tough_meat", "egg",
+):
+    _set_sensory(_code, ("savory", "umami"), ("protein-anchor", "browning-source"), "substantial")
+for _code in ("white_rice", "brown_rice", "quinoa", "pasta", "bread_wrap", "soft_potato", "crisp_potato", "baked_potato", "corn_porridge"):
+    _set_sensory(_code, ("neutral", "starchy"), ("foundation", "absorbs-sauce"), "substantial")
+for _code in ("legume", "prepared_legume"):
+    _set_sensory(_code, ("earthy", "savory"), ("foundation", "protein-stretcher", "thickens"), "creamy")
+for _code in ("aromatic_slow", "aromatic_fast", "fresh_herb", "dry_seasoning"):
+    _set_sensory(_code, ("aromatic",), ("flavor-builder",), "soft")
+for _code in ("sturdy_root", "winter_squash", "corn", "sweet_kernel"):
+    _set_sensory(_code, ("sweet", "earthy"), ("vegetable-body", "sweetness-balance"), "tender")
+for _code in ("quick_green", "leafy_tender", "leafy_sturdy", "cruciferous", "cabbage", "okra"):
+    _set_sensory(_code, ("green", "vegetal"), ("fresh-contrast", "vegetable-body"), "tender-crisp", "green")
+for _code in ("tender_watery", "tomato", "mushroom", "pepper", "crisp_stir_fry", "artichoke", "cauliflower_rice"):
+    _set_sensory(_code, ("vegetal",), ("vegetable-body", "moisture-balance"), "tender")
+_set_sensory("tomato", ("acidic", "savory", "sweet"), ("brightness", "sauce-builder", "moisture-source"), "juicy", "red")
+_set_sensory("mushroom", ("earthy", "umami"), ("savory-depth", "browning-source"), "meaty")
+_set_sensory("pepper", ("sweet", "vegetal"), ("aromatic-body", "color-contrast"), "tender-crisp", "bright")
+_set_sensory("raw_finish", ("fresh", "acidic"), ("crisp-contrast", "brightness"), "crisp")
+_set_sensory("raw_fruit", ("sweet", "fresh"), ("fresh-contrast", "sweetness-balance"), "juicy", "bright")
+_set_sensory("citrus_finish", ("acidic", "aromatic"), ("brightness", "balances-richness"), "juicy", "bright")
+_set_sensory("broth_liquid", ("savory", "salty"), ("supplies-liquid", "savory-depth"), "liquid")
+_set_sensory("milk_cream", ("creamy", "rich"), ("adds-richness", "sauce-builder"), "creamy", "pale")
+_set_sensory("cultured_creamy", ("tangy", "creamy"), ("cooling-contrast", "balances-richness"), "creamy", "pale")
+_set_sensory("melting_cheese", ("salty", "savory", "rich"), ("adds-richness", "savory-depth"), "melty")
+_set_sensory("acid_condiment", ("acidic",), ("brightness", "balances-richness"), "liquid")
+_set_sensory("prepared_condiment", ("seasoned",), ("flavor-builder", "sauce-builder"), "saucy")
+_set_sensory("tomato_product", ("acidic", "savory", "sweet"), ("sauce-builder", "supplies-liquid"), "saucy", "red")
+_set_sensory("cooking_fat", ("rich",), ("supports-browning", "adds-richness"), "silky")
+_set_sensory("sweetener", ("sweet",), ("sweetness-balance", "browning-source"), "")
+_set_sensory("salt_seasoning", ("salty",), ("flavor-builder",), "")
+_set_sensory("thickener", ("neutral",), ("thickens",), "")
+_set_sensory("creamy_soup_base", ("creamy", "savory", "salty"), ("sauce-builder", "supplies-liquid", "thickens"), "creamy", "pale")
+_set_sensory("dry_baking_helper", ("neutral",), ("formula-structure",), "")
 
 
 ASSIGNMENTS = {
@@ -796,7 +1338,8 @@ ASSIGNMENTS.update({
     "cabbage": {"cabbage", "napa cabbage"},
     "okra": {"okra"},
     "crisp_stir_fry": {"bamboo shoots", "bean sprouts", "water chestnuts"},
-    "sweet_kernel": {"corn", "peas"},
+    "sweet_kernel": {"peas"},
+    "corn": {"corn"},
     "artichoke": {"artichokes"},
     "tough_meat": ASSIGNMENTS["tough_meat"] | {"corned beef"},
     "citrus_finish": {"lemons", "limes"},
@@ -805,6 +1348,43 @@ ASSIGNMENTS.update({
     "soft_potato": {"mashed potatoes"},
     "crisp_potato": {"french fries", "hash browns", "roasted potatoes"},
     "baked_potato": {"baked potatoes"},
+    "legume": ASSIGNMENTS["legume"] | {
+        "black-eyed peas", "butter beans", "cannellini beans", "cranberry beans",
+        "green lentils", "kidney beans", "lima beans", "mayocoba beans",
+        "red lentils", "split peas", "yellow lentils",
+    },
+    "prepared_legume": {"baked beans", "refried beans"},
+    "bread_wrap": ASSIGNMENTS["bread_wrap"] | {"tortillas"},
+    "ready_cured_meat": {"hot dogs", "pepperoni"},
+    "aromatic_fast": ASSIGNMENTS["aromatic_fast"] | {"ginger"},
+    "dry_seasoning": {
+        "basil", "bay leaves", "black pepper", "cayenne pepper", "celery seed",
+        "chili powder", "cinnamon", "cloves", "coriander", "cumin", "dill",
+        "garlic powder", "italian seasoning", "mustard powder", "nutmeg",
+        "onion powder", "oregano", "paprika", "parsley", "red pepper flakes",
+        "rosemary", "sage", "smoked paprika", "thyme", "turmeric", "white pepper",
+    },
+    "fresh_herb": {"cilantro", "fresh basil", "fresh parsley", "fresh thyme"},
+    "salt_seasoning": {"salt"},
+    "cooking_fat": {"butter", "canola oil", "margarine", "olive oil", "sesame oil", "vegetable oil"},
+    "broth_liquid": {"beef broth", "chicken broth", "vegetable broth"},
+    "milk_cream": {"coconut milk", "half-and-half", "heavy cream", "milk"},
+    "cultured_creamy": {"cottage cheese", "cream cheese", "greek yogurt", "ricotta cheese", "sour cream"},
+    "melting_cheese": {
+        "american cheese", "blue cheese", "cheddar cheese", "colby jack cheese",
+        "feta cheese", "monterey jack cheese", "mozzarella cheese", "parmesan cheese",
+        "pepper jack cheese", "swiss cheese",
+    },
+    "acid_condiment": {"apple cider vinegar", "balsamic vinegar", "white vinegar"},
+    "prepared_condiment": {
+        "bbq sauce", "hot sauce", "ketchup", "mayonnaise", "mustard", "soy sauce",
+        "worcestershire sauce", "peanut butter", "vanilla extract",
+    },
+    "tomato_product": {"crushed tomatoes", "diced tomatoes", "rotel", "tomato paste", "tomato sauce"},
+    "thickener": {"cornstarch"},
+    "dry_baking_helper": {"all-purpose flour", "baking powder", "baking soda", "yeast"},
+    "sweetener": {"brown sugar", "honey", "maple syrup", "molasses", "powdered sugar", "sugar"},
+    "creamy_soup_base": {"cream of chicken soup", "cream of mushroom soup"},
 })
 
 
@@ -868,12 +1448,28 @@ def _db_family(family_code, db_path):
             row["desired_outcome"] or "", row["doneness_cue"] or "",
             row["failure_mode"] or "", row["recovery_hint"] or "",
             row["holdability"] or "fair",
+            bool(row["verification_required"]) if "verification_required" in row.keys() else False,
+            int(row["rest_minutes"] or 0) if "rest_minutes" in row.keys() else 0,
+            (row["rest_template"] or "") if "rest_template" in row.keys() else "",
+            int(row["frozen_thaw_minutes"] or 0) if "frozen_thaw_minutes" in row.keys() else 0,
+            (row["frozen_thaw_equipment"] or "counter") if "frozen_thaw_equipment" in row.keys() else "counter",
+            (row["frozen_thaw_template"] or "") if "frozen_thaw_template" in row.keys() else "",
         ) for row in rows)
         return BehaviorFamily(
             family["family_code"], family["family_name"], family["role"],
             family["description"],
             tuple(part.strip() for part in (family["physical_traits"] or "").split(",") if part.strip()),
             methods,
+            (),
+            family["portion_basis"] if "portion_basis" in family.keys() else "flexible",
+            float(family["portion_per_standard"] or 1) if "portion_per_standard" in family.keys() else 1.0,
+            family["portion_label"] if "portion_label" in family.keys() else "portion",
+            family["portion_rounding"] if "portion_rounding" in family.keys() else "practical",
+            bool(family["stretchable"]) if "stretchable" in family.keys() else False,
+            tuple(part.strip() for part in (family["flavor_domains"] or "").split(",") if part.strip()) if "flavor_domains" in family.keys() else (),
+            tuple(part.strip() for part in (family["culinary_functions"] or "").split(",") if part.strip()) if "culinary_functions" in family.keys() else (),
+            family["texture_contribution"] or "" if "texture_contribution" in family.keys() else "",
+            family["color_contribution"] or "" if "color_contribution" in family.keys() else "",
         )
     except sqlite3.Error:
         return None
@@ -911,14 +1507,35 @@ def _apply_db_exceptions(rule, name, form_name, db_path):
     return replace(rule, **updates) if updates else rule
 
 
+def ingredient_attributes(name, form_name="", db_path=None) -> dict[str, str]:
+    """Return verified KO facts without teaching planner code ingredient names."""
+    if not db_path:
+        return {}
+    try:
+        con = sqlite3.connect(db_path)
+        rows = con.execute(
+            """SELECT a.attribute_name,a.attribute_value,a.form_name
+                 FROM ko_ingredient_attributes a
+                 JOIN ingredients i USING (ingredient_id)
+                WHERE lower(i.name)=lower(?) AND a.verified=1
+                  AND (a.form_name='' OR lower(a.form_name)=lower(?))
+                ORDER BY CASE WHEN a.form_name='' THEN 0 ELSE 1 END""",
+            (name, form_name or ""),
+        ).fetchall()
+        con.close()
+        return {str(key): str(value) for key, value, _ in rows}
+    except sqlite3.Error:
+        return {}
+
+
 def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> ResolvedBehavior:
     codes, source = family_codes_for(name, role, form_name, db_path)
     # Meal role is contextual: beans may be today's protein and avocado may be
     # today's produce. Physical behavior follows the ingredient, not the slot.
     families = []
     for code in codes:
-        family = _db_family(code, db_path) if source == "ckb_membership" else None
-        family = family or FAMILY_LIBRARY.get(code)
+        family = FAMILY_LIBRARY.get(code)
+        family = family or (_db_family(code, db_path) if source == "ckb_membership" else None)
         if family:
             families.append(family)
     primary = families[0] if families else None
@@ -937,6 +1554,7 @@ def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> Res
             "brief_heat", "reheat", "assemble",
         }
         casserole_methods = {"roast", "bake", "reheat", "assemble", "simmer"}
+        grill_side_methods = {"simmer", "boil", "warm", "reheat", "saute", "assemble"}
         for candidate in primary.methods:
             form_matches = not form_key or not candidate.forms or any(value in form_key for value in candidate.forms)
             strategy_matches = not strategy_key or candidate.method == strategy_key or (
@@ -945,6 +1563,8 @@ def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> Res
                 strategy_key == "soup" and candidate.method in soup_methods
             ) or (
                 strategy_key == "casserole" and candidate.method in casserole_methods
+            ) or (
+                strategy_key == "grill" and role == "foundation" and candidate.method in grill_side_methods
             )
             if form_matches and strategy_matches:
                 selected = candidate
@@ -962,23 +1582,46 @@ def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> Res
     if primary and strategy and selected is None:
         reason = f"{primary.name} has no verified {strategy} method for {form_name or 'this form'}."
     selected = _apply_db_exceptions(selected, name, form_name, db_path)
-    return ResolvedBehavior(name, role, form_name, primary, families[1:], selected, source, reason)
+    return ResolvedBehavior(
+        name, role, form_name, primary, families[1:], selected, source, reason,
+        ingredient_attributes(name, form_name, db_path),
+    )
 
 
 def iter_family_seed_rows() -> Iterable[tuple]:
     for family in FAMILY_LIBRARY.values():
         yield (
             family.code, family.name, family.role, family.description,
-            ",".join(family.physical_traits), 1,
+            ",".join(family.physical_traits), family.portion_basis,
+            family.portion_per_standard, family.portion_label,
+            family.portion_rounding, int(family.stretchable),
+            ",".join(family.flavor_domains), ",".join(family.culinary_functions),
+            family.texture_contribution, family.color_contribution, 1,
         )
 
 
 def seed_behavior_library(con):
-    """Install reusable family knowledge without overwriting trained edits."""
+    """Install current base-family knowledge; item exceptions remain untouched."""
     con.executemany(
-        """INSERT OR IGNORE INTO ko_behavior_families
-           (family_code, family_name, role, description, physical_traits, verified)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO ko_behavior_families
+           (family_code, family_name, role, description, physical_traits,
+            portion_basis, portion_per_standard, portion_label,
+            portion_rounding, stretchable, flavor_domains,
+            culinary_functions, texture_contribution, color_contribution, verified)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(family_code) DO UPDATE SET
+             family_name=excluded.family_name, role=excluded.role,
+             description=excluded.description, physical_traits=excluded.physical_traits,
+             portion_basis=excluded.portion_basis,
+             portion_per_standard=excluded.portion_per_standard,
+             portion_label=excluded.portion_label,
+             portion_rounding=excluded.portion_rounding,
+             stretchable=excluded.stretchable,
+             flavor_domains=excluded.flavor_domains,
+             culinary_functions=excluded.culinary_functions,
+             texture_contribution=excluded.texture_contribution,
+             color_contribution=excluded.color_contribution,
+             verified=excluded.verified""",
         list(iter_family_seed_rows()),
     )
     family_ids = dict(con.execute(
@@ -989,21 +1632,49 @@ def seed_behavior_library(con):
         for rule in family.methods:
             for form_name in (rule.forms or ("",)):
                 con.execute(
-                    """INSERT OR IGNORE INTO ko_family_methods
+                    """INSERT INTO ko_family_methods
                        (family_id, method_name, form_name, cooking_environment,
                         creates_environment, prep_minutes, cook_minutes,
                         active_minutes, attention_load, equipment_name,
                         add_stage, desired_outcome, handling_template,
                         instruction_template, doneness_cue, failure_mode,
-                        recovery_hint, holdability, verified)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                        recovery_hint, holdability, verification_required,
+                        rest_minutes, rest_template, frozen_thaw_minutes,
+                        frozen_thaw_equipment, frozen_thaw_template, verified)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                       ON CONFLICT(family_id,method_name,form_name) DO UPDATE SET
+                         cooking_environment=excluded.cooking_environment,
+                         creates_environment=excluded.creates_environment,
+                         prep_minutes=excluded.prep_minutes,
+                         cook_minutes=excluded.cook_minutes,
+                         active_minutes=excluded.active_minutes,
+                         attention_load=excluded.attention_load,
+                         equipment_name=excluded.equipment_name,
+                         add_stage=excluded.add_stage,
+                         desired_outcome=excluded.desired_outcome,
+                         handling_template=excluded.handling_template,
+                         instruction_template=excluded.instruction_template,
+                         doneness_cue=excluded.doneness_cue,
+                         failure_mode=excluded.failure_mode,
+                         recovery_hint=excluded.recovery_hint,
+                         holdability=excluded.holdability,
+                         verification_required=excluded.verification_required,
+                         rest_minutes=excluded.rest_minutes,
+                         rest_template=excluded.rest_template,
+                         frozen_thaw_minutes=excluded.frozen_thaw_minutes,
+                         frozen_thaw_equipment=excluded.frozen_thaw_equipment,
+                         frozen_thaw_template=excluded.frozen_thaw_template,
+                         verified=excluded.verified""",
                     (family_id, rule.method, form_name, rule.environment,
                      rule.creates_environment, rule.prep_minutes,
                      rule.cook_minutes, rule.active_minutes,
                      rule.attention_load, rule.equipment, rule.stage,
                      rule.desired_outcome, rule.handling_template,
                      rule.instruction_template, rule.doneness_cue,
-                     rule.failure_mode, rule.recovery_hint, rule.holdability),
+                     rule.failure_mode, rule.recovery_hint, rule.holdability,
+                     int(rule.verification_required), rule.rest_minutes,
+                     rule.rest_template, rule.frozen_thaw_minutes,
+                     rule.frozen_thaw_equipment, rule.frozen_thaw_template),
                 )
 
 
@@ -1032,4 +1703,42 @@ def seed_behavior_memberships(con):
                    (ingredient_id, family_id, form_name, priority, is_primary, notes, verified)
                    VALUES (?, ?, '', 100, 1, 'Initial behavior-family migration', 1)""",
                 (ingredient_id, family_ids[family_code]),
+            )
+
+    attribute_rows = {
+        "garlic": {"flavor_identity": "garlic"},
+        "garlic powder": {"flavor_identity": "garlic"},
+        "onions": {"flavor_identity": "onion"},
+        "onion powder": {"flavor_identity": "onion"},
+        "basmati rice": {"pressure_minutes": "5", "pressure_release_minutes": "10"},
+        "white rice": {"pressure_minutes": "4", "pressure_release_minutes": "10"},
+        "jasmine rice": {"pressure_minutes": "4", "pressure_release_minutes": "10"},
+        "brown rice": {"pressure_minutes": "22", "pressure_release_minutes": "10"},
+        "wild rice": {"pressure_minutes": "28", "pressure_release_minutes": "10"},
+        "soy sauce": {"cuisine_affinity": "Chinese"},
+        "tomato sauce": {"cuisine_affinity": "Italian"},
+        "tomato paste": {"cuisine_affinity": "Italian"},
+        "italian seasoning": {"cuisine_affinity": "Italian"},
+        "chili powder": {"cuisine_affinity": "Mexican"},
+        "cumin": {"cuisine_affinity": "Mexican"},
+        "lemons": {"cuisine_affinity": "Mediterranean"},
+        "limes": {"cuisine_affinity": "Mexican,Mediterranean"},
+        "olive oil": {"cuisine_affinity": "Mediterranean"},
+        "greek yogurt": {"cuisine_affinity": "Mediterranean"},
+        "bbq sauce": {"cuisine_affinity": "BBQ"},
+    }
+    for name, attributes in attribute_rows.items():
+        ingredient_id = ingredient_ids.get(_key(name))
+        if ingredient_id is None:
+            continue
+        for attribute_name, attribute_value in attributes.items():
+            con.execute(
+                """INSERT INTO ko_ingredient_attributes
+                   (ingredient_id,form_name,attribute_name,attribute_value,notes,verified)
+                   VALUES (?,'',?,?, 'Initial KO attribute migration',1)
+                   ON CONFLICT(ingredient_id,form_name,attribute_name) DO UPDATE SET
+                     attribute_value=excluded.attribute_value,
+                     notes=excluded.notes,
+                     verified=excluded.verified""",
+                (ingredient_id, attribute_name, attribute_value),
             )

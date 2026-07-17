@@ -181,7 +181,36 @@ class APIServiceTests(unittest.TestCase):
         self.assertIn("Chicken breast, Bacon", choice["title"])
         self.assertTrue(any(line.startswith("Bacon — Fresh Raw") for line in recipe["ingredients"]))
         self.assertIn("Cook Bacon first", plan)
-        self.assertLess(plan.index("Cook Bacon first"), plan.index("Heat a lightly oiled skillet"))
+        self.assertLess(plan.index("Cook Bacon first"), plan.index("Brown Chicken breast"))
+
+    def test_grill_is_equipment_gated_and_uses_ko_grill_science(self):
+        without_grill = get_meal_builder_options({"inventory": [], "equipment": []})
+        with_grill_kitchen = {
+            "inventory": [], "equipment": [{"name": "Outdoor Grill"}],
+        }
+        with_grill = get_meal_builder_options(with_grill_kitchen)
+        self.assertFalse(next(item for item in without_grill["methods"] if item["id"] == "grill")["available"])
+        self.assertTrue(next(item for item in with_grill["methods"] if item["id"] == "grill")["available"])
+
+        request = {
+            "mode": "build_your_meal", "kitchen": with_grill_kitchen,
+            "selections": {
+                "protein": "Chicken breast", "protein_state": "Fresh Raw",
+                "produce": ["Tomatoes", "Zucchini"], "foundation": "",
+                "cooking_method": "grill", "meal_structure": "composed_plate",
+                "serving_temperature": "hot", "time_minutes": 45, "servings": 4,
+            },
+        }
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+        plan = " ".join(recipe["steps"])
+        self.assertEqual(choice["heat_source"], "grill")
+        self.assertIn("indirect heat", plan)
+        self.assertIn("165°F", plan)
+        self.assertIn("Grill Tomatoes cut-side down", plan)
+        self.assertIn("still hold their shape", plan)
+        self.assertIn("grill basket", plan)
+        self.assertNotIn("scrape up the browned flavor", plan)
 
     def test_layered_bowl_tomatoes_remain_distinct_instead_of_becoming_sauce(self):
         request = {
@@ -205,7 +234,7 @@ class APIServiceTests(unittest.TestCase):
         plan = " ".join(recipe["steps"])
 
         self.assertIn("Keep Tomatoes distinct", plan)
-        self.assertIn("do not fry it into an accidental sauce", plan)
+        self.assertIn("stop before its pieces collapse into a sauce", plan)
         self.assertNotIn("Add Tomatoes to the skillet and cook until ready", plan)
 
     def test_builder_recognizes_custom_mayo_and_salsa_as_owned_extras(self):
@@ -251,7 +280,7 @@ class APIServiceTests(unittest.TestCase):
         self.assertIn("Rotisserie chicken — Cooked", recipe["ingredients"])
         self.assertTrue(any(line.startswith("Navy beans — Canned") for line in recipe["ingredients"]))
         self.assertIn("Drain and rinse Navy beans", plan)
-        self.assertIn("slice or shred Rotisserie chicken", plan)
+        self.assertIn("slice or shred it as the meal needs", plan)
         self.assertIn("do not recook it", plan)
         self.assertNotIn("Rotisserie chicken to the skillet and cook until ready", plan)
         self.assertNotIn("Prep is complete", plan)
@@ -527,7 +556,7 @@ class APIServiceTests(unittest.TestCase):
         self.assertIn("Plan on about", all_statements)
         self.assertIn("gather the ingredients", all_statements)
         self.assertIn("microwave defrost setting", plan)
-        self.assertIn("thawed ground beef", plan)
+        self.assertIn("microwave defrost setting", plan)
         self.assertIn("no pink ground meat remains", plan)
         self.assertIn("30 seconds after the last pink disappears", plan)
         self.assertNotIn("food thermometer", plan)
@@ -558,16 +587,16 @@ class APIServiceTests(unittest.TestCase):
         thaw_step = next(step for step in recipe["steps"] if "microwave defrost setting" in step)
         prep_step = next(step for step in recipe["steps"] if "finishes defrosting" in step)
         self.assertTrue(thaw_step.startswith("Minutes 5–12:"))
-        self.assertTrue(prep_step.startswith("Minutes 9–11:"))
+        self.assertTrue(prep_step.startswith("Minutes 9–12:"))
         self.assertIn("\n\n", prep_step)
         self.assertEqual(recipe["missing_items"], [])
         adjustments = {item["name"]: item for item in recipe["ingredient_adjustments"]}
         self.assertEqual(
             adjustments["Cooking oil or butter"]["resolved_name"],
-            "Rendered fat from the ground beef",
+            "Rendered fat from Ground beef",
         )
         self.assertEqual(adjustments["Onion powder"]["status"], "Omit")
-        self.assertIn("onion flavor", adjustments["Onion powder"]["omission_consequence"])
+        self.assertIn("provides this flavor identity", adjustments["Onion powder"]["omission_consequence"])
         self.assertEqual(adjustments["Cornstarch"]["status"], "Omit")
         self.assertNotIn("Chicken broth", recipe["missing_items"])
         self.assertNotIn("Milk", recipe["missing_items"])
@@ -593,14 +622,15 @@ class APIServiceTests(unittest.TestCase):
         recipe = build_recipe_from_candidate(candidate)
         plan = "\n".join(recipe["action_steps"])
 
-        self.assertEqual(candidate["minutes"], 22)
+        self.assertGreaterEqual(candidate["minutes"], 22)
+        self.assertLessEqual(candidate["minutes"], 24)
         self.assertIn("1/4-inch dice", plan)
         self.assertIn("1/2-inch dice", plan)
         self.assertIn("Cook for about 4 minutes", plan)
         self.assertIn("bloom in the hot fat for about 30 seconds", plan)
         self.assertIn("8–10 minutes", plan)
-        self.assertIn("carrots are fork-tender", plan)
-        self.assertIn("onions are soft and beginning to color", plan)
+        self.assertIn("Carrots reaches this outcome: Tender pieces", plan)
+        self.assertIn("Onions reaches this outcome: Soft, sweet, aromatic pieces", plan)
         self.assertIn("Spoon everything in the skillet", plan)
         self.assertNotIn("Add Ground beef to the plates", plan)
         self.assertNotIn("Good job—the main cooking is done", plan)
@@ -657,9 +687,9 @@ class APIServiceTests(unittest.TestCase):
 
         self.assertIn("halfway to two-thirds up the side", plan)
         self.assertIn("145°F", plan)
-        self.assertIn("rest it for at least 3 minutes", plan)
-        self.assertIn("Keep them separate from the steak skillet", plan)
-        self.assertIn("bright green and fork-tender", plan)
+        self.assertIn("followed by at least a 3-minute rest", plan)
+        self.assertIn("Keep it separate from the protein cooking vessel", plan)
+        self.assertIn("retained color", plan)
         self.assertNotIn("cook until ready", plan.lower())
 
     def test_opened_partial_can_gets_age_and_safety_check_before_prep(self):

@@ -59,15 +59,16 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     assert "my-kitchen.html?start=builder" in flow
     assert 'mode: "build_your_meal"' in flow
     assert "await requestRecipe(candidate.candidate_id" in flow
-    assert "One protein for now" in builder_page
+    assert "Choose one or more" in builder_page
     assert "Vegetables &amp; fruit" in builder_page
     assert "Pantry &amp; fridge extras" in builder_page
     assert "Composed Plate" in flow
     assert "Layered Bowl" in flow
     assert "Cooked Together" in flow
     assert 'label:"Stovetop"' in flow
-    assert "Protein form" in builder_page
-    assert "<option>Canned</option>" in builder_page
+    assert "data-protein-search" in builder_page
+    assert '>Canned</option>' in flow
+    assert 'id:"grill"' in flow
     assert 'input[name="extras"]:checked' in flow
     assert "Cold <small>training next" in builder_page
     assert "How should the finished meal come together?" in builder_page

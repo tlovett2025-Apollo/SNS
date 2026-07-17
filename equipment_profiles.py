@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import List
 
 from ingredient_profiles import KitchenActivity
+from ko_behavior import resolve_behavior
+from config import DB_PATH
 
 
 @dataclass(frozen=True)
@@ -39,12 +41,9 @@ def build_rice_equipment_activities(rice_name: str, equipment_name: str) -> List
                             attention_load=0.0, equipment="counter", stage="finish", depends_on=[f"cook:{rice_name}"], activity_id=f"rest:{rice_name}"),
         ]
     if equipment == "pressure cooker":
-        rice_key = rice_name.strip().lower()
-        # White and basmati rice need a short pressure phase.  The old generic
-        # 15-minute phase treated every rice like brown rice and made the rest
-        # of the meal wait for overcooked grains.
-        pressure_minutes = 5 if "basmati" in rice_key else 4
-        release_minutes = 10
+        behavior = resolve_behavior(rice_name, "foundation", db_path=DB_PATH)
+        pressure_minutes = int(behavior.attributes.get("pressure_minutes", 4))
+        release_minutes = int(behavior.attributes.get("pressure_release_minutes", 10))
         return [
             KitchenActivity(rice_name, "prep", "Measure the rice and water for the pressure cooker.", 2, True,
                             equipment="counter", stage="early", activity_id=prep_id),

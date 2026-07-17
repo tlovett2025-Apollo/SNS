@@ -42,9 +42,31 @@ def _join(items):
     return " & ".join(items)
 
 
-def _contains_any(items, terms):
-    keys = {_key(item) for item in items}
-    return any(any(term in item for term in terms) for item in keys)
+def _inventory_has_ko(
+    items, family_codes=(), physical_traits=(), relationship_traits=(),
+    culinary_functions=(),
+):
+    family_codes = set(family_codes)
+    physical_traits = set(physical_traits)
+    relationship_traits = set(relationship_traits)
+    culinary_functions = set(culinary_functions)
+    for name in items:
+        behavior = resolve_behavior(name, "ingredient", db_path=DB_PATH)
+        if not behavior.primary_family:
+            continue
+        if family_codes & set(behavior.family_codes):
+            return True
+        if physical_traits & set(behavior.primary_family.physical_traits):
+            return True
+        if culinary_functions & set(behavior.primary_family.culinary_functions):
+            return True
+        all_relationships = {
+            trait for family in [behavior.primary_family, *behavior.trait_families]
+            for trait in family.relationship_traits
+        }
+        if relationship_traits & all_relationships:
+            return True
+    return False
 
 
 def _ingredient_check(item, available, excluded, protein=""):
@@ -65,9 +87,14 @@ def _ingredient_check(item, available, excluded, protein=""):
         ), "")
         if resolved_name:
             status = "Substitute"
-        elif name_key == _key("Cooking oil or butter") and "ground" in _key(protein):
+        elif (
+            name_key == _key("Cooking oil or butter")
+            and "fat-rendering" in set(
+                getattr(resolve_behavior(protein, "protein", db_path=DB_PATH).primary_family, "physical_traits", ())
+            )
+        ):
             status = "Substitute"
-            resolved_name = "Rendered fat from the ground beef"
+            resolved_name = f"Rendered fat from {protein}"
         elif item.pantry_optional or item.can_omit:
             status = "Omit"
         elif name_key in excluded_keys:
@@ -136,9 +163,14 @@ def _quantity_plan(components, component_forms, inventory_lots, servings, eater_
         form = forms.get(key) or _key(lot.get("form"))
         unit = _key(lot.get("unit"))
         available = float(lot.get("quantity") or 0)
-        if "canned" in form or unit == "can" or key.startswith("canned "):
-            is_protein = any(word in key for word in ("chicken", "tuna", "salmon"))
-            planned = max(1, ceil(effective / (2 if is_protein else 4)))
+        behavior = resolve_behavior(name, "ingredient", form, db_path=DB_PATH)
+        family = behavior.primary_family
+        basis = family.portion_basis if family else "flexible"
+        amount = family.portion_per_standard if family else 1.0
+        stretchable = bool(family and family.stretchable)
+        is_canned = "canned" in form or unit in {"can", "cans"}
+        if is_canned:
+            planned = max(1, ceil(effective * (amount if basis == "cans" else .25)))
             if 0 < available < 0.5:
                 display = f"{planned} can{'s' if planned != 1 else ''} needed; less than 1/2 can is on hand"
                 notes.append(f"Less than half a can of {name} is not being counted as enough for this meal.")
@@ -149,32 +181,26 @@ def _quantity_plan(components, component_forms, inventory_lots, servings, eater_
                     notes.append("Using all available cans will make the entire meal larger; adjust sauce and seasoning as needed.")
                 display = f"{use:g} can{'s' if use != 1 else ''}"
             plan[key] = {"display": display, "unit": "can", "planned": planned, "available": available}
-            if is_protein and available and available < planned:
+            if stretchable and available and available < planned:
                 notes.append(
                     f"The {name} on hand appears short for the planned amount. Stretch it by distributing it through the selected vegetables or foundation."
                 )
-        elif any(word in key for word in ("ribeye", "sirloin", "steak")):
-            pieces = max(1, ceil(effective))
-            pounds = _quarter_pound_up(pieces * 8)
-            plan[key] = {"display": f"{pieces} steak{'s' if pieces != 1 else ''} (about {pounds:g} lb total)"}
+        elif basis == "pieces":
+            pieces = max(1, ceil(effective * amount))
+            label = family.portion_label
+            plan[key] = {"display": f"{pieces} {label}{'' if pieces == 1 else 's'}"}
             if unit in {"piece", "pieces"} and available and available < pieces:
                 notes.append(
-                    f"Only {available:g} steak{'s are' if available != 1 else ' is'} recorded for {pieces} planned. Slice after resting and divide it across the meal."
+                    f"Only {available:g} {label}{'s are' if available != 1 else ' is'} recorded for {pieces} planned. Divide the cooked amount across the meal or use a KO-approved stretch component."
                 )
-        elif key == "eggs":
-            eggs = max(1, ceil(effective * 2))
-            plan[key] = {"display": f"{eggs} eggs"}
-        elif any(word in key for word in ("sausage", "chicken breast", "chicken thigh")):
-            pieces = max(1, ceil(effective))
-            plan[key] = {"display": f"{pieces} pieces"}
-        elif key.endswith("rice"):
-            cups = ceil(effective) / 4.0
+        elif basis == "dry_cups":
+            cups = ceil(effective * amount * 4) / 4.0
             plan[key] = {"display": f"{cups:g} cup{'s' if cups != 1 else ''} dry"}
-        elif "mashed potato" in key:
-            cups = ceil(effective * 2) / 4.0
+        elif basis == "prepared_cups":
+            cups = ceil(effective * amount * 4) / 4.0
             plan[key] = {"display": f"about {cups:g} cup{'s' if cups != 1 else ''}"}
-        elif any(word in key for word in ("ground beef", "ground turkey", "ground chicken", "pork")):
-            pounds = _quarter_pound_up(effective * 4)
+        elif basis == "weight_oz":
+            pounds = _quarter_pound_up(effective * amount)
             plan[key] = {"display": f"{pounds:g} lb"}
             available_pounds = available if unit in {"lb", "pound", "pounds"} else 0
             package_weight = float(lot.get("package_weight_oz") or 0)
@@ -201,6 +227,43 @@ def _score_strategy(strategy, energy, budget, time_limit):
     if time_limit and strategy["minutes"] > time_limit:
         score -= (strategy["minutes"] - time_limit) * 2
     return max(0, score)
+
+
+def _ko_combination_fit(component_specs):
+    """Score functions and sensory contrast, never conventional name pairings."""
+    profiles = []
+    for name, role, form in component_specs:
+        behavior = resolve_behavior(name, role, form, db_path=DB_PATH)
+        if behavior.primary_family:
+            profiles.append(behavior.primary_family)
+    functions = {value for profile in profiles for value in profile.culinary_functions}
+    flavors = {value for profile in profiles for value in profile.flavor_domains}
+    textures = {profile.texture_contribution for profile in profiles if profile.texture_contribution}
+    colors = {profile.color_contribution for profile in profiles if profile.color_contribution}
+    score = len(profiles) * 2
+    reasons = []
+    if "protein-anchor" in functions and "foundation" in functions:
+        score += 6
+        reasons.append("has a KO-defined protein and foundation")
+    if "absorbs-sauce" in functions and functions & {"sauce-builder", "moisture-source", "supplies-liquid"}:
+        score += 5
+        reasons.append("has a foundation that can carry the meal's moisture and flavor")
+    if flavors & {"rich", "savory", "umami"} and functions & {"brightness", "fresh-contrast", "balances-richness"}:
+        score += 6
+        reasons.append("balances savory richness with brightness or fresh contrast")
+    if "browning-source" in functions and "moisture-source" in functions:
+        score += 3
+        reasons.append("can develop browning before a wetter component joins")
+    if len(textures) >= 3:
+        score += 4
+        reasons.append("offers useful texture contrast")
+    if len(colors) >= 2:
+        score += 2
+        reasons.append("offers visible color contrast")
+    moisture_count = sum("moisture-source" in profile.culinary_functions for profile in profiles)
+    if moisture_count > 2:
+        score -= (moisture_count - 2) * 3
+    return score, reasons
 
 
 def _sauce_for_cuisine(cuisine):
@@ -240,11 +303,12 @@ def _cuisine_requirements(cuisine):
 
 def _first_soup_liquid(available):
     """Return the exact saved-kitchen name for the soup's cooking liquid."""
-    terms = ("broth", "stock", "bouillon", "soup base", "consomme")
-    return next(
-        (item for item in available if any(term in _key(item) for term in terms)),
-        "Broth or water",
-    )
+    for item in available:
+        behavior = resolve_behavior(item, "ingredient", db_path=DB_PATH)
+        functions = set(behavior.primary_family.culinary_functions) if behavior.primary_family else set()
+        if "supplies-liquid" in functions:
+            return item
+    return "Broth or water"
 
 
 def _soup_ingredients(available):
@@ -273,28 +337,23 @@ def _method_is_eligible(method, available, foundation, equipment):
     if method == "skillet":
         return True
     if method == "soup":
-        has_liquid_path = _contains_any(
-            available,
-            ("broth", "stock", "bouillon", "soup base", "cream of", "consomme"),
+        has_liquid_path = _inventory_has_ko(available, culinary_functions=("supplies-liquid",))
+        inherently_stewable = _inventory_has_ko(
+            available, physical_traits=("collagen-rich",), relationship_traits=("wet-cook",)
         )
-        inherently_stewable = _contains_any(available, ("stew meat",))
         return has_liquid_path or inherently_stewable
     if method == "casserole":
-        return bool(foundation) or _contains_any(
-            available,
-            ("cream of", "sauce", "cheese", "egg", "breadcrumbs", "cracker"),
+        return bool(foundation) or _inventory_has_ko(
+            available, culinary_functions=("sauce-builder", "thickens", "adds-richness")
         )
     if method == "handheld":
-        return _contains_any(
-            available,
-            ("bread", "bun", "roll", "tortilla", "wrap", "pita", "naan", "flatbread"),
-        )
+        return _inventory_has_ko(available, family_codes=("bread_wrap",))
     if method == "grill":
         return any("grill" in item for item in equipment_keys)
     if method == "cold_meal":
-        return _contains_any(
-            available,
-            ("cooked", "leftover", "canned", "bread", "tortilla", "lettuce", "greens", "cheese"),
+        return _inventory_has_ko(
+            available, physical_traits=("ready-to-eat",),
+            relationship_traits=("no-cook-default", "assembly-foundation"),
         )
     return False
 
@@ -423,7 +482,8 @@ def generate_candidates(
         if incompatible:
             continue
         is_soup = method["cooking_method"] == "soup"
-        method_sauce = "rustic broth soup" if is_soup else sauce
+        is_grill = method["cooking_method"] == "grill"
+        method_sauce = "rustic broth soup" if is_soup else "simple sauce" if is_grill else sauce
         method_ingredients = (
             _soup_ingredients(method_resources)
             if is_soup
@@ -453,17 +513,26 @@ def generate_candidates(
         ]
         ingredient_checks = component_checks + requirement_checks
 
-        # A named fresh aromatic is a structural ingredient. Powder may layer
-        # flavor, but it is not silently required a second time.
-        selected_keys = {_key(item) for item in selected_components}
+        # A structural ingredient and a supporting seasoning may express the
+        # same flavor identity.  KO attributes—not ingredient-name branches—
+        # decide when the second expression is redundant.
+        selected_identities = {
+            resolve_behavior(
+                item, "ingredient", component_forms.get(item, ""), db_path=DB_PATH
+            ).attributes.get("flavor_identity")
+            for item in selected_components
+        }
+        selected_identities.discard(None)
         for check in requirement_checks:
-            check_key = _key(check.get("name"))
-            if check_key == "onion powder" and any("onion" in item for item in selected_keys):
+            requirement_identity = resolve_behavior(
+                check.get("name"), "ingredient", db_path=DB_PATH
+            ).attributes.get("flavor_identity")
+            if requirement_identity and requirement_identity in selected_identities:
                 check.update(status="Omit", required=False, resolved_name=None,
-                             omission_consequence="The onions already provide onion flavor, sweetness, and texture.")
-            if check_key == "garlic powder" and any(item in {"garlic", "fresh garlic"} for item in selected_keys):
-                check.update(status="Omit", required=False, resolved_name=None,
-                             omission_consequence="The garlic already provides the intended garlic flavor.")
+                             omission_consequence=(
+                                 "A selected ingredient already provides this flavor identity; "
+                                 "omit the duplicate seasoning unless you deliberately want it stronger."
+                             ))
 
         # Culinary validity and household safety are gates, not score penalties.
         # Excluded ingredients must never reach ranking. Missing ingredients
@@ -479,10 +548,13 @@ def generate_candidates(
             if item["status"] == "Need" and item["required"]
         ]
         score = _score_strategy(method, energy_level, budget_level, time_limit)
+        combination_score, combination_reasons = _ko_combination_fit(behavior_components)
+        score += combination_score
         c = dict(method)
         c["serving_styles"] = _serving_styles(method["cooking_method"])
         c["serving_style"] = c["serving_styles"][0]
         c["experience_overlays"] = _experience_overlays(cooking_for_kids, kid_theme)
+        c["combination_reasons"] = combination_reasons
         effective, quantity_plan, quantity_note = _quantity_plan(
             selected_components, component_forms, inventory_lots, servings,
             eater_profiles, use_all_cans,

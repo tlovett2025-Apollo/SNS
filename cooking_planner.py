@@ -56,13 +56,6 @@ def _join(items):
     return " & ".join(cleaned)
 
 
-_TABLE_EXTRAS = {
-    "mayonnaise", "salsa", "ketchup", "mustard", "hot sauce", "pickles",
-    "sour cream", "greek yogurt",
-}
-_COOKING_FATS = {"olive oil", "vegetable oil", "canola oil", "sesame oil", "butter", "margarine"}
-
-
 def _extras_instruction(candidate: dict, strategy: str) -> str:
     """Give every user-selected pantry/fridge extra an explicit job."""
     sauce_profile = get_sauce_profile(_clean(candidate.get("sauce")))
@@ -75,10 +68,18 @@ def _extras_instruction(candidate: dict, strategy: str) -> str:
     ]
     if not extras:
         return ""
-    table = [item for item in extras if item.lower() in _TABLE_EXTRAS]
+    family_codes = {
+        item: set(get_ingredient_profile(item, "ingredient").behavior_family_codes)
+        for item in extras
+    }
+    table = [
+        item for item in extras
+        if family_codes[item] & {"prepared_condiment", "cultured_creamy"}
+    ]
     cooking = [
         item for item in extras
-        if item not in table and not (strategy == "skillet" and item.lower() in _COOKING_FATS)
+        if item not in table
+        and not (strategy == "skillet" and "cooking_fat" in family_codes[item])
     ]
     parts = []
     if strategy == "handheld":
@@ -150,23 +151,36 @@ def _resolved_requirement_name(candidate: dict, name: str) -> str:
     return ""
 
 
+def _resolved_requirements_by_ko(candidate: dict, family_codes=(), functions=()) -> list[str]:
+    wanted_families = set(family_codes)
+    wanted_functions = set(functions)
+    matches = []
+    for requirement in candidate.get("inventory_requirements") or []:
+        if not isinstance(requirement, dict) or requirement.get("status") not in {"Have", "Need", "Substitute"}:
+            continue
+        name = _clean(requirement.get("resolved_name") or requirement.get("name"))
+        if not name:
+            continue
+        profile = get_ingredient_profile(name, "ingredient")
+        if wanted_families & set(profile.behavior_family_codes) or wanted_functions & set(profile.culinary_functions):
+            matches.append(name)
+    return list(dict.fromkeys(matches))
+
+
 def _comfort_sauce_prep(candidate: dict, fallback: str) -> str:
     """Prepare only ingredients that survived the kitchen eligibility gate."""
     if not candidate.get("inventory_requirements"):
         return fallback
 
     instructions = []
-    seasonings = []
-    vegetables = {item.lower() for item in _split_joined_items(candidate.get("vegetable"))}
-    for name in ("Garlic powder", "Onion powder", "Black pepper"):
-        resolved = _resolved_requirement_name(candidate, name)
-        if resolved and resolved.lower() not in vegetables:
-            seasonings.append(resolved)
+    seasonings = _resolved_requirements_by_ko(
+        candidate, family_codes=("dry_seasoning", "salt_seasoning")
+    )
     if seasonings:
         instructions.append(f"Measure {_join(seasonings)}.")
 
-    broth = _resolved_requirement_name(candidate, "Chicken broth")
-    milk = _resolved_requirement_name(candidate, "Milk")
+    broth = next(iter(_resolved_requirements_by_ko(candidate, family_codes=("broth_liquid",))), "")
+    milk = next(iter(_resolved_requirements_by_ko(candidate, family_codes=("milk_cream",))), "")
     if broth and milk and broth.lower() != milk.lower():
         instructions.append(f"Whisk the {broth} and {milk} together.")
     elif broth and milk:
@@ -174,7 +188,7 @@ def _comfort_sauce_prep(candidate: dict, fallback: str) -> str:
     elif broth or milk:
         instructions.append(f"Measure {(broth or milk)} for the pan sauce.")
 
-    thickener = _resolved_requirement_name(candidate, "Cornstarch")
+    thickener = next(iter(_resolved_requirements_by_ko(candidate, family_codes=("thickener",))), "")
     if thickener:
         instructions.append(
             f"In a small cup, stir the {thickener} with 1 tablespoon cold water until smooth."
@@ -187,21 +201,21 @@ def _comfort_sauce_finish(candidate: dict, fallback: str) -> str:
     if not candidate.get("inventory_requirements"):
         return fallback
 
-    broth = _resolved_requirement_name(candidate, "Chicken broth")
-    milk = _resolved_requirement_name(candidate, "Milk")
+    broth = next(iter(_resolved_requirements_by_ko(candidate, family_codes=("broth_liquid",))), "")
+    milk = next(iter(_resolved_requirements_by_ko(candidate, family_codes=("milk_cream",))), "")
     liquids = _join([broth, milk])
     parts = [
         f"Add {liquids or 'the prepared liquid'} to the skillet and scrape up the browned flavor.",
         "Bring it to a gentle simmer.",
     ]
-    thickener = _resolved_requirement_name(candidate, "Cornstarch")
+    thickener = next(iter(_resolved_requirements_by_ko(candidate, family_codes=("thickener",))), "")
     if thickener:
         parts.append(
             f"Stir the {thickener} mixture again, add it gradually, and stir until the sauce lightly coats everything in the skillet."
         )
     else:
         parts.append("Stir until everything is hot and coated with the loose, spoonable pan sauce.")
-    if _resolved_requirement_name(candidate, "Salt"):
+    if _resolved_requirements_by_ko(candidate, family_codes=("salt_seasoning",)):
         parts.append("Taste before adding salt; add only what is needed.")
     else:
         parts.append("Taste the sauce; the broth may already provide enough seasoning.")
@@ -406,7 +420,8 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         if not is_opened_can or not ("canned" in form or unit in {"can", "cans"}):
             continue
         name = _clean(lot.get("name"))
-        high_acid = any(word in name.lower() for word in ("tomato", "fruit", "pineapple", "peach", "pear", "citrus"))
+        item_profile = get_ingredient_profile(name, "vegetable")
+        high_acid = "acidic" in set(item_profile.physical_traits)
         limit = 7 if high_acid else 4
         age = None
         try:
@@ -446,6 +461,12 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
     ]
 
     ko_activities = [activity for activity in activities if activity.source == "ko"]
+    if _clean(candidate.get("meal_structure")) == "composed_plate":
+        for activity in ko_activities:
+            if activity.component == foundation and activity.activity_type in {"cook", "reheat", "warm"}:
+                activity.instruction = (
+                    f"{activity.instruction} Keep it separate from the protein cooking vessel so each component retains its own texture."
+                )
     referenced = {
         dependency
         for activity in ko_activities
@@ -512,14 +533,9 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         soup_liquid = _clean(candidate.get("soup_liquid")) or "broth or water"
         soup_liquid_quantity = _clean(candidate.get("soup_liquid_quantity")) or "enough to cover the ingredients"
         soup_liquid_measure = soup_liquid_quantity.split(",", 1)[0]
-        seasoning_names = [
-            item.get("name")
-            for item in candidate.get("inventory_requirements") or []
-            if isinstance(item, dict)
-            and _clean(item.get("name")).lower() in {
-                "garlic powder", "onion powder", "black pepper"
-            }
-        ]
+        seasoning_names = _resolved_requirements_by_ko(
+            candidate, family_codes=("dry_seasoning", "salt_seasoning")
+        )
         seasoning_text = _join(seasoning_names) if seasoning_names else "the seasonings"
         if include_sear:
             opening = (
@@ -550,12 +566,11 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             equipment="burner",
         ))
 
-        protein_key = protein.lower()
-        tough_beef = any(
-            word in protein_key
-            for word in ["stew meat", "chuck", "brisket", "shoulder"]
-        )
-        if tough_beef:
+        protein_profile = get_ingredient_profile(protein, "protein") if protein else None
+        protein_traits = set(getattr(protein_profile, "behavior_traits", ()))
+        protein_physical = set(getattr(protein_profile, "physical_traits", ()))
+        protein_families = set(getattr(protein_profile, "behavior_family_codes", ()))
+        if "long-lead" in protein_traits and "collagen-rich" in protein_physical:
             simmer_minutes = 75
             simmer_instruction = (
                 f"Cover the pot and keep {protein or 'the soup ingredients'}, "
@@ -564,14 +579,14 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
                 "at 60 minutes and continue until it is fork-tender, usually 60–90 minutes. "
                 "Crack the lid only if the soup needs to reduce."
             )
-        elif raw_protein and any(word in protein_key for word in ["chicken", "turkey", "pork"]):
+        elif raw_protein and "safety-critical" in protein_physical:
             simmer_minutes = 30
             simmer_instruction = (
                 f"Cover the pot and gently simmer {protein or 'the soup ingredients'}, "
                 f"{_join(vegetables)}, and {foundation or 'the remaining ingredients'} "
                 "together until the protein is safe and tender and the vegetables are cooked through."
             )
-        elif not raw_protein and "bean" in protein_key:
+        elif not raw_protein and "legume" in protein_families:
             simmer_minutes = 18
             simmer_instruction = (
                 f"Partially cover the pot and gently simmer the cooked {protein or 'ingredients'} "
@@ -602,7 +617,7 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             equipment="burner",
         ))
         finish_dependency = "shared simmer:meal"
-        if not raw_protein and "bean" in protein_key:
+        if not raw_protein and "legume" in protein_families:
             energy_allows_blending = energy not in {"low", "very low", "barely breathing"}
             equipment = " ".join(candidate.get("available_equipment") or []).lower()
             can_blend = "immersion blender" in equipment or "blender" in equipment
@@ -632,7 +647,7 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         activities.append(_planner_activity(
             "finish soup",
             " ".join(filter(None, (
-                "Taste the soup. Add salt only if needed and adjust the black pepper.",
+                "Taste the soup. Adjust salt and the other seasonings only as needed.",
                 soup_extras,
                 "Serve from the pot.",
             ))),
@@ -690,7 +705,6 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             equipment="counter",
         ))
     else:
-        mushroom_finish = terminal_ids(["Mushrooms"])
         protein_gate = next((
             _activity_id(activity)
             for activity in ko_activities
@@ -703,12 +717,18 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         sauce_dependencies = terminal_ids(vegetables)
         if protein_gate and protein_gate not in sauce_dependencies:
             sauce_dependencies.append(protein_gate)
-        finish_instruction = (
-            _comfort_sauce_finish(candidate, sauce_profile.cook_instruction)
-            if sauce_profile and sauce_profile.name == "simple comfort pan sauce"
-            else sauce_profile.cook_instruction if sauce_profile
-            else f"Taste, adjust seasoning, and finish {sauce}; use the browned pan flavor when available."
-        )
+        if strategy == "grill":
+            finish_instruction = (
+                f"Prepare {sauce} separately as a finishing sauce or table accompaniment. "
+                "Keep it off the grill's direct flame and taste before serving."
+            )
+        else:
+            finish_instruction = (
+                _comfort_sauce_finish(candidate, sauce_profile.cook_instruction)
+                if sauce_profile and sauce_profile.name == "simple comfort pan sauce"
+                else sauce_profile.cook_instruction if sauce_profile
+                else f"Taste, adjust seasoning, and finish {sauce}; use the browned cooking flavor when available."
+            )
         finish_instruction = " ".join(filter(None, (
             finish_instruction,
             _extras_instruction(candidate, strategy),
@@ -718,11 +738,14 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             finish_instruction,
             minutes=sauce_profile.finish_minutes if sauce_profile else 3,
             stage="finish",
-            depends_on=mushroom_finish or sauce_dependencies,
-            equipment="burner",
+            depends_on=sauce_dependencies,
+            equipment="counter" if strategy == "grill" else "burner",
         ))
+        primary_profile = get_ingredient_profile(protein, "protein") if protein else None
         one_pan_ground_meat = (
-            strategy == "skillet" and "ground" in protein.lower() and bool(vegetables)
+            strategy == "skillet"
+            and "ground" in set(getattr(primary_profile, "physical_traits", ()))
+            and bool(vegetables)
         )
         meal_structure = _clean(candidate.get("meal_structure")) or "integrated"
         plated_components = _join([foundation, *vegetables]) or "the cooked components"
@@ -840,19 +863,8 @@ def consolidate_kitchen_activities(
 
     def consolidated_prep(activity_type, selected, depends_on, extra_instruction="", extra_minutes=0):
         instructions = []
-        ground_meat_skillet = (
-            _strategy(candidate) == "skillet"
-            and "ground" in _clean((candidate or {}).get("protein")).lower()
-        )
         for activity in selected:
-            component = _clean(getattr(activity, "component", "")).lower()
-            if ground_meat_skillet and component == "carrots":
-                instruction = "Prep Carrots: peel if desired and cut into about 1/4-inch dice"
-            elif ground_meat_skillet and component == "onions":
-                instruction = "Prep Onions: peel and cut into about 1/2-inch dice"
-            else:
-                instruction = activity.instruction.rstrip(".")
-            instructions.append(instruction)
+            instructions.append(activity.instruction.rstrip("."))
         if extra_instruction:
             instructions.append(extra_instruction.rstrip("."))
         calculated_minutes = sum(max(0, int(activity.minutes or 0)) for activity in selected)
@@ -1006,7 +1018,8 @@ def consolidate_skillet_vegetables(
 
     vegetables = _split_joined_items(candidate.get("vegetable"))
     protein = _clean(candidate.get("protein"))
-    ground_meat = "ground" in protein.lower()
+    protein_profile = get_ingredient_profile(protein, "protein") if protein else None
+    ground_meat = "ground" in set(getattr(protein_profile, "physical_traits", ()))
     if not vegetables or (len(vegetables) < 2 and not ground_meat):
         return activities
 
@@ -1038,32 +1051,29 @@ def consolidate_skillet_vegetables(
 
         vegetable_names = _join([activity.component for activity in vegetable_activities])
         vegetable_keys = {activity.component.lower() for activity in vegetable_activities}
-        seasoning_names = []
-        for name in ("Garlic powder", "Onion powder", "Black pepper"):
-            resolved = _resolved_requirement_name(candidate, name)
-            if resolved and resolved.lower() not in vegetable_keys:
-                seasoning_names.append(resolved)
+        seasoning_names = [
+            name for name in _resolved_requirements_by_ko(
+                candidate, family_codes=("dry_seasoning", "salt_seasoning")
+            ) if name.lower() not in vegetable_keys
+        ]
         bloom_instruction = (
             f"Stir in {_join(seasoning_names)} and let the seasonings bloom in the hot fat for about 30 seconds. "
             if seasoning_names else ""
         )
+        vegetable_profiles = {
+            activity.component: get_ingredient_profile(activity.component, "vegetable")
+            for activity in vegetable_activities
+        }
         has_sturdy_vegetable = any(
-            word in name for name in vegetable_keys
-            for word in ("carrot", "parsnip", "turnip", "potato")
+            profile.cook_minutes >= 8 or "long-lead-vegetable" in set(profile.behavior_traits)
+            for profile in vegetable_profiles.values()
         )
         vegetable_minutes = "8–10" if has_sturdy_vegetable else "5–7"
-        texture_targets = []
-        if any("carrot" in name for name in vegetable_keys):
-            texture_targets.append("the carrots are fork-tender")
-        if any("onion" in name for name in vegetable_keys):
-            texture_targets.append("the onions are soft and beginning to color")
-        other_vegetables = [
-            name for name in vegetable_keys
-            if "carrot" not in name and "onion" not in name
+        texture_targets = [
+            f"{name} reaches this outcome: {profile.desired_outcome.rstrip('.')}"
+            for name, profile in vegetable_profiles.items()
         ]
-        if other_vegetables:
-            texture_targets.append("the remaining vegetables are tender")
-        texture_text = " and ".join(texture_targets) or "the vegetables are tender"
+        texture_text = "; and ".join(texture_targets) or "the vegetables are tender"
         shared = _planner_activity(
             "cook skillet",
             (
@@ -1101,34 +1111,45 @@ def consolidate_skillet_vegetables(
         rewritten.append(shared)
         return rewritten
 
-    sturdy_words = ("carrot", "potato", "parsnip", "turnip", "squash")
+    profiles = {
+        activity.component: get_ingredient_profile(activity.component, "vegetable")
+        for activity in vegetable_activities
+    }
+
     def environment_priority(activity):
-        name = activity.component.lower()
-        if "mushroom" in name:
+        profile = profiles[activity.component]
+        traits = set(profile.behavior_traits)
+        if "protect-dry-browning" in traits:
             return 0
-        if any(word in name for word in ("onion", "pepper")):
+        if "early-entry" in traits or "joins-sauce-base" in traits:
             return 1
-        if any(word in name for word in sturdy_words):
+        if "long-lead-vegetable" in traits or profile.cook_minutes >= 10:
             return 2
-        if "tomato" in name:
+        if "late-entry" in traits or "last-entry" in traits or "party-cooked" in traits:
             return 4
         return 3
     vegetable_activities.sort(key=lambda activity: (
         environment_priority(activity), vegetables.index(activity.component),
     ))
     first, *later = vegetable_activities
-    names = {activity.component.lower() for activity in vegetable_activities}
-    mushroom_first = "mushroom" in first.component.lower()
+    trait_sets = {
+        component: set(profile.behavior_traits) | set(profile.physical_traits)
+        for component, profile in profiles.items()
+    }
+    protected_first = "protect-dry-browning" in trait_sets[first.component]
     rustic_sauce = (
-        any("tomato" in name for name in names)
-        and any(any(word in name for word in ("onion", "pepper")) for name in names)
+        any("party-cooked" in traits for traits in trait_sets.values())
+        and any("joins-sauce-base" in traits for traits in trait_sets.values())
     )
-    okra_with_tomato = any("okra" in name for name in names) and any("tomato" in name for name in names)
-    if mushroom_first:
+    deliberate_wet_mucilage = (
+        any("mucilage-rich" in traits for traits in trait_sets.values())
+        and any("acidic" in traits for traits in trait_sets.values())
+    )
+    if protected_first:
         head_start, together_minutes = 6, 6
     elif rustic_sauce:
         head_start, together_minutes = 4, 8
-    elif okra_with_tomato:
+    elif deliberate_wet_mucilage:
         head_start, together_minutes = 6, 4
     else:
         base_minutes = max(2, max(int(activity.minutes or 0) for activity in vegetable_activities))
@@ -1159,11 +1180,13 @@ def consolidate_skillet_vegetables(
 
     selected_fat = next((
         item for item in candidate.get("selected_extras") or []
-        if _clean(item).lower() in _COOKING_FATS
+        if "cooking_fat" in set(
+            get_ingredient_profile(_clean(item), "ingredient").behavior_family_codes
+        )
     ), "")
     heat_fat = f"Heat {_clean(selected_fat)} in the skillet. " if selected_fat else ""
     vessel_opening = "Add" if cooked_protein else "After moving the protein to a plate, add"
-    if mushroom_first:
+    if protected_first:
         opening = (
             heat_fat + f"{vessel_opening} {first.component} to the skillet in a single, uncrowded layer. "
             f"Let the moisture evaporate and the bottoms brown before turning, about {head_start} minutes. "
@@ -1171,7 +1194,7 @@ def consolidate_skillet_vegetables(
     elif rustic_sauce:
         aromatics = [
             activity.component for activity in vegetable_activities
-            if any(word in activity.component.lower() for word in ("onion", "pepper"))
+            if "joins-sauce-base" in trait_sets[activity.component]
         ]
         opening = (
             heat_fat + f"{vessel_opening} {_join(aromatics)} to the skillet and soften them for about {head_start} minutes. "
@@ -1179,17 +1202,10 @@ def consolidate_skillet_vegetables(
         later = [activity for activity in vegetable_activities if activity.component not in aromatics]
     else:
         opening = heat_fat + f"{vessel_opening} {first.component} to the skillet and cook for {head_start} minutes. "
-    outcome_parts = []
-    if any("asparagus" in name for name in names):
-        outcome_parts.append("the asparagus is bright green and crisp-tender")
-    if any("swiss chard" in name for name in names):
-        outcome_parts.append("the chard stems are tender and the leaves are wilted")
-    if any("mushroom" in name for name in names):
-        outcome_parts.append("the mushrooms are browned")
-    if any("tomato" in name for name in names) and not rustic_sauce:
-        outcome_parts.append("the tomatoes are warm and softened but still hold some shape")
-    if any("okra" in name for name in names):
-        outcome_parts.append("the okra is tender with browned edges")
+    outcome_parts = [
+        f"{component} reaches this outcome: {profile.desired_outcome.rstrip('.')}"
+        for component, profile in profiles.items()
+    ]
     outcome = "; ".join(outcome_parts) or "the vegetables are tender and ready for the sauce"
     shared = _planner_activity(
         "cook vegetables",
@@ -1230,6 +1246,8 @@ def apply_vegetable_relationship_intelligence(
     activities: List[KitchenActivity], candidate: dict,
 ) -> List[KitchenActivity]:
     """Apply KO relationship/outcome rules before shared-vessel consolidation."""
+    if _strategy(candidate) != "skillet":
+        return activities
     structure = _clean(candidate.get("meal_structure")) or "integrated"
     vegetables = _split_joined_items(candidate.get("vegetable"))
     for activity in activities:
@@ -1238,33 +1256,23 @@ def apply_vegetable_relationship_intelligence(
         rules = ingredient_relationships(activity.component)
         if not rules:
             continue
-        key = activity.component.lower()
-        if "tomato" in key:
-            if structure in {"layered_bowl", "composed_plate"}:
-                activity.activity_type = "finish produce"
-                activity.instruction = (
-                    f"Keep {activity.component} distinct: cut it into bite-size pieces and season lightly. "
-                    "Use it fresh, or briefly blister it only if you want it warm; do not fry it into an accidental sauce."
-                )
-                activity.minutes = 2
-                activity.human_busy = True
-                activity.attention_load = 1.0
-                activity.stage = "finish"
-                activity.equipment = "counter"
-            elif len(vegetables) == 1:
-                activity.instruction = (
-                    f"Add {activity.component} near the end and cook for 3–4 minutes, just until warmed and beginning to soften. "
-                    "Stop while the pieces still hold their shape; continue longer only when you intentionally want tomato sauce."
-                )
-                activity.minutes = 4
-                activity.stage = "late"
-        elif "okra" in key:
+        traits = set(rules.get("behavior_traits") or ())
+        if (
+            {"party-cooked", "late-when-distinct"}.issubset(traits)
+            and structure in {"layered_bowl", "composed_plate"}
+        ):
+            profile = get_ingredient_profile(activity.component, "vegetable")
+            activity.activity_type = "finish produce"
             activity.instruction = (
-                f"Pat {activity.component} dry. Cook it in a lightly oiled, uncrowded skillet over medium-high heat, "
-                "stirring only as needed, until browned at the edges and tender. Do not add water unless this is intentionally becoming a stew or gumbo."
+                f"Keep {activity.component} distinct. {profile.handling_note} "
+                "Serve it fresh, or briefly heat it only if a warm component is intended; "
+                "stop before its pieces collapse into a sauce."
             )
-            activity.minutes = 9
-            activity.attention_load = 0.65
+            activity.minutes = max(2, profile.prep_minutes)
+            activity.human_busy = True
+            activity.attention_load = 1.0
+            activity.stage = "finish"
+            activity.equipment = "counter"
     return activities
 
 
@@ -1289,10 +1297,17 @@ def apply_protein_role_intelligence(
             if activity.component == name and activity.activity_type in {"cook", "saute", "reheat"}
         ]
         for activity in protein_work:
-            if role == "accent" and any(word in name.lower() for word in ("bacon", "sausage", "ham", "chorizo")):
+            profile = get_ingredient_profile(name, "protein")
+            physical = set(profile.physical_traits)
+            if role == "accent":
+                fat_instruction = (
+                    "leave only a light coating of the flavorful fat in the skillet"
+                    if "fat-rendering" in physical else
+                    "leave the skillet ready for the main protein"
+                )
                 activity.instruction = (
-                    f"Cook {name} first until browned and safely cooked. Transfer it to a plate, leave only a light coating "
-                    "of the flavorful fat in the skillet, and reserve it to fold into the meal near the end."
+                    f"Cook {name} first until browned and safely cooked. Transfer it to a plate, {fat_instruction}, "
+                    "and reserve it to fold into the meal near the end."
                 )
                 activity.minutes = max(6, int(activity.minutes or 0))
                 activity.stage = "early"
@@ -1356,7 +1371,9 @@ def consolidate_integrated_skillet_reheating(
     protein = _clean(candidate.get("protein"))
     instructions = []
     if any(activity.component == foundation for activity in reheats):
-        if "bean" in foundation.lower():
+        foundation_profile = get_ingredient_profile(foundation, "foundation")
+        foundation_functions = set(getattr(foundation_profile, "culinary_functions", ()))
+        if "thickens" in foundation_functions:
             instructions.append(
                 f"Stir in {foundation}; mash or purée some if desired, and heat it through."
             )
@@ -1424,7 +1441,7 @@ def constrain_single_skillet_environment(
         activity_id = _activity_id(activity)
         dependency = (
             protein_verify
-            if previous_id == f"cook:{protein}" and "steak" in protein.lower() and protein_verify
+            if previous_id == f"cook:{protein}" and protein_verify
             else previous_id
         )
         if dependency and dependency not in activity.depends_on:
@@ -1471,21 +1488,8 @@ def assign_available_equipment(activities: List[KitchenActivity], candidate: dic
             continue
         activity.depends_on = ["gather:meal"]
         component = activity.component
-        ground_meat = "ground" in component.lower()
-        if "microwave" in available:
-            activity.equipment = "microwave"
-            activity.minutes = 7
-            activity.human_busy = True
-            activity.attention_load = 0.35
-            activity.instruction = (
-                f"Remove all packaging and place the {component.lower()} on a microwave-safe plate. "
-                "Use the microwave defrost setting for about 7 minutes per pound as a starting point, "
-                + ("turning it and scraping away softened portions as they thaw. " if ground_meat else "turning and separating pieces halfway through. ")
-                + "If the center is still icy, continue in "
-                "1-minute defrost intervals. Cook it immediately after thawing."
-            )
-        else:
-            activity.equipment = "counter"
+        if (activity.equipment or "").lower() not in available:
+            activity.equipment = "sink"
             activity.minutes = 30
             activity.human_busy = True
             activity.attention_load = 0.1
@@ -1498,17 +1502,38 @@ def assign_available_equipment(activities: List[KitchenActivity], candidate: dic
     foundation_name = _clean(candidate.get("foundation"))
     rice_device = choose_rice_equipment(available)
     candidate["selected_rice_equipment"] = rice_device
-    if "rice" in foundation_name.lower() and rice_device != "stovetop":
+    foundation_profile = get_ingredient_profile(foundation_name, "foundation") if foundation_name else None
+    rice_capable = bool(
+        set(getattr(foundation_profile, "behavior_family_codes", ()))
+        & {"white_rice", "brown_rice"}
+    )
+    if rice_capable and rice_device != "stovetop":
+        removed = [activity for activity in activities if activity.component == foundation_name]
+        removed_ids = {_activity_id(activity) for activity in removed}
+        referenced = {
+            dependency for activity in removed for dependency in activity.depends_on
+            if dependency in removed_ids
+        }
+        terminals = [activity_id for activity_id in removed_ids if activity_id not in referenced]
         activities = [activity for activity in activities if activity.component != foundation_name]
-        activities.extend(build_rice_equipment_activities(foundation_name, rice_device))
-        if rice_device == "pressure cooker":
-            old_terminal = f"rest:{foundation_name}"
-            new_terminal = f"natural release:{foundation_name}"
-            for activity in activities:
-                activity.depends_on = [
-                    new_terminal if dependency == old_terminal else dependency
-                    for dependency in activity.depends_on
-                ]
+        replacements = build_rice_equipment_activities(foundation_name, rice_device)
+        activities.extend(replacements)
+        replacement_ids = {_activity_id(activity) for activity in replacements}
+        replacement_referenced = {
+            dependency for activity in replacements for dependency in activity.depends_on
+            if dependency in replacement_ids
+        }
+        new_terminal = next(
+            (activity_id for activity_id in replacement_ids if activity_id not in replacement_referenced),
+            "",
+        )
+        for activity in activities:
+            if activity in replacements:
+                continue
+            activity.depends_on = [
+                new_terminal if dependency in terminals else dependency
+                for dependency in activity.depends_on
+            ]
     return activities
 
 

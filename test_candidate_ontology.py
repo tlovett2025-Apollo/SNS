@@ -29,7 +29,7 @@ def test_soup_requires_a_liquid_path_or_an_inherently_stewable_protein():
 def test_casserole_requires_structure():
     assert not _method_is_eligible("casserole", ["Chicken", "Mushrooms"], "", [])
     assert _method_is_eligible("casserole", ["Chicken", "Mushrooms"], "Rice", [])
-    assert _method_is_eligible("casserole", ["Chicken", "Cheese"], "", [])
+    assert _method_is_eligible("casserole", ["Chicken breast", "Cheddar cheese"], "", [])
 
 
 def test_grill_requires_available_grill_equipment():

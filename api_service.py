@@ -17,6 +17,7 @@ from datetime import date
 from config import DB_PATH
 from build_provenance import collect_build_provenance
 from household_inventory import replace_household_inventory, submit_pending_items
+from ko_behavior import resolve_behavior
 from recipe_engine import build_recipe_from_candidate, generate_candidates
 
 
@@ -36,13 +37,14 @@ _MEAL_SHAPES = {
     "grill": "plate",
 }
 
-_LIVE_PLANNER_METHODS = {"skillet", "casserole", "soup", "handheld"}
+_LIVE_PLANNER_METHODS = {"skillet", "casserole", "soup", "handheld", "grill"}
 
 _BUILDER_METHODS = (
     {"id": "skillet", "label": "Stovetop", "description": "One or more stovetop vessels; meal structure decides whether components join or stay separate."},
     {"id": "soup", "label": "Soup or Stew", "description": "A liquid-led one-vessel meal; SNS chooses the suitable owned pot."},
     {"id": "casserole", "label": "Oven Bake", "description": "An oven-baked meal assembled in one baking dish."},
     {"id": "handheld", "label": "Handheld", "description": "Components cooked as needed, then assembled with bread or a wrap."},
+    {"id": "grill", "label": "Grill", "description": "Direct and indirect grill zones with KO-specific doneness, flare-up, basket, and resting guidance."},
 )
 
 _BUILDER_EXTRA_NAMES = (
@@ -258,14 +260,48 @@ def get_meal_builder_options(payload: dict | None = None, db_path: str | Path = 
             **extra,
         }
 
+    def protein_choice(name: str) -> dict:
+        item = choice(name)
+        form = item.get("form") or ""
+        behavior = resolve_behavior(name, "protein", form, db_path=db_path)
+        family = behavior.primary_family
+        functions = set(family.culinary_functions) if family else set()
+        relationships = set(family.relationship_traits) if family else set()
+        physical = set(family.physical_traits) if family else set()
+        item["default_state"] = (
+            "Canned" if "canned" in _key(form)
+            else "Cooked" if physical & {"ready-to-eat", "cooked"}
+            else "Frozen Raw" if "frozen" in _key(form)
+            else "Fresh Raw"
+        )
+        item["suggested_role"] = (
+            "stretch" if "protein-stretcher" in functions
+            else "accent" if "accent-capable" in relationships
+            else "supporting"
+        )
+        item["family_code"] = family.code if family else ""
+        return item
+
+    equipment_values = kitchen.get("equipment") or []
+    equipment_names = [
+        _clean(item.get("display_name", item.get("name"))) if isinstance(item, dict) else _clean(item)
+        for item in equipment_values
+    ]
+    owns_grill = any("grill" in _key(name) for name in equipment_names)
+    methods = [
+        {**item, "available": item["id"] != "grill" or owns_grill,
+         **({"note": "Add a grill in My Kitchen to plan this environment."} if item["id"] == "grill" and not owns_grill else {})}
+        for item in _BUILDER_METHODS
+    ]
+
     return {
         "api_version": CONTRACT_VERSION,
-        "proteins": [choice(row["name"]) for row in proteins],
+        "proteins": [protein_choice(row["name"]) for row in proteins],
         "produce": [choice(row["name"], kind=row["kind"]) for row in produce],
         "foundations": [choice(row["name"]) for row in foundations],
         "extras": [choice(name) for name in _BUILDER_EXTRA_NAMES],
         "cuisines": [row["name"] for row in cuisines],
-        "methods": list(_BUILDER_METHODS),
+        "methods": methods,
         "meal_structures": [
             {"id": "integrated", "label": "Cooked Together", "description": "A cohesive one-vessel meal whose compatible ingredients join in stages."},
             {"id": "composed_plate", "label": "Composed Plate", "description": "Restaurant-style: protein, vegetable, and foundation prepared independently."},
@@ -416,20 +452,15 @@ def _concept_requests(engine_request: dict, resolved: list[ResolvedIngredient]):
     ]
     vegetables = [item for item in resolved if _key(item.category) == "vegetables"]
     foundations = list(engine_request.get("foundation_names") or [])[:2]
-    available_keys = {_key(item) for item in engine_request.get("available_items") or []}
-
     flavor_directions = ["Comfort Food"]
-    flavor_rules = (
-        ("Chinese", {"soy sauce"}),
-        ("Italian", {"tomato sauce", "tomato paste", "italian seasoning"}),
-        ("Mexican", {"salsa", "chili powder", "cumin", "taco seasoning"}),
-        ("Mediterranean", {"lemon", "lemons", "olive oil", "greek yogurt"}),
-        ("Indian", {"curry powder", "garam masala"}),
-        ("BBQ", {"bbq sauce", "barbecue sauce"}),
-    )
-    for cuisine, signals in flavor_rules:
-        if available_keys & signals:
-            flavor_directions.append(cuisine)
+    for item_name in engine_request.get("available_items") or []:
+        affinities = resolve_behavior(
+            item_name, "ingredient", db_path=DB_PATH
+        ).attributes.get("cuisine_affinity", "")
+        for cuisine in affinities.split(","):
+            cuisine = _clean(cuisine)
+            if cuisine and cuisine not in flavor_directions:
+                flavor_directions.append(cuisine)
     flavor_directions = flavor_directions[:3]
 
     if not proteins:
@@ -491,15 +522,18 @@ def _concept_requests(engine_request: dict, resolved: list[ResolvedIngredient]):
 
 
 def _method_preferences(protein: ResolvedIngredient | None) -> tuple[str, ...]:
-    category = _key(protein.category if protein else "")
     state = _protein_state(protein)
-    if category == "eggs":
-        return ("skillet", "casserole", "handheld", "soup")
-    if category == "beans":
-        return ("soup", "skillet", "casserole", "handheld")
+    behavior = resolve_behavior(
+        protein.name, "protein", protein.form_name or "", db_path=DB_PATH
+    ) if protein else None
+    family_code = behavior.primary_family.code if behavior and behavior.primary_family else ""
+    if family_code == "egg":
+        return ("skillet", "casserole", "handheld", "soup", "grill")
+    if family_code in {"legume", "prepared_legume"}:
+        return ("soup", "skillet", "casserole", "handheld", "grill")
     if state == "Cooked":
-        return ("casserole", "handheld", "soup", "skillet")
-    return ("skillet", "casserole", "soup", "handheld")
+        return ("casserole", "handheld", "soup", "skillet", "grill")
+    return ("skillet", "grill", "casserole", "soup", "handheld")
 
 
 def _choose_concept_candidate(options, protein, used_methods):
@@ -525,20 +559,25 @@ def _dish_family(candidate: dict) -> str:
     if structure == "layered_bowl":
         return "layered_bowl"
     method = _clean(candidate.get("cooking_method", candidate.get("strategy")))
-    protein = _key(candidate.get("protein"))
+    protein_behavior = resolve_behavior(
+        candidate.get("protein"), "protein", candidate.get("protein_state") or "",
+        method, DB_PATH,
+    )
+    family_code = protein_behavior.primary_family.code if protein_behavior.primary_family else ""
+    physical = set(protein_behavior.primary_family.physical_traits) if protein_behavior.primary_family else set()
     cuisine = _key(candidate.get("cuisine"))
     if method == "skillet":
         if "chinese" in cuisine:
             return "stir_fry"
-        if "steak" in protein:
+        if family_code == "tender_steak":
             return "seared_dinner"
-        if "ground" in protein:
+        if "ground" in physical:
             return "hash"
-        if "bean" in protein or candidate.get("protein_state") == "Canned":
+        if family_code in {"legume", "prepared_legume", "ready_protein"}:
             return "pantry_supper"
         return "one_pot_supper"
     if method == "soup":
-        return "bean_soup" if "bean" in protein else "rustic_soup"
+        return "bean_soup" if family_code in {"legume", "prepared_legume"} else "rustic_soup"
     if method == "casserole":
         return "baked_casserole"
     if method == "handheld":
@@ -584,6 +623,8 @@ def _heat_source(candidate: dict) -> str:
         return "oven"
     if method == "handheld":
         return "mixed"
+    if method == "grill":
+        return "grill"
     return "stovetop"
 
 
@@ -691,11 +732,18 @@ def _score_make_candidate(candidate: dict, engine_request: dict) -> dict:
         score += 20
         reasons.append("builds a complete meal with the available foundation")
 
-    protein = _key(candidate.get("protein"))
     method = _clean(candidate.get("cooking_method", candidate.get("strategy")))
-    if ("bean" in protein and method == "soup") or ("ground" in protein and method == "skillet") or ("steak" in protein and method == "skillet"):
+    protein_behavior = resolve_behavior(
+        candidate.get("protein"), "protein", candidate.get("protein_state") or "",
+        method, DB_PATH,
+    )
+    if protein_behavior.primary_family and protein_behavior.method:
         score += 20
         reasons.append("the method fits the protein")
+        relationships = set(protein_behavior.primary_family.relationship_traits)
+        if method == "soup" and "soup-friendly" in relationships:
+            score += 18
+            reasons.append("the protein's KO is especially well suited to soup")
     if candidate.get("protein_state") in {"Cooked", "Canned"} and effort_level in {"Very Low", "Low"}:
         score += 8
         reasons.append("starts with a cooked or canned protein")
@@ -1047,19 +1095,21 @@ def _builder_candidates(payload: dict, db_path: str | Path):
     protein_selections[0]["role"] = "main"
     for item in protein_selections[1:]:
         if not item["role"]:
-            key = _key(item["name"])
+            behavior = resolve_behavior(
+                item["name"], "protein", item.get("state") or "", method, db_path
+            )
+            functions = set(behavior.primary_family.culinary_functions) if behavior.primary_family else set()
+            relationships = set(behavior.primary_family.relationship_traits) if behavior.primary_family else set()
             item["role"] = (
-                "stretch" if any(word in key for word in ("bean", "lentil", "chickpea"))
-                else "accent" if any(word in key for word in ("bacon", "sausage", "ham", "chorizo"))
+                "stretch" if "protein-stretcher" in functions
+                else "accent" if "accent-capable" in relationships
                 else "supporting"
             )
     if method not in _LIVE_PLANNER_METHODS:
         raise APIContractError("Choose a currently supported cooking method.")
-    if len(protein_selections) > 1 and method != "skillet":
-        raise APIContractError("Multiple proteins are currently trained for stovetop meals; choose Stovetop Meal.")
     if meal_structure not in {"integrated", "composed_plate", "layered_bowl"}:
         raise APIContractError("Choose a supported meal structure.")
-    if method != "skillet" and meal_structure != "integrated":
+    if method not in {"skillet", "grill"} and meal_structure != "integrated":
         raise APIContractError("That cooking method already determines an integrated meal structure.")
     if _clean(selections.get("serving_temperature")) == "cold":
         raise APIContractError("Cold meal planning is visible but is not trained yet.")
@@ -1185,7 +1235,7 @@ def _raw_candidates(payload: dict, db_path: str | Path):
             method = candidate.get("cooking_method", candidate.get("strategy", "meal"))
             if method not in _LIVE_PLANNER_METHODS:
                 continue
-            if method != "skillet" and _clean(candidate.get("meal_structure")) not in {"", "integrated"}:
+            if method not in {"skillet", "grill"} and _clean(candidate.get("meal_structure")) not in {"", "integrated"}:
                 continue
             candidate["dish_family"] = _dish_family(candidate)
             candidate["title"] = _selection_title(candidate)

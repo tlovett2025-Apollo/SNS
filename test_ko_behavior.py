@@ -5,6 +5,7 @@ from pathlib import Path
 
 from config import DB_PATH
 from ko_behavior import (
+    FAMILY_LIBRARY,
     family_codes_for,
     resolve_behavior,
     seed_behavior_library,
@@ -24,7 +25,12 @@ class KOBehaviorFamilyTests(unittest.TestCase):
             CREATE TABLE ko_behavior_families (
                 family_id INTEGER PRIMARY KEY, family_code TEXT NOT NULL UNIQUE,
                 family_name TEXT NOT NULL, role TEXT NOT NULL,
-                description TEXT NOT NULL, physical_traits TEXT, verified INTEGER DEFAULT 0
+                description TEXT NOT NULL, physical_traits TEXT,
+                portion_basis TEXT DEFAULT 'flexible', portion_per_standard REAL DEFAULT 1,
+                portion_label TEXT DEFAULT 'portion', portion_rounding TEXT DEFAULT 'practical',
+                stretchable INTEGER DEFAULT 0, flavor_domains TEXT,
+                culinary_functions TEXT, texture_contribution TEXT,
+                color_contribution TEXT, verified INTEGER DEFAULT 0
             );
             CREATE TABLE ko_family_methods (
                 family_method_id INTEGER PRIMARY KEY, family_id INTEGER NOT NULL,
@@ -35,7 +41,11 @@ class KOBehaviorFamilyTests(unittest.TestCase):
                 desired_outcome TEXT NOT NULL, handling_template TEXT,
                 instruction_template TEXT NOT NULL, doneness_cue TEXT NOT NULL,
                 failure_mode TEXT NOT NULL, recovery_hint TEXT NOT NULL,
-                holdability TEXT, verified INTEGER DEFAULT 0,
+                holdability TEXT, verification_required INTEGER DEFAULT 0,
+                rest_minutes INTEGER DEFAULT 0, rest_template TEXT,
+                frozen_thaw_minutes INTEGER DEFAULT 0,
+                frozen_thaw_equipment TEXT, frozen_thaw_template TEXT,
+                verified INTEGER DEFAULT 0,
                 UNIQUE(family_id, method_name, form_name)
             );
             CREATE TABLE ingredient_behavior_memberships (
@@ -130,6 +140,46 @@ class KOBehaviorFamilyTests(unittest.TestCase):
             self.assertEqual(missing, [])
         finally:
             con.close()
+
+    def test_every_real_catalog_form_resolves_to_complete_ko_knowledge(self):
+        con = sqlite3.connect(DB_PATH)
+        try:
+            rows = con.execute(
+                """SELECT i.name,i.category,coalesce(f.form_name,'')
+                     FROM ingredients i LEFT JOIN ingredient_forms f USING(ingredient_id)
+                    WHERE i.active=1 ORDER BY i.name,f.form_name"""
+            ).fetchall()
+            failures = []
+            for name, category, form_name in rows:
+                if name == "Centauran Gotlet Ribs":
+                    continue
+                role = (
+                    "protein" if category.lower() == "protein"
+                    else "foundation" if category.lower() == "foundation"
+                    else "vegetable" if category.lower() in {"vegetable", "fruit"}
+                    else "ingredient"
+                )
+                report = audit_behavior(name, role, form_name, db_path=DB_PATH)
+                if not report.operational:
+                    failures.append((name, form_name, report.missing))
+            self.assertEqual(failures, [])
+        finally:
+            con.close()
+
+    def test_every_family_method_carries_outcome_failure_and_recovery_knowledge(self):
+        incomplete = []
+        for family in FAMILY_LIBRARY.values():
+            if not family.methods:
+                incomplete.append((family.code, "no methods"))
+            for rule in family.methods:
+                for field_name in (
+                    "environment", "creates_environment", "handling_template",
+                    "instruction_template", "desired_outcome", "doneness_cue",
+                    "failure_mode", "recovery_hint", "holdability",
+                ):
+                    if not str(getattr(rule, field_name) or "").strip():
+                        incomplete.append((family.code, rule.method, field_name))
+        self.assertEqual(incomplete, [])
 
 
 if __name__ == "__main__":

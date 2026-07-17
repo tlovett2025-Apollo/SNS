@@ -43,7 +43,10 @@ INGREDIENT_METADATA_COLUMNS = [
 ]
 
 BEHAVIOR_FAMILY_COLUMNS = [
-    "family_code", "family_name", "role", "description", "physical_traits", "verified",
+    "family_code", "family_name", "role", "description", "physical_traits",
+    "portion_basis", "portion_per_standard", "portion_label", "portion_rounding",
+    "stretchable", "flavor_domains", "culinary_functions",
+    "texture_contribution", "color_contribution", "verified",
 ]
 
 FAMILY_METHOD_COLUMNS = [
@@ -52,10 +55,17 @@ FAMILY_METHOD_COLUMNS = [
     "attention_load", "equipment_name", "add_stage", "desired_outcome",
     "handling_template", "instruction_template", "doneness_cue", "failure_mode",
     "recovery_hint", "holdability", "verified",
+    "verification_required", "rest_minutes", "rest_template",
+    "frozen_thaw_minutes", "frozen_thaw_equipment", "frozen_thaw_template",
 ]
 
 BEHAVIOR_MEMBERSHIP_COLUMNS = [
     "ingredient_name", "family_code", "form_name", "priority", "is_primary",
+    "notes", "verified",
+]
+
+INGREDIENT_ATTRIBUTE_COLUMNS = [
+    "ingredient_name", "form_name", "attribute_name", "attribute_value",
     "notes", "verified",
 ]
 
@@ -70,6 +80,7 @@ TRAINING_COLUMNS = {
     "Behavior Families": BEHAVIOR_FAMILY_COLUMNS,
     "Family Methods": FAMILY_METHOD_COLUMNS,
     "Ingredient Behavior Memberships": BEHAVIOR_MEMBERSHIP_COLUMNS,
+    "Ingredient KO Attributes": INGREDIENT_ATTRIBUTE_COLUMNS,
 }
 
 FLAG_VALUES = {"0", "1", "false", "true", "no", "yes", "n", "y"}
@@ -207,6 +218,8 @@ def validate_training_file(csv_path, import_type, db_path):
                 _require_text(row, "family_name", row_number)
                 _require_text(row, "description", row_number)
                 flag(row["verified"], "verified", row_number)
+                decimal(row["portion_per_standard"] or "1", "portion_per_standard", row_number, 0.0)
+                flag(row["stretchable"] or "0", "stretchable", row_number)
                 if role not in ROLES:
                     raise ValueError(f"Invalid role on CSV row {row_number}: {role!r}")
                 _reject_duplicates(seen, family_code, row_number)
@@ -225,10 +238,11 @@ def validate_training_file(csv_path, import_type, db_path):
                     raise ValueError(f"Verified behavior family not found on CSV row {row_number}: {family_code}")
                 for field in ["cooking_environment", "desired_outcome", "instruction_template", "doneness_cue", "failure_mode", "recovery_hint"]:
                     _require_text(row, field, row_number)
-                for field in ["prep_minutes", "cook_minutes", "active_minutes"]:
-                    integer(row[field], field, row_number)
+                for field in ["prep_minutes", "cook_minutes", "active_minutes", "rest_minutes", "frozen_thaw_minutes"]:
+                    integer(row[field] or "0", field, row_number)
                 decimal(row["attention_load"], "attention_load", row_number, 0.0, 1.0)
                 flag(row["verified"], "verified", row_number)
+                flag(row["verification_required"] or "0", "verification_required", row_number)
                 if clean(row["add_stage"]).lower() not in STAGES:
                     raise ValueError(f"Invalid add_stage on CSV row {row_number}: {row['add_stage']!r}")
                 if clean(row["holdability"]).lower() not in HOLDABILITY:
@@ -266,6 +280,21 @@ def validate_training_file(csv_path, import_type, db_path):
                     (ingredient_id, family[0], form_name),
                 ).fetchone():
                     raise ValueError(f"Behavior membership already exists on CSV row {row_number}: {key}")
+
+            elif import_type == "Ingredient KO Attributes":
+                form_name = clean(row["form_name"])
+                attribute_name = _require_text(row, "attribute_name", row_number).lower()
+                _require_text(row, "attribute_value", row_number)
+                flag(row["verified"], "verified", row_number)
+                key = (ingredient_name.lower(), form_name.lower(), attribute_name)
+                _reject_duplicates(seen, key, row_number)
+                if cur.execute(
+                    """SELECT 1 FROM ko_ingredient_attributes
+                       WHERE ingredient_id=? AND lower(form_name)=lower(?)
+                         AND attribute_name=?""",
+                    (ingredient_id, form_name, attribute_name),
+                ).fetchone():
+                    raise ValueError(f"KO attribute already exists on CSV row {row_number}: {key}")
 
             elif import_type == "Ingredient Forms":
                 form_name = _require_text(row, "form_name", row_number)
@@ -432,11 +461,22 @@ def import_training_rows(rows, import_type, db_path):
             if import_type == "Behavior Families":
                 cur.execute(
                     """INSERT INTO ko_behavior_families
-                       (family_code, family_name, role, description, physical_traits, verified)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
+                       (family_code, family_name, role, description, physical_traits,
+                        portion_basis, portion_per_standard, portion_label,
+                        portion_rounding, stretchable, flavor_domains,
+                        culinary_functions, texture_contribution,
+                        color_contribution, verified)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (clean(row["family_code"]).lower(), clean(row["family_name"]),
                      clean(row["role"]).lower(), clean(row["description"]),
-                     clean(row["physical_traits"]), flag(row["verified"], "verified", 0)),
+                     clean(row["physical_traits"]), clean(row["portion_basis"]) or "flexible",
+                     float(clean(row["portion_per_standard"]) or 1),
+                     clean(row["portion_label"]) or "portion",
+                     clean(row["portion_rounding"]) or "practical",
+                     flag(row["stretchable"] or "0", "stretchable", 0),
+                     clean(row["flavor_domains"]), clean(row["culinary_functions"]),
+                     clean(row["texture_contribution"]), clean(row["color_contribution"]),
+                     flag(row["verified"], "verified", 0)),
                 )
 
             elif import_type == "Family Methods":
@@ -450,8 +490,11 @@ def import_training_rows(rows, import_type, db_path):
                         creates_environment, prep_minutes, cook_minutes, active_minutes,
                         attention_load, equipment_name, add_stage, desired_outcome,
                         handling_template, instruction_template, doneness_cue,
-                        failure_mode, recovery_hint, holdability, verified)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        failure_mode, recovery_hint, holdability,
+                        verification_required, rest_minutes, rest_template,
+                        frozen_thaw_minutes, frozen_thaw_equipment,
+                        frozen_thaw_template, verified)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (family_id, clean(row["method_name"]).lower(), clean(row["form_name"]),
                      clean(row["cooking_environment"]), clean(row["creates_environment"]),
                      int(row["prep_minutes"]), int(row["cook_minutes"]), int(row["active_minutes"]),
@@ -460,6 +503,10 @@ def import_training_rows(rows, import_type, db_path):
                      clean(row["handling_template"]), clean(row["instruction_template"]),
                      clean(row["doneness_cue"]), clean(row["failure_mode"]),
                      clean(row["recovery_hint"]), clean(row["holdability"]).lower(),
+                     flag(row["verification_required"] or "0", "verification_required", 0),
+                     int(row["rest_minutes"] or 0), clean(row["rest_template"]),
+                     int(row["frozen_thaw_minutes"] or 0), clean(row["frozen_thaw_equipment"]),
+                     clean(row["frozen_thaw_template"]),
                      flag(row["verified"], "verified", 0)),
                 )
 
@@ -475,6 +522,16 @@ def import_training_rows(rows, import_type, db_path):
                     (ingredient_id, family_id, clean(row["form_name"]), int(row["priority"]),
                      flag(row["is_primary"], "is_primary", 0), clean(row["notes"]),
                      flag(row["verified"], "verified", 0)),
+                )
+
+            elif import_type == "Ingredient KO Attributes":
+                cur.execute(
+                    """INSERT INTO ko_ingredient_attributes
+                       (ingredient_id,form_name,attribute_name,attribute_value,notes,verified)
+                       VALUES (?,?,?,?,?,?)""",
+                    (ingredient_id, clean(row["form_name"]),
+                     clean(row["attribute_name"]).lower(), clean(row["attribute_value"]),
+                     clean(row["notes"]), flag(row["verified"], "verified", 0)),
                 )
 
             elif import_type == "Ingredient Forms":

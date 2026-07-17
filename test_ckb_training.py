@@ -141,7 +141,7 @@ class CKBTrainingSafetyTests(unittest.TestCase):
             chicken_kinds = [activity.activity_type for activity in chicken.publish_activities(state_name="Fresh Raw")]
         finally:
             ingredient_profiles.DB_PATH = original_path
-        self.assertEqual(["prep", "cook"], chicken_kinds)
+        self.assertEqual(["prep", "cook", "verify", "rest"], chicken_kinds)
 
     def test_alpha_gal_wave_corrects_beef_and_writes_audit_rows(self):
         names = ["Beef brisket", "Beef stew meat", "Chuck roast", "Corned beef", "Flank steak", "Ground beef", "Ribeye steak", "Sirloin steak"]
