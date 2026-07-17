@@ -545,6 +545,11 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             _clean(item.get("name")) for item in supporting
             if _clean(item.get("state")).lower() in {"cooked", "canned", "ready to eat"}
         ]
+        for activity in prep_activities:
+            if activity.component in raw_supporting:
+                activity.instruction = (
+                    f"Leave {activity.component} whole so it cooks evenly and its center can be checked before slicing."
+                )
         activities = [activities[0], *state_changes, *prep_activities]
         prep_ids = [_activity_id(activity) for activity in prep_activities]
         main_prep = next((item for item in prep_ids if item.endswith(f":{protein}")), "gather:meal")
@@ -568,11 +573,17 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         else:
             brown_dependencies = [main_prep]
 
+        selected_fat = _resolved_requirement_name(candidate, "Cooking oil or butter")
+        fat_text = (
+            f"Add 1 tablespoon {selected_fat}"
+            if selected_fat and _clean(selected_fat).lower() != "cooking oil or butter"
+            else "Add 1 tablespoon cooking oil or butter"
+        )
         activities.append(_planner_activity(
             "brown main protein",
             (
-                f"Heat the braising vessel, add a thin coating of the selected cooking fat if needed, "
-                f"and brown {protein} on its broad sides. Work in batches only when the pieces would crowd the vessel."
+                f"Heat the braising vessel. {fat_text}, then brown {protein} on its broad sides. "
+                "Work in batches only when the pieces would crowd the vessel."
             ),
             minutes=8, human_busy=True, stage="early", depends_on=brown_dependencies, equipment="burner",
         ))
@@ -650,16 +661,22 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             "finish braise", finish_text, minutes=3, human_busy=True, stage="finish",
             depends_on=[finish_dependency], equipment="burner" if strategy == "braise" else "counter",
         ))
-        service_components = [
-            *[_clean(item.get("name")) for item in supporting],
+        supporting_names = [_clean(item.get("name")) for item in supporting if _clean(item.get("name"))]
+        plated_components = [
             *[name for name in vegetables if name not in finish_components],
             foundation,
         ]
-        service_components = [name for name in service_components if name]
-        service_instruction = f"Slice or portion {protein}; "
-        if service_components:
-            service_instruction += f"distribute {_join(service_components)} through the meal, then "
-        service_instruction += "spoon the braising sauce over everything."
+        plated_components = [name for name in plated_components if name]
+        service_instruction = f"Slice or portion {protein}."
+        if len(supporting_names) == 1:
+            service_instruction += (
+                f" Slice {supporting_names[0]} if desired and serve it with {protein}."
+            )
+        elif supporting_names:
+            service_instruction += f" Portion {_join(supporting_names)} and serve them with {protein}."
+        if plated_components:
+            service_instruction += f" Add {_join(plated_components)} to the plates."
+        service_instruction += " Spoon the braising sauce over everything."
         activities.append(_planner_activity(
             "finish and serve",
             service_instruction,

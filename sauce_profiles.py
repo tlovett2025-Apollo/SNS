@@ -102,8 +102,12 @@ BBQ_BRAISING_SAUCE = SauceProfile(
     name="BBQ Sauce",
     ingredients=[
         SauceIngredient(
-            "Broth or water", "1–1 1/2 cups, or enough to come one-third to halfway up the meat",
+            "Broth or water", "1 1/2 cups, divided",
             substitutes=("Chicken broth", "Beef broth", "Vegetable broth", "Water"),
+        ),
+        SauceIngredient(
+            "Cooking oil or butter", "1 tablespoon",
+            substitutes=("Cooking oil", "Butter", "Olive oil", "Vegetable oil", "Canola oil"),
         ),
         SauceIngredient("BBQ sauce", "1/2 cup"),
         SauceIngredient(
@@ -127,13 +131,14 @@ BBQ_BRAISING_SAUCE = SauceProfile(
         SauceIngredient("Black pepper", "1/4 teaspoon", pantry_optional=True),
     ],
     prep_instruction=(
-        "Whisk 1/2 cup BBQ sauce with the broth or water. Add 1 tablespoon each Worcestershire sauce "
+        "Measure 1 1/2 cups broth or water. Whisk 1/2 cup BBQ sauce with 1 cup of it; reserve the remaining "
+        "1/2 cup to adjust the liquid level during the braise. Add 1 tablespoon each Worcestershire sauce "
         "and mustard and 2 tablespoons ketchup when using, plus the measured garlic powder, onion powder, and black pepper. "
         "Keep the hot sauce for the final taste."
     ),
     cook_instruction=(
         "Pour the measured BBQ braising liquid around the browned meat, using only enough to come "
-        "one-third to halfway up it. Scrape up the browned bits, cover, and cook gently."
+        "one-third to halfway up it. Scrape up the browned bits."
     ),
     prep_minutes=3,
     finish_minutes=2,

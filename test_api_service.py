@@ -148,6 +148,49 @@ class APIServiceTests(unittest.TestCase):
         self.assertTrue(any(line.startswith("Beef brisket — Fresh Raw") for line in recipe["ingredients"]))
         self.assertLess(recipe["active_minutes"], 30)
 
+    def test_bbq_brisket_and_turkey_sausage_braise_is_fully_measured_and_decisive(self):
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": {
+                "inventory": [
+                    {"name": "Chicken broth", "form": "Shelf-stable", "amount": "plenty"},
+                    {"name": "Garlic powder", "form": "Shelf-stable", "amount": "plenty"},
+                    {"name": "Onion powder", "form": "Shelf-stable", "amount": "plenty"},
+                    {"name": "Black pepper", "form": "Shelf-stable", "amount": "plenty"},
+                ],
+                "equipment": [{"name": "Stovetop"}],
+            },
+            "selections": {
+                "proteins": [
+                    {"name": "Beef brisket", "state": "Fresh Raw", "role": "main"},
+                    {"name": "Turkey sausage", "state": "Fresh Raw", "role": "supporting"},
+                ],
+                "produce": [], "foundation": "",
+                "extras": ["BBQ sauce", "Worcestershire sauce", "Mustard", "Ketchup", "Hot sauce"],
+                "cuisine": "BBQ", "cooking_method": "skillet",
+                "meal_structure": "integrated", "serving_temperature": "hot",
+                "energy": "Low", "time_minutes": 240, "servings": 4,
+            },
+        }
+
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+        plan = " ".join(recipe["instructions"])
+
+        self.assertIn("Chicken broth — 1 1/2 cups, divided", recipe["ingredients"])
+        self.assertIn("Cooking oil or butter — 1 tablespoon", recipe["ingredients"])
+        self.assertIn("Cut Beef brisket into 1 1/2- to 2-inch pieces", plan)
+        self.assertIn("Leave Turkey sausage whole", plan)
+        self.assertNotIn("remove casings", plan)
+        self.assertIn("Measure 1 1/2 cups Chicken broth", plan)
+        self.assertIn("reserve the remaining 1/2 cup", plan)
+        self.assertIn("Add 1 tablespoon cooking oil or butter", plan)
+        self.assertNotIn("selected cooking fat", plan)
+        self.assertNotIn("Scrape up the browned bits, cover, and cook gently", plan)
+        self.assertIn("Slice Turkey sausage if desired and serve it with Beef brisket", plan)
+        self.assertNotIn("distribute Turkey sausage", plan)
+        self.assertTrue(recipe["recipe_validation"]["production_ready"])
+
     def test_chicken_tomato_spaghetti_uses_every_ingredient_and_names_two_vessels_honestly(self):
         request = {
             "mode": "build_your_meal",

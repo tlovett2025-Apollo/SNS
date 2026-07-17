@@ -131,7 +131,7 @@ FAMILY_LIBRARY: Dict[str, BehaviorFamily] = {
         (method(
             "braise", ("fresh raw", "frozen raw"), "covered moist heat",
             "rich braising liquid", 4, 120, 15, .2, "burner", "early",
-            "Cut {name} into even pieces when appropriate; thaw before browning.",
+            "Cut {name} into 1 1/2- to 2-inch pieces so it can tenderize on this stovetop schedule; thaw before browning.",
             "Brown {name} in batches, add enough liquid for a braise, cover, and cook gently until fork-tender.",
             "Fork-tender meat with connective tissue softened into the cooking liquid.",
             "A fork enters easily and the meat yields without springing back.",

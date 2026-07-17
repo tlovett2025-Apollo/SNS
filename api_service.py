@@ -964,11 +964,13 @@ def _candidate_ingredient_lines(
     resolved: list[ResolvedIngredient],
 ) -> list[str]:
     """Render selected components and recipe requirements with useful state."""
-    requirements = {
-        _key(item.get("name")): item
-        for item in candidate.get("inventory_requirements") or []
-        if isinstance(item, dict) and _clean(item.get("name"))
-    }
+    requirements = {}
+    for item in candidate.get("inventory_requirements") or []:
+        if not isinstance(item, dict) or not _clean(item.get("name")):
+            continue
+        requirements[_key(item.get("name"))] = item
+        if _clean(item.get("resolved_name")):
+            requirements[_key(item.get("resolved_name"))] = item
     resolved_by_name = {}
     for item in resolved:
         resolved_by_name.setdefault(_key(item.name), item)
