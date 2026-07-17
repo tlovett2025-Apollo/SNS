@@ -56,7 +56,7 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     assert "Help Me Build My Meal" in flow
     assert "Give Me Meal Ideas" in flow
     assert "Signature Recipes" in flow
-    assert "my-kitchen.html?start=builder" in flow
+    assert 'link("build-your-meal.html", "Help Me Build My Meal"' in flow
     assert 'mode: "build_your_meal"' in flow
     assert "await requestRecipe(candidate.candidate_id" in flow
     assert "Choose one or more" in builder_page
@@ -77,6 +77,7 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
 def test_quantity_and_form_controls_cover_packages_cans_appetites_and_garlic():
     flow = PUBLIC_FLOW.read_text(encoding="utf-8")
     kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
+    preferences_page = (PUBLIC_FLOW.parent / "household-preferences.html").read_text(encoding="utf-8")
     builder_page = (PUBLIC_FLOW.parent / "build-your-meal.html").read_text(encoding="utf-8")
 
     assert "data-opened-at" in flow
@@ -91,9 +92,12 @@ def test_quantity_and_form_controls_cover_packages_cans_appetites_and_garlic():
     assert "data-produce-form" in flow
     assert "which garlic" in flow.lower()
     assert "data-dialog-form-note" in kitchen_page
-    assert "data-household-members" in kitchen_page
-    assert "data-add-household-member" in kitchen_page
-    assert "household_members: householdMembers" in flow
+    assert "data-household-members" not in kitchen_page
+    assert "data-add-household-member" not in kitchen_page
+    assert "data-household-members" in preferences_page
+    assert "data-add-household-member" in preferences_page
+    assert "data-save-household" in preferences_page
+    assert "household_members: members" in flow
 
 
 def test_make_a_meal_exposes_effort_and_selection_context():
@@ -142,3 +146,14 @@ def test_logged_in_home_and_left_navigation_are_connected():
     assert "position:fixed" in css
     assert 'data-app-shell' in kitchen_page
     assert 'location.href = "home.html"' in login_page
+
+
+def test_meal_navigation_opens_destinations_before_waiting_for_api():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    home_page = (PUBLIC_FLOW.parent / "home.html").read_text(encoding="utf-8")
+
+    assert 'choose-recipe.html?refresh=1' in flow
+    assert 'choose-recipe.html?refresh=1' in home_page
+    assert 'href="build-your-meal.html"' in home_page
+    assert 'Finding genuinely different ideas from My Kitchen' in flow
+    assert 'if (currentPage() !== "choose-recipe.html") return' in flow

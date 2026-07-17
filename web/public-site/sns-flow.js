@@ -83,8 +83,8 @@ const SNS = (() => {
     document.body.classList.add("app-shell-page");
     const page = currentPage();
     const activeFor = href => {
-      if (href === "my-kitchen.html?start=ideas") return page === "choose-recipe.html";
-      if (href === "my-kitchen.html?start=builder") return page === "build-your-meal.html";
+      if (href.startsWith("choose-recipe.html")) return page === "choose-recipe.html";
+      if (href === "build-your-meal.html") return page === "build-your-meal.html";
       return page === href.split("?")[0];
     };
     const link = (href, label, className = "") => `
@@ -98,8 +98,8 @@ const SNS = (() => {
       <nav class="app-sidebar-nav">
         ${link("home.html", "Home")}
         <div class="app-nav-label">Make dinner</div>
-        ${link("my-kitchen.html?start=ideas", "Give Me Meal Ideas", "meal-action")}
-        ${link("my-kitchen.html?start=builder", "Help Me Build My Meal", "meal-action")}
+        ${link("choose-recipe.html?refresh=1", "Give Me Meal Ideas", "meal-action")}
+        ${link("build-your-meal.html", "Help Me Build My Meal", "meal-action")}
         ${link("signature-recipes.html", "Signature Recipes", "meal-action")}
         ${link("favorite-recipes.html", "My Favorite Recipes")}
         <div class="app-nav-label">My household</div>
@@ -157,9 +157,13 @@ const SNS = (() => {
     if (currentPage() !== "my-kitchen.html") return;
     const action = new URLSearchParams(location.search).get("start");
     if (!action) return;
-    history.replaceState({}, "", "my-kitchen.html");
-    if (action === "ideas") generateRecipeList();
-    if (action === "builder") openMealBuilder();
+    if (action === "ideas") location.replace("choose-recipe.html?refresh=1");
+    if (action === "builder") location.replace("build-your-meal.html");
+  }
+
+  function savedKitchenState() {
+    try { return JSON.parse(localStorage.getItem(kitchenStorageKey) || "{}") || {}; }
+    catch { return {}; }
   }
 
   function quantityProfile(name) {
@@ -204,7 +208,9 @@ const SNS = (() => {
   }
 
   function kitchenPayload() {
-    const items = [...document.querySelectorAll("[data-food]")].map(row => {
+    const saved = savedKitchenState();
+    const foodRows = [...document.querySelectorAll("[data-food]")];
+    const items = foodRows.map(row => {
       const quantity = Number(row.querySelector("[data-quantity]")?.value || 0);
       return {
         name: row.dataset.food,
@@ -218,27 +224,34 @@ const SNS = (() => {
         expiration_date: row.querySelector("[data-expiration-date]")?.value || null
       };
     }).filter(item => item.quantity > 0);
-    const householdMembers = [...document.querySelectorAll("[data-household-member]")].map(row => ({
+    const memberRows = [...document.querySelectorAll("[data-household-member]")];
+    const householdMembers = memberRows.map(row => ({
       name: row.querySelector("[data-member-name]")?.value.trim() || "Household member",
       appetite: row.querySelector("[data-member-appetite]")?.value || "standard"
     }));
-    const effort = document.querySelector("[data-make-effort]")?.value || "Low";
+    const inventory = foodRows.length ? items : (saved.foods || []).filter(item => Number(item.quantity || 0) > 0);
+    const members = memberRows.length ? householdMembers : (saved.household_members || []);
+    const equipmentButtons = [...document.querySelectorAll("[data-equipment]")];
+    const equipment = equipmentButtons.length
+      ? equipmentButtons.filter(button => button.classList.contains("active")).map(button => ({
+          name: button.dataset.equipment,
+          available: true
+        }))
+      : (saved.equipment || []).filter(item => item.active).map(item => ({name: item.name, available: true}));
+    const effort = document.querySelector("[data-make-effort]")?.value || saved.tonight_effort || "Low";
 
     return {
       api_version: "1.0",
       contract_version: "my-kitchen-v1",
       household_id: "local-demo-household",
       generated_at: new Date().toISOString(),
-      servings: householdMembers.length || 4,
+      servings: members.length || 4,
       energy: effort,
       effort,
-      inventory: items,
-      equipment: [...document.querySelectorAll("[data-equipment].active")].map(button => ({
-        name: button.dataset.equipment,
-        available: true
-      })),
+      inventory,
+      equipment,
       meal_preferences: {
-        household_members: householdMembers,
+        household_members: members,
         recent_meals: recentMealHistory()
       },
       cost_filter: null
@@ -306,8 +319,12 @@ const SNS = (() => {
   }
 
   function browserKitchenState() {
+    const saved = savedKitchenState();
+    const foodRows = [...document.querySelectorAll("[data-food]")];
+    const equipmentButtons = [...document.querySelectorAll("[data-equipment]")];
+    const memberRows = [...document.querySelectorAll("[data-household-member]")];
     return {
-      foods: [...document.querySelectorAll("[data-food]")].map(row => ({
+      foods: foodRows.length ? foodRows.map(row => ({
         name: row.dataset.food,
         storage: row.dataset.storage,
         form: row.dataset.form || "On hand",
@@ -318,17 +335,17 @@ const SNS = (() => {
         package_weight_oz: Number(row.querySelector("[data-package-weight]")?.value || 0) || null,
         expiration_date: row.querySelector("[data-expiration-date]")?.value || null,
         custom: row.dataset.custom === "true"
-      })),
-      equipment: [...document.querySelectorAll("[data-equipment]")].map(button => ({
+      })) : (saved.foods || []),
+      equipment: equipmentButtons.length ? equipmentButtons.map(button => ({
         name: button.dataset.equipment,
         active: button.classList.contains("active"),
         custom: button.dataset.custom === "true"
-      })),
-      household_members: [...document.querySelectorAll("[data-household-member]")].map(row => ({
+      })) : (saved.equipment || []),
+      household_members: memberRows.length ? memberRows.map(row => ({
         name: row.querySelector("[data-member-name]")?.value || "",
         appetite: row.querySelector("[data-member-appetite]")?.value || "standard"
-      })),
-      tonight_effort: document.querySelector("[data-make-effort]")?.value || "Low"
+      })) : (saved.household_members || []),
+      tonight_effort: document.querySelector("[data-make-effort]")?.value || saved.tonight_effort || "Low"
     };
   }
 
@@ -857,7 +874,9 @@ const SNS = (() => {
     try {
       await postJson(API.saveKitchen, payload);
       const status = document.querySelector("[data-save-status]");
-      if (status) status.textContent = "My Kitchen is saved.";
+      if (status) status.textContent = document.querySelector("[data-save-household]")
+        ? "Household preferences are saved."
+        : "My Kitchen is saved.";
     } catch {
       const status = document.querySelector("[data-save-status]");
       if (status) status.textContent = "Saved in this browser; API connection is pending.";
@@ -876,6 +895,27 @@ const SNS = (() => {
     }
     sessionStorage.setItem("snsRecipeChoices", JSON.stringify(recipes));
     location.href = "choose-recipe.html";
+  }
+
+  async function refreshRecipeChoices() {
+    if (currentPage() !== "choose-recipe.html") return;
+    const params = new URLSearchParams(location.search);
+    const recipes = JSON.parse(sessionStorage.getItem("snsRecipeChoices") || "[]");
+    if (params.get("refresh") !== "1" && recipes.length) return;
+    history.replaceState({}, "", "choose-recipe.html");
+    const holder = document.querySelector("[data-recipe-grid]");
+    if (holder) holder.innerHTML = '<p class="recipe-loading">Finding genuinely different ideas from My Kitchen…</p>';
+    const payload = kitchenPayload();
+    sessionStorage.setItem("snsKitchenPayload", JSON.stringify(payload));
+    let choices;
+    try {
+      const response = await postJson(API.getRecipeList, payload);
+      choices = response.candidates || response.recipes || response;
+    } catch {
+      choices = fallbackRecipes(payload);
+    }
+    sessionStorage.setItem("snsRecipeChoices", JSON.stringify(choices));
+    renderRecipeChoices();
   }
 
   function openMealBuilder() {
@@ -921,7 +961,8 @@ const SNS = (() => {
   async function renderMealBuilder() {
     const form = document.querySelector("[data-meal-builder]");
     if (!form) return;
-    const kitchen = JSON.parse(sessionStorage.getItem("snsKitchenPayload") || "{}");
+    const kitchen = kitchenPayload();
+    sessionStorage.setItem("snsKitchenPayload", JSON.stringify(kitchen));
     const owned = ownedKitchenNames(kitchen);
     const savedMembers = kitchen.meal_preferences?.household_members || [];
     if (savedMembers.length) {
@@ -1301,12 +1342,14 @@ const SNS = (() => {
     renderMealBuilder();
     renderHome();
     document.querySelector("[data-save-kitchen]")?.addEventListener("click", saveKitchen);
+    document.querySelector("[data-save-household]")?.addEventListener("click", saveKitchen);
     document.querySelector("[data-get-recipes]")?.addEventListener("click", generateRecipeList);
     document.querySelector("[data-build-meal]")?.addEventListener("click", openMealBuilder);
     document.querySelector("[data-signature-recipes]")?.addEventListener("click", openSignatureRecipes);
     document.querySelectorAll("[data-checkout]").forEach(b => b.addEventListener("click", () => checkout(b.dataset.checkout)));
     document.querySelector("[data-billing-portal]")?.addEventListener("click", billingPortal);
     runRequestedKitchenAction();
+    refreshRecipeChoices();
   }
 
   return { init, kitchenPayload, API };

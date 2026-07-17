@@ -5,8 +5,22 @@
 <header class="site-header"><a class="brand" href="home.html">Stock <span>&amp;</span> Stir</a><nav class="header-nav"><a class="header-link" href="home.html">Home</a></nav></header>
 <main class="simple-destination">
   <div class="eyebrow">Household Preferences</div><h1>The people SNS is cooking for.</h1>
-  <p class="lede">This page will hold household members, appetite defaults, allergies, exclusions, and preferences. Tonight-only attendance and exclusions will remain adjustable inside the meal flow.</p>
-  <section class="coming-soon-panel"><strong>Profile editor is the next connection.</strong><p>For now, the household information already stored with My Kitchen continues to feed serving calculations.</p><a class="btn btn-secondary" href="my-kitchen.html">Review the current household</a></section>
+  <p class="lede">Save the people SNS usually cooks for and how large a standard meal feels to each person. Tonight-only attendance remains adjustable inside the meal flow.</p>
+  <section class="inventory-section household-appetite-section">
+    <div class="section-heading static-heading">
+      <span class="section-icon" aria-hidden="true">☺</span>
+      <span class="section-title"><span>Household appetites</span><small>Light is ¾ portion, standard is 1 portion, and big is 1½ portions.</small></span>
+    </div>
+    <div class="section-body">
+      <div class="household-member-list" data-household-members></div>
+      <button class="add-kitchen-item" type="button" data-add-household-member>+ Add household member</button>
+    </div>
+  </section>
+  <div class="preference-save-row">
+    <span data-save-status>Changes are stored in this browser.</span>
+    <button class="btn btn-primary" type="button" data-save-household>Save Household Preferences</button>
+  </div>
+  <section class="coming-soon-panel"><strong>More household preferences are coming here.</strong><p>Allergies, standing exclusions, and preferences will live beside appetites. Meal-specific attendance and exclusions will remain part of tonight’s meal flow.</p></section>
 </main>
 <script src="sns-flow.js"></script>
 </body>

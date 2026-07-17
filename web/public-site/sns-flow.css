@@ -224,3 +224,9 @@ h2 { margin: 0 0 8px; font-size: 1.35rem; }
 
 @media(max-width:900px){.app-shell-page{padding-left:0}.app-shell-page>.site-header{justify-content:space-between}.app-shell-page>.site-header>.brand{display:inline}.app-sidebar{transform:translateX(-105%);transition:transform .22s ease;box-shadow:14px 0 40px rgba(0,0,0,.25)}.app-nav-open .app-sidebar{transform:translateX(0)}.app-menu-toggle{display:inline-flex;order:-1}.app-sidebar-overlay{position:fixed;inset:0;z-index:35;border:0;background:rgba(13,24,18,.48)}.app-nav-open .app-sidebar-overlay{display:block}.home-welcome{grid-template-columns:1fr}.home-kitchen-card{grid-template-columns:1fr auto;align-items:center}.home-quick-links,.article-columns{grid-template-columns:1fr}.home-quick-links a{min-height:auto}.weekly-pantry-article>header{display:grid}.weekly-pantry-article>header a{white-space:normal}}
 @media(max-width:540px){.app-shell-page>.site-header>.brand{font-size:1rem}.app-shell-page>.site-header .header-nav{display:none}.app-sidebar{width:min(86vw,300px)}.app-home,.simple-destination,.reading-page{width:min(100% - 22px,1120px);padding-top:26px}.home-welcome{gap:16px}.home-welcome h1{font-size:2.5rem}.home-kitchen-card{grid-template-columns:1fr}.weekly-pantry-article{border-radius:16px}.article-intro{font-size:1rem}}
+
+.simple-destination .household-appetite-section{margin-top:30px}
+.preference-save-row{display:flex;align-items:center;justify-content:flex-end;gap:18px;margin-top:14px}
+.preference-save-row [data-save-status]{margin-right:auto;color:var(--muted);font-size:.85rem}
+.recipe-loading{grid-column:1/-1;padding:36px;border:1px solid var(--line);border-radius:var(--radius);background:#fff;color:var(--muted);font-size:1.05rem;text-align:center}
+@media(max-width:600px){.preference-save-row{align-items:stretch;display:grid}.preference-save-row .btn{width:100%}}
