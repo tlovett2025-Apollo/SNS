@@ -302,9 +302,53 @@ class APIServiceTests(unittest.TestCase):
         self.assertFalse(any(item["candidate_id"].startswith("cold-meal") for item in candidates))
         self.assertTrue(all("Comfort Food" not in item["title"] for item in candidates))
 
+    def test_make_a_meal_assortment_uses_effort_and_real_variety(self):
+        low_kitchen = diverse_kitchen_payload()
+        low_kitchen["effort"] = "Low"
+        low = get_recipe_list(low_kitchen)["candidates"]
+
+        high_kitchen = diverse_kitchen_payload()
+        high_kitchen["effort"] = "High"
+        high = get_recipe_list(high_kitchen)["candidates"]
+
+        self.assertEqual(low[0]["selection_badge"], "Best fit")
+        self.assertTrue(any(item["selection_badge"] == "Lowest effort" for item in low))
+        self.assertTrue(all(item["effort"] <= 9 for item in low))
+        self.assertTrue(any(item["effort"] > 8 for item in high))
+        self.assertGreaterEqual(len({item["protein"] for item in low}), 3)
+        self.assertGreaterEqual(len({item["dish_family"] for item in low}), 3)
+        self.assertTrue(all(item["effort_label"] for item in low))
+        self.assertTrue(all(item["selection_reasons"] for item in low))
+
+    def test_recent_meal_history_rotates_the_leading_choice(self):
+        kitchen = diverse_kitchen_payload()
+        original = get_recipe_list(kitchen)["candidates"][0]
+        kitchen["meal_preferences"] = {"recent_meals": [{
+            "title": original["title"],
+            "protein": original["protein"],
+            "dish_family": original["dish_family"],
+        }]}
+
+        rotated = get_recipe_list(kitchen)["candidates"][0]
+
+        self.assertNotEqual(rotated["candidate_id"], original["candidate_id"])
+
+    def test_expiring_inventory_can_be_selected_as_use_soon(self):
+        kitchen = diverse_kitchen_payload()
+        kitchen["inventory"][0]["expiration_date"] = date.today().isoformat()
+
+        candidates = get_recipe_list(kitchen)["candidates"]
+        canned_chicken = next(item for item in candidates if item["protein"] == "Canned chicken")
+
+        self.assertTrue(any("uses soon: Canned chicken" in reason for reason in canned_chicken["selection_reasons"]))
+        self.assertTrue(any(item["selection_badge"] == "Use soon" for item in candidates))
+
     def test_opened_recipe_lists_only_its_selected_components(self):
         kitchen = diverse_kitchen_payload()
-        candidate = get_recipe_list(kitchen)["candidates"][0]
+        candidate = next(
+            item for item in get_recipe_list(kitchen)["candidates"]
+            if item["protein"] == "Canned chicken"
+        )
 
         recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
 

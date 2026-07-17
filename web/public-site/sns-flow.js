@@ -50,6 +50,7 @@ const SNS = (() => {
     "bacon": { unit: "package", step: 1 }
   };
   const kitchenStorageKey = "snsKitchenStateV1";
+  const mealHistoryKey = "snsMealHistoryV1";
   const defaultForms = {
     Pantry: "Shelf-stable",
     Fridge: "Refrigerated",
@@ -99,13 +100,15 @@ const SNS = (() => {
         unit: row.querySelector("[data-unit]")?.value || quantityProfile(row.dataset.food).unit,
         opened_at: row.querySelector("[data-opened-at]")?.value || null,
         refrigerated_after_opening: row.querySelector("[data-refrigerated-after-opening]")?.checked ?? null,
-        package_weight_oz: Number(row.querySelector("[data-package-weight]")?.value || 0) || null
+        package_weight_oz: Number(row.querySelector("[data-package-weight]")?.value || 0) || null,
+        expiration_date: row.querySelector("[data-expiration-date]")?.value || null
       };
     }).filter(item => item.quantity > 0);
     const householdMembers = [...document.querySelectorAll("[data-household-member]")].map(row => ({
       name: row.querySelector("[data-member-name]")?.value.trim() || "Household member",
       appetite: row.querySelector("[data-member-appetite]")?.value || "standard"
     }));
+    const effort = document.querySelector("[data-make-effort]")?.value || "Low";
 
     return {
       api_version: "1.0",
@@ -113,14 +116,16 @@ const SNS = (() => {
       household_id: "local-demo-household",
       generated_at: new Date().toISOString(),
       servings: householdMembers.length || 4,
-      energy: "Low",
+      energy: effort,
+      effort,
       inventory: items,
       equipment: [...document.querySelectorAll("[data-equipment].active")].map(button => ({
         name: button.dataset.equipment,
         available: true
       })),
       meal_preferences: {
-        household_members: householdMembers
+        household_members: householdMembers,
+        recent_meals: recentMealHistory()
       },
       cost_filter: null
     };
@@ -146,6 +151,7 @@ const SNS = (() => {
         opened_at: row.querySelector("[data-opened-at]")?.value || null,
         refrigerated_after_opening: row.querySelector("[data-refrigerated-after-opening]")?.checked ?? null,
         package_weight_oz: Number(row.querySelector("[data-package-weight]")?.value || 0) || null,
+        expiration_date: row.querySelector("[data-expiration-date]")?.value || null,
         custom: row.dataset.custom === "true"
       })),
       equipment: [...document.querySelectorAll("[data-equipment]")].map(button => ({
@@ -156,7 +162,8 @@ const SNS = (() => {
       household_members: [...document.querySelectorAll("[data-household-member]")].map(row => ({
         name: row.querySelector("[data-member-name]")?.value || "",
         appetite: row.querySelector("[data-member-appetite]")?.value || "standard"
-      }))
+      })),
+      tonight_effort: document.querySelector("[data-make-effort]")?.value || "Low"
     };
   }
 
@@ -164,7 +171,26 @@ const SNS = (() => {
     localStorage.setItem(kitchenStorageKey, JSON.stringify(browserKitchenState()));
   }
 
-  function quantityEditor(name, quantity = 1, unit = "", openedAt = "", refrigerated = false, packageWeightOz = "") {
+  function recentMealHistory() {
+    try { return JSON.parse(localStorage.getItem(mealHistoryKey) || "[]").slice(0, 8); }
+    catch { return []; }
+  }
+
+  function recordMealHistory(meal) {
+    if (!meal?.title) return;
+    const history = recentMealHistory();
+    history.unshift({
+      title: meal.title,
+      protein: meal.protein || "",
+      dish_family: meal.dish_family || "",
+      cuisine: meal.cuisine || "",
+      cooking_method: meal.cooking_method || "",
+      cooked_at: new Date().toISOString()
+    });
+    localStorage.setItem(mealHistoryKey, JSON.stringify(history.slice(0, 8)));
+  }
+
+  function quantityEditor(name, quantity = 1, unit = "", openedAt = "", refrigerated = false, packageWeightOz = "", expirationDate = "") {
     const profile = quantityProfile(name);
     const selectedUnit = unit || profile.unit;
     return `
@@ -178,8 +204,9 @@ const SNS = (() => {
         <select data-unit>${unitOptions(selectedUnit)}</select>
       </label>
       <details class="inventory-detail" data-inventory-detail>
-        <summary>Package or opened-can details</summary>
+        <summary>Dates and package details</summary>
         <div class="inventory-detail-fields">
+          <label class="wide"><span>Use-by or best-by date (optional)</span><input type="date" data-expiration-date value="${escapeHtml(expirationDate)}"></label>
           <label data-can-field><span>Opened date</span><input type="date" data-opened-at value="${escapeHtml(openedAt)}"></label>
           <label data-can-field><span>Refrigerated promptly</span><input type="checkbox" data-refrigerated-after-opening${refrigerated ? " checked" : ""}></label>
           <label data-package-field class="wide"><span>Original package weight in ounces (optional)</span><input type="number" min="0.1" step="0.1" data-package-weight value="${escapeHtml(packageWeightOz)}"></label>
@@ -187,7 +214,7 @@ const SNS = (() => {
       </details>`;
   }
 
-  function createFoodRow({ name, storage, form, quantity, unit = "", level = "little", custom = true, opened_at = "", refrigerated_after_opening = false, package_weight_oz = "" }) {
+  function createFoodRow({ name, storage, form, quantity, unit = "", level = "little", custom = true, opened_at = "", refrigerated_after_opening = false, package_weight_oz = "", expiration_date = "" }) {
     const row = document.createElement("div");
     row.className = "food-row";
     row.dataset.food = name;
@@ -197,7 +224,7 @@ const SNS = (() => {
     const startingQuantity = quantity ?? legacyQuantity(level);
     row.innerHTML = `
       <div><div class="food-name">${escapeHtml(name)}</div><div class="food-note">${escapeHtml(row.dataset.form)}</div></div>
-      <div class="amount quantity-editor" aria-label="${escapeHtml(name)} quantity">${quantityEditor(name, startingQuantity, unit, opened_at, refrigerated_after_opening, package_weight_oz)}</div>`;
+      <div class="amount quantity-editor" aria-label="${escapeHtml(name)} quantity">${quantityEditor(name, startingQuantity, unit, opened_at, refrigerated_after_opening, package_weight_oz, expiration_date)}</div>`;
     return row;
   }
 
@@ -246,6 +273,7 @@ const SNS = (() => {
     if (row.querySelector("[data-opened-at]")) row.querySelector("[data-opened-at]").value = details.opened_at || "";
     if (row.querySelector("[data-refrigerated-after-opening]")) row.querySelector("[data-refrigerated-after-opening]").checked = Boolean(details.refrigerated_after_opening);
     if (row.querySelector("[data-package-weight]")) row.querySelector("[data-package-weight]").value = details.package_weight_oz || "";
+    if (row.querySelector("[data-expiration-date]")) row.querySelector("[data-expiration-date]").value = details.expiration_date || "";
     syncInventoryDetails(row.querySelector(".amount"));
   }
 
@@ -254,8 +282,6 @@ const SNS = (() => {
     const unit = group.querySelector("[data-unit]")?.value;
     group.querySelectorAll("[data-can-field]").forEach(field => field.hidden = unit !== "can");
     group.querySelectorAll("[data-package-field]").forEach(field => field.hidden = unit !== "package");
-    const details = group.querySelector("[data-inventory-detail]");
-    if (details) details.hidden = !["can", "package"].includes(unit);
   }
 
   function upgradeQuantityEditors() {
@@ -275,6 +301,8 @@ const SNS = (() => {
     try { state = JSON.parse(localStorage.getItem(kitchenStorageKey) || "null"); }
     catch { state = null; }
     if (!state) return;
+    const effort = document.querySelector("[data-make-effort]");
+    if (effort && state.tonight_effort) effort.value = state.tonight_effort;
 
     (state.foods || []).forEach(food => {
       let row = findFoodRow(food.name, food.storage);
@@ -339,7 +367,7 @@ const SNS = (() => {
       syncInventoryDetails(group);
       markChanged();
     });
-    group.querySelectorAll("[data-opened-at], [data-refrigerated-after-opening], [data-package-weight]").forEach(input => input.addEventListener("change", markChanged));
+    group.querySelectorAll("[data-opened-at], [data-refrigerated-after-opening], [data-package-weight], [data-expiration-date]").forEach(input => input.addEventListener("change", markChanged));
     syncInventoryDetails(group);
   }
 
@@ -438,6 +466,7 @@ const SNS = (() => {
       updateCount();
       markChanged();
     }));
+    document.querySelector("[data-make-effort]")?.addEventListener("change", markChanged);
     document.querySelector("[data-add-household-member]")?.addEventListener("click", () => {
       const row = createHouseholdMember();
       document.querySelector("[data-household-members]")?.append(row);
@@ -849,9 +878,10 @@ const SNS = (() => {
       <article class="recipe-card">
         <div class="recipe-art"></div>
         <div class="recipe-body">
+          ${recipe.selection_badge ? `<span class="selection-badge">${escapeHtml(recipe.selection_badge)}</span>` : ""}
           <div class="meta">
             <span class="pill">${escapeHtml(recipe.total_minutes || recipe.minutes || "Flexible")} min</span>
-            <span class="pill">Effort ${escapeHtml(recipe.effort ?? "Practical")}</span>
+            <span class="pill">Effort ${escapeHtml(recipe.effort_label || recipe.effort || "Practical")}</span>
             <span class="pill">${escapeHtml(recipe.match || "Match")}</span>
           </div>
           <h2>${escapeHtml(recipe.title)}</h2>
@@ -874,11 +904,12 @@ const SNS = (() => {
     const request = { candidate_id: recipeId, recipe_id: recipeId, kitchen };
     sessionStorage.setItem("snsRecipeRequest", JSON.stringify(request));
     let recipe;
+    const choices = JSON.parse(sessionStorage.getItem("snsRecipeChoices") || "[]");
+    const selectedChoice = choices.find(r => (r.candidate_id || r.id) === recipeId) || {};
     try {
       recipe = await postJson(API.getRecipe, request);
     } catch {
-      const choices = JSON.parse(sessionStorage.getItem("snsRecipeChoices") || "[]");
-      const choice = choices.find(r => (r.candidate_id || r.id) === recipeId) || {};
+      const choice = selectedChoice;
       recipe = {
         id: recipeId,
         title: choice.title || "Stock & Stir Recipe",
@@ -893,6 +924,7 @@ const SNS = (() => {
         total_minutes: choice.minutes || 35
       };
     }
+    recordMealHistory({...selectedChoice, ...recipe});
     sessionStorage.setItem("snsGeneratedRecipe", JSON.stringify(recipe));
     location.href = "recipe.html";
   }

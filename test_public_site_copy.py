@@ -90,3 +90,16 @@ def test_quantity_and_form_controls_cover_packages_cans_appetites_and_garlic():
     assert "data-household-members" in kitchen_page
     assert "data-add-household-member" in kitchen_page
     assert "household_members: householdMembers" in flow
+
+
+def test_make_a_meal_exposes_effort_and_selection_context():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
+
+    assert "data-make-effort" in kitchen_page
+    assert "Tonight’s effort" in kitchen_page
+    assert 'mealHistoryKey = "snsMealHistoryV1"' in flow
+    assert "recent_meals: recentMealHistory()" in flow
+    assert "selection_badge" in flow
+    assert "effort_label" in flow
+    assert "data-expiration-date" in flow

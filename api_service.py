@@ -12,6 +12,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 import sqlite3
+from datetime import date
 
 from config import DB_PATH
 from build_provenance import collect_build_provenance
@@ -147,6 +148,7 @@ def normalize_kitchen_snapshot(payload: dict) -> dict:
             "opened_at": _clean(item.get("opened_at")) or None,
             "refrigerated_after_opening": item.get("refrigerated_after_opening"),
             "package_weight_oz": item.get("package_weight_oz"),
+            "expiration_date": _clean(item.get("expiration_date")) or None,
         })
     return {
         "api_version": CONTRACT_VERSION,
@@ -298,6 +300,7 @@ def save_my_kitchen(
         "opened_at": item.source.get("opened_at"),
         "refrigerated_after_opening": item.source.get("refrigerated_after_opening"),
         "package_weight_oz": item.source.get("package_weight_oz"),
+        "expiration_date": item.source.get("expiration_date"),
     } for item in resolved]
     saved = replace_household_inventory(
         db_path, household_id, acting_user_id, items
@@ -384,6 +387,13 @@ def _engine_request(payload: dict, db_path: str | Path):
         "available_equipment": [name for name in equipment if name],
         "excluded_items": excluded_items,
         "inventory_lots": snapshot["inventory_lots"],
+        "foundation_names": [item.name for item in foundations],
+        "component_forms": {
+            item.name: item.form_name for item in resolved if item.form_name
+        },
+        "recent_meals": list(preferences.get("recent_meals") or []),
+        "effort_level": _clean(payload.get("effort")) or _clean(payload.get("energy")) or "Low",
+        "eater_profiles": preferences.get("eater_profiles") or {},
     }
 
 
@@ -400,49 +410,78 @@ def _slug(value: str) -> str:
 
 
 def _concept_requests(engine_request: dict, resolved: list[ResolvedIngredient]):
-    """Build distinct ingredient concepts before asking the planner for methods."""
+    """Build a bounded but varied pantry concept pool before method planning."""
     proteins = [
         item for item in resolved if _key(item.category) in _PROTEIN_CATEGORIES
     ]
     vegetables = [item for item in resolved if _key(item.category) == "vegetables"]
-    foundation = engine_request.get("foundation_name", "")
+    foundations = list(engine_request.get("foundation_names") or [])[:2]
+    available_keys = {_key(item) for item in engine_request.get("available_items") or []}
+
+    flavor_directions = ["Comfort Food"]
+    flavor_rules = (
+        ("Chinese", {"soy sauce"}),
+        ("Italian", {"tomato sauce", "tomato paste", "italian seasoning"}),
+        ("Mexican", {"salsa", "chili powder", "cumin", "taco seasoning"}),
+        ("Mediterranean", {"lemon", "lemons", "olive oil", "greek yogurt"}),
+        ("Indian", {"curry powder", "garam masala"}),
+        ("BBQ", {"bbq sauce", "barbecue sauce"}),
+    )
+    for cuisine, signals in flavor_rules:
+        if available_keys & signals:
+            flavor_directions.append(cuisine)
+    flavor_directions = flavor_directions[:3]
 
     if not proteins:
         return [(dict(engine_request), None)]
 
     concepts = []
-    for index, protein in enumerate(proteins):
-        request = dict(engine_request)
-        request["protein_name"] = protein.name
-        request["protein_state"] = _protein_state(protein)
-
-        if vegetables:
-            if len(proteins) > 1 and index % 3 == 0 and len(vegetables) > 1:
-                selected_vegetables = vegetables[:2]
-            else:
-                selected_vegetables = [vegetables[index % len(vegetables)]]
+    seen = set()
+    vegetable_names = [item.name for item in vegetables]
+    for protein_index, protein in enumerate(proteins):
+        if vegetable_names:
+            first = vegetable_names[protein_index % len(vegetable_names)]
+            second = vegetable_names[(protein_index + 1) % len(vegetable_names)]
+            third = vegetable_names[(protein_index + 2) % len(vegetable_names)]
+            bundles = [[first], [first, second] if first != second else [first], [third]]
         else:
-            selected_vegetables = []
-        request["vegetable_names"] = [item.name for item in selected_vegetables]
-        request["vegetable_name"] = (
-            selected_vegetables[0].name if selected_vegetables else ""
-        )
-        request["foundation_name"] = foundation if index % 2 == 0 else ""
-        concepts.append((request, protein))
-
-    # A kitchen with one protein can still offer distinct vegetable-centered
-    # ideas instead of repeating one ingredient bundle under several methods.
-    if len(proteins) == 1 and len(vegetables) > 1:
-        for vegetable in vegetables[1:]:
+            bundles = [[]]
+        for variant, bundle in enumerate(bundles):
             request = dict(engine_request)
-            request["protein_name"] = proteins[0].name
-            request["protein_state"] = _protein_state(proteins[0])
-            request["vegetable_names"] = [vegetable.name]
-            request["vegetable_name"] = vegetable.name
-            request["foundation_name"] = ""
-            concepts.append((request, proteins[0]))
+            request["protein_name"] = protein.name
+            request["protein_state"] = _protein_state(protein)
+            request["vegetable_names"] = bundle
+            request["vegetable_name"] = bundle[0] if bundle else ""
+            request["foundation_name"] = (
+                foundations[(protein_index + variant) % len(foundations)]
+                if foundations and variant != 1 else ""
+            )
+            request["cuisine_name"] = flavor_directions[(protein_index + variant) % len(flavor_directions)]
+            signature = (
+                _key(protein.name), tuple(_key(item) for item in bundle),
+                _key(request["foundation_name"]), _key(request["cuisine_name"]),
+            )
+            if signature in seen:
+                continue
+            seen.add(signature)
+            concepts.append((request, protein))
 
-    return concepts
+    # One-protein kitchens still deserve several substantially different ideas.
+    if len(proteins) == 1:
+        protein = proteins[0]
+        for index, vegetable in enumerate(vegetable_names[3:6], start=3):
+            request = dict(engine_request)
+            request.update({
+                "protein_name": protein.name,
+                "protein_state": _protein_state(protein),
+                "vegetable_names": [vegetable],
+                "vegetable_name": vegetable,
+                "foundation_name": foundations[index % len(foundations)] if foundations else "",
+                "cuisine_name": flavor_directions[index % len(flavor_directions)],
+            })
+            concepts.append((request, protein))
+
+    return concepts[:48]
 
 
 def _method_preferences(protein: ResolvedIngredient | None) -> tuple[str, ...]:
@@ -471,6 +510,233 @@ def _choose_concept_candidate(options, protein, used_methods):
         if method in supported:
             return supported[method]
     return next(iter(supported.values()), None)
+
+
+def _dish_family(candidate: dict) -> str:
+    method = _clean(candidate.get("cooking_method", candidate.get("strategy")))
+    protein = _key(candidate.get("protein"))
+    cuisine = _key(candidate.get("cuisine"))
+    if method == "skillet":
+        if "chinese" in cuisine:
+            return "stir_fry"
+        if "steak" in protein:
+            return "seared_dinner"
+        if "ground" in protein:
+            return "skillet_hash"
+        if "bean" in protein or candidate.get("protein_state") == "Canned":
+            return "pantry_skillet"
+        return "pan_supper"
+    if method == "soup":
+        return "bean_soup" if "bean" in protein else "rustic_soup"
+    if method == "casserole":
+        return "baked_casserole"
+    if method == "handheld":
+        return "wrap_or_sandwich"
+    return method or "meal"
+
+
+_FAMILY_LABELS = {
+    "stir_fry": "Stir-Fry",
+    "seared_dinner": "Seared Dinner",
+    "skillet_hash": "Skillet Hash",
+    "pantry_skillet": "Pantry Skillet",
+    "pan_supper": "Pan Supper",
+    "bean_soup": "Bean Soup",
+    "rustic_soup": "Rustic Soup",
+    "baked_casserole": "Casserole",
+    "wrap_or_sandwich": "Wrap or Sandwich",
+}
+
+
+def _selection_title(candidate: dict) -> str:
+    ingredients = [candidate.get("protein"), *str(candidate.get("vegetable") or "").split(" & ")]
+    ingredients = [_clean(item) for item in ingredients if _clean(item)]
+    if len(ingredients) > 1:
+        components = f"{', '.join(ingredients[:-1])} & {ingredients[-1]}"
+    else:
+        components = ingredients[0] if ingredients else "My Kitchen"
+    cuisine = _clean(candidate.get("cuisine"))
+    prefix = "" if cuisine in {"", "Comfort Food", "American"} else f"{cuisine} "
+    family = _FAMILY_LABELS.get(candidate.get("dish_family"), _clean(candidate.get("label")) or "Meal")
+    foundation = _clean(candidate.get("foundation"))
+    with_foundation = f" with {foundation}" if foundation and family not in {"Casserole", "Bean Soup", "Rustic Soup"} else ""
+    return f"{prefix}{components} {family}{with_foundation}"
+
+
+def _effort_label(score) -> str:
+    value = int(score or 0)
+    if value <= 3:
+        return "Very low"
+    if value <= 5:
+        return "Low"
+    if value <= 7:
+        return "Moderate"
+    return "High"
+
+
+def _effort_target(level) -> int:
+    return {"Very Low": 3, "Low": 5, "Medium": 7, "High": 10}.get(_clean(level), 6)
+
+
+_GENERATOR_REQUEST_FIELDS = {
+    "protein_name", "vegetable_name", "foundation_name", "cuisine_name",
+    "energy_level", "budget_level", "time_minutes", "servings", "max_results",
+    "vegetable_names", "protein_state", "available_items", "requested_items",
+    "available_equipment", "excluded_items", "planned_purchase_items",
+    "requested_method", "selected_extras", "component_forms", "meal_structure",
+    "inventory_lots", "eater_profiles", "use_all_cans", "cooking_for_kids",
+    "kid_theme",
+}
+
+
+def _generator_request(request: dict) -> dict:
+    """Keep selection-only context out of the recipe engine contract."""
+    return {key: value for key, value in request.items() if key in _GENERATOR_REQUEST_FIELDS}
+
+
+def _recent_match_penalty(candidate: dict, recent_meals: list) -> int:
+    penalty = 0
+    for age, meal in enumerate(recent_meals[:8]):
+        if not isinstance(meal, dict):
+            continue
+        weight = max(1, 8 - age)
+        if _key(meal.get("title")) == _key(candidate.get("title")):
+            penalty += 7 * weight
+        elif (
+            _key(meal.get("protein")) == _key(candidate.get("protein"))
+            and _key(meal.get("dish_family")) == _key(candidate.get("dish_family"))
+        ):
+            penalty += 4 * weight
+    return penalty
+
+
+def _score_make_candidate(candidate: dict, engine_request: dict) -> dict:
+    effort = int(candidate.get("effort_score") or 0)
+    effort_level = _clean(engine_request.get("effort_level") or engine_request.get("energy_level"))
+    effort_target = _effort_target(effort_level)
+    score = int(candidate.get("score") or 0)
+    reasons = []
+    if effort <= effort_target:
+        score += 12 + (effort_target - effort) * 3
+        reasons.append(f"{_effort_label(effort).lower()} effort for tonight")
+    else:
+        score -= (effort - effort_target) * 18
+        reasons.append(f"above tonight’s {_clean(effort_level).lower()}-effort target")
+
+    missing = len(candidate.get("inventory_need") or [])
+    # A missing staple with a trained omission/substitution should matter, but
+    # should not erase a much better culinary form (for example beans as soup).
+    score -= missing * 8
+    if not missing:
+        score += 12
+        reasons.append("uses what is already in My Kitchen")
+
+    opportunities = len(candidate.get("opportunities") or [])
+    if opportunities:
+        score += opportunities * 6
+        reasons.append("has a trained flavor or texture opportunity")
+
+    if _clean(candidate.get("foundation")):
+        score += 20
+        reasons.append("builds a complete meal with the available foundation")
+
+    protein = _key(candidate.get("protein"))
+    method = _clean(candidate.get("cooking_method", candidate.get("strategy")))
+    if ("bean" in protein and method == "soup") or ("ground" in protein and method == "skillet") or ("steak" in protein and method == "skillet"):
+        score += 20
+        reasons.append("the method fits the protein")
+    if candidate.get("protein_state") in {"Cooked", "Canned"} and effort_level in {"Very Low", "Low"}:
+        score += 8
+        reasons.append("starts with a cooked or canned protein")
+
+    selected = {_key(candidate.get("protein")), _key(candidate.get("foundation"))}
+    selected.update(_key(item) for item in str(candidate.get("vegetable") or "").split(" & "))
+    use_soon = []
+    for lot in engine_request.get("inventory_lots") or []:
+        if _key(lot.get("name")) not in selected:
+            continue
+        opened = bool(lot.get("opened_at"))
+        expiring = False
+        try:
+            expires = date.fromisoformat(_clean(lot.get("expiration_date")))
+            expiring = 0 <= (expires - date.today()).days <= 3
+        except (TypeError, ValueError):
+            pass
+        if opened or expiring:
+            use_soon.append(_clean(lot.get("name")))
+    if use_soon:
+        score += min(24, 10 * len(use_soon))
+        reasons.append(f"uses soon: {', '.join(use_soon)}")
+
+    score -= _recent_match_penalty(candidate, engine_request.get("recent_meals") or [])
+    if candidate.get("quantity_note") and "short" in _key(candidate.get("quantity_note")):
+        score -= 12
+    candidate["selection_score"] = score
+    candidate["selection_reasons"] = reasons
+    candidate["effort_label"] = _effort_label(effort)
+    return candidate
+
+
+def _select_assortment(pool: list[dict], limit: int) -> list[dict]:
+    """Choose a useful set, not merely the first N individually ranked meals."""
+    if not pool or limit <= 0:
+        return []
+    unique = {}
+    for candidate in pool:
+        signature = (
+            _key(candidate.get("protein")), _key(candidate.get("vegetable")),
+            _key(candidate.get("foundation")), _key(candidate.get("dish_family")),
+            _key(candidate.get("cuisine")),
+        )
+        current = unique.get(signature)
+        if current is None or candidate["selection_score"] > current["selection_score"]:
+            unique[signature] = candidate
+    remaining = list(unique.values())
+    selected = []
+
+    def add(candidate, badge):
+        candidate["selection_badge"] = badge
+        selected.append(candidate)
+        remaining.remove(candidate)
+
+    best = max(remaining, key=lambda item: item["selection_score"])
+    add(best, "Best fit")
+    if remaining and len(selected) < limit:
+        easiest = min(
+            remaining,
+            key=lambda item: (item.get("effort_score", 10), -item["selection_score"]),
+        )
+        add(easiest, "Lowest effort")
+    use_soon = [item for item in remaining if any("uses soon:" in reason for reason in item.get("selection_reasons") or [])]
+    if use_soon and len(selected) < limit:
+        add(max(use_soon, key=lambda item: item["selection_score"]), "Use soon")
+
+    while remaining and len(selected) < limit:
+        family_counts = {}
+        method_counts = {}
+        protein_counts = {}
+        bundles = set()
+        for item in selected:
+            family_counts[item.get("dish_family")] = family_counts.get(item.get("dish_family"), 0) + 1
+            method = item.get("cooking_method", item.get("strategy"))
+            method_counts[method] = method_counts.get(method, 0) + 1
+            protein_counts[_key(item.get("protein"))] = protein_counts.get(_key(item.get("protein")), 0) + 1
+            bundles.add((_key(item.get("protein")), _key(item.get("vegetable")), _key(item.get("foundation"))))
+
+        def assortment_value(item):
+            value = item["selection_score"]
+            value -= family_counts.get(item.get("dish_family"), 0) * 28
+            value -= method_counts.get(item.get("cooking_method", item.get("strategy")), 0) * 14
+            value -= protein_counts.get(_key(item.get("protein")), 0) * 16
+            if _key(item.get("protein")) not in protein_counts:
+                value += 100
+            bundle = (_key(item.get("protein")), _key(item.get("vegetable")), _key(item.get("foundation")))
+            if bundle in bundles:
+                value -= 45
+            return value
+
+        add(max(remaining, key=assortment_value), "Different direction")
+    return selected
 
 
 def _concept_title(candidate: dict) -> str:
@@ -609,9 +875,21 @@ def _candidate_view(candidate: dict) -> dict:
         "passive_minutes": candidate.get("passive_minutes", 0),
         "attention": candidate.get("attention_score", 0),
         "effort": candidate.get("effort_score", 0),
+        "effort_label": candidate.get("effort_label") or _effort_label(candidate.get("effort_score")),
         "score": candidate.get("score", 0),
-        "match": _match_text(int(candidate.get("score", 0))),
-        "summary": candidate.get("why") or "A practical meal built from My Kitchen.",
+        "selection_score": candidate.get("selection_score", candidate.get("score", 0)),
+        "selection_badge": candidate.get("selection_badge"),
+        "selection_reasons": list(candidate.get("selection_reasons") or []),
+        "dish_family": candidate.get("dish_family") or _dish_family(candidate),
+        "protein": candidate.get("protein"),
+        "cuisine": candidate.get("cuisine"),
+        "cooking_method": method,
+        "match": _match_text(int(candidate.get("selection_score", candidate.get("score", 0)))),
+        "summary": (
+            "; ".join(candidate.get("selection_reasons")[:2])
+            if candidate.get("selection_reasons")
+            else candidate.get("why") or "A practical meal built from My Kitchen."
+        ),
         "missing_items": list(candidate.get("inventory_need") or []),
         "ingredient_adjustments": [
             item for item in candidate.get("inventory_requirements") or []
@@ -724,7 +1002,7 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         *engine_request.get("available_items", []),
         *[name for name in extras if _key(name) in owned_keys],
     ]))
-    candidates = generate_candidates(**engine_request)
+    candidates = generate_candidates(**_generator_request(engine_request))
     if not candidates:
         raise APIContractError(
             "Those choices conflict with My Kitchen exclusions or the selected method."
@@ -751,27 +1029,32 @@ def _raw_candidates(payload: dict, db_path: str | Path):
         engine_request["foundation_name"],
     )):
         return snapshot, resolved, pending, [], engine_request
-    candidates = []
-    used_methods = set()
-    max_results = int(engine_request.get("max_results") or 10)
+    pool = []
+    max_results = min(6, max(1, int(engine_request.get("max_results") or 6)))
     for index, (concept_request, protein) in enumerate(
         _concept_requests(engine_request, resolved)
     ):
-        options = generate_candidates(**concept_request)
-        candidate = _choose_concept_candidate(options, protein, used_methods)
-        if not candidate:
-            continue
-        method = candidate.get("cooking_method", candidate.get("strategy", "meal"))
-        candidate["candidate_id"] = "-".join(filter(None, (
-            _slug(method),
-            _slug(candidate.get("protein", "pantry")),
-            str(index + 1),
-        )))
-        candidate["title"] = _concept_title(candidate)
-        used_methods.add(method)
-        candidates.append(candidate)
-        if len(candidates) >= max_results:
-            break
+        options = generate_candidates(**_generator_request(concept_request))
+        for option_index, candidate in enumerate(options):
+            method = candidate.get("cooking_method", candidate.get("strategy", "meal"))
+            if method not in _LIVE_PLANNER_METHODS:
+                continue
+            candidate["dish_family"] = _dish_family(candidate)
+            candidate["title"] = _selection_title(candidate)
+            candidate["candidate_id"] = "-".join(filter(None, (
+                _slug(method), _slug(candidate.get("protein", "pantry")),
+                _slug(candidate.get("vegetable")), _slug(candidate.get("foundation")),
+                _slug(candidate.get("cuisine")), str(index + 1), str(option_index + 1),
+            )))
+            pool.append(_score_make_candidate(candidate, engine_request))
+    # Do not manufacture variety by offering a meal wildly above tonight's
+    # stated capacity. A small stretch remains visible; a different kind of
+    # evening should not.
+    effort_ceiling = _effort_target(engine_request.get("effort_level")) + 4
+    within_effort = [item for item in pool if int(item.get("effort_score") or 0) <= effort_ceiling]
+    if within_effort:
+        pool = within_effort
+    candidates = _select_assortment(pool, max_results)
     return snapshot, resolved, pending, candidates, engine_request
 
 
@@ -852,6 +1135,12 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
         "serving_temperature": classification["serving_temperature"],
         "preparation_mode": classification["preparation_mode"],
         "meal_occasion": classification["meal_occasion"],
+        "dish_family": classification.get("dish_family"),
+        "protein": classification.get("protein"),
+        "cuisine": classification.get("cuisine"),
+        "cooking_method": classification.get("cooking_method"),
+        "effort": classification.get("effort"),
+        "effort_label": classification.get("effort_label"),
         "cost_estimate": None,
         "capability_status": "supported",
         "grocery_list": list(recipe.get("grocery_list") or []),
