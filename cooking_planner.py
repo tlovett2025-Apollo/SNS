@@ -207,10 +207,21 @@ def _comfort_sauce_finish(candidate: dict, fallback: str) -> str:
     broth = next(iter(_resolved_requirements_by_ko(candidate, family_codes=("broth_liquid",))), "")
     milk = next(iter(_resolved_requirements_by_ko(candidate, family_codes=("milk_cream",))), "")
     liquids = _join([broth, milk])
-    parts = [
-        f"Add {liquids or 'the prepared liquid'} to the skillet and scrape up the browned flavor.",
-        "Bring it to a gentle simmer.",
-    ]
+    acidic_vegetable = any(
+        "acidic" in set(get_ingredient_profile(name, "vegetable").physical_traits)
+        for name in _split_joined_items(candidate.get("vegetable"))
+    )
+    if milk and acidic_vegetable:
+        parts = [
+            f"Add {broth or 'the broth'} to the skillet and scrape up the browned flavor.",
+            "Bring it to a gentle simmer, then reduce the heat to low.",
+            f"Stir in {milk} gradually without letting the sauce boil; gentle heat helps it stay smooth around the tomatoes.",
+        ]
+    else:
+        parts = [
+            f"Add {liquids or 'the prepared liquid'} to the skillet and scrape up the browned flavor.",
+            "Bring it to a gentle simmer.",
+        ]
     thickener = next(iter(_resolved_requirements_by_ko(candidate, family_codes=("thickener",))), "")
     if thickener:
         parts.append(
@@ -464,6 +475,29 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
     ]
 
     ko_activities = [activity for activity in activities if activity.source == "ko"]
+    if strategy == "skillet" and protein:
+        seasoning_names = _resolved_requirements_by_ko(
+            candidate, family_codes=("dry_seasoning", "salt_seasoning")
+        )
+        selected_fat = next((
+            _clean(item) for item in candidate.get("selected_extras") or []
+            if "cooking_fat" in set(get_ingredient_profile(_clean(item), "ingredient").behavior_family_codes)
+        ), "")
+        prep_activity = next((
+            activity for activity in ko_activities
+            if activity.component == protein and activity.activity_type == "prep"
+        ), None)
+        cook_activity = next((
+            activity for activity in ko_activities
+            if activity.component == protein and activity.activity_type == "cook"
+        ), None)
+        if prep_activity and seasoning_names:
+            prep_activity.instruction = (
+                prep_activity.instruction.rstrip(". ")
+                + f". Season with {_join(seasoning_names)}."
+            )
+        if cook_activity and selected_fat:
+            cook_activity.instruction = f"Heat {selected_fat} in the skillet. {cook_activity.instruction}"
     if _clean(candidate.get("meal_structure")) == "composed_plate":
         for activity in ko_activities:
             if activity.component == foundation and activity.activity_type in {"cook", "reheat", "warm"}:
@@ -484,6 +518,147 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             if activity.component in names and _activity_id(activity) not in referenced
         ]
 
+    if strategy in {"braise", "oven_braise"}:
+        # A braise is one shared cooking environment. Ingredient KOs still own
+        # handling knowledge, but supporting proteins and vegetables join the
+        # main braise in form-aware stages instead of becoming parallel entrees.
+        state_changes = [activity for activity in ko_activities if activity.activity_type == "thaw"]
+        prep_activities = [activity for activity in ko_activities if activity.activity_type == "prep"]
+        finish_components = []
+        early_vegetables = []
+        late_vegetables = []
+        for name in vegetables:
+            profile = get_ingredient_profile(name, "vegetable")
+            traits = set(profile.behavior_traits) | set(profile.physical_traits)
+            if "finish-only-default" in traits or profile.add_stage == "finish":
+                finish_components.append(name)
+            elif profile.add_stage == "early" or "early-entry" in traits:
+                early_vegetables.append(name)
+            else:
+                late_vegetables.append(name)
+
+        supporting = protein_specs[1:]
+        raw_supporting = [
+            _clean(item.get("name")) for item in supporting
+            if _clean(item.get("state")).lower() not in {"cooked", "canned", "ready to eat"}
+        ]
+        ready_supporting = [
+            _clean(item.get("name")) for item in supporting
+            if _clean(item.get("state")).lower() in {"cooked", "canned", "ready to eat"}
+        ]
+        activities = [activities[0], *state_changes, *prep_activities]
+        prep_ids = [_activity_id(activity) for activity in prep_activities]
+        main_prep = next((item for item in prep_ids if item.endswith(f":{protein}")), "gather:meal")
+        heat_equipment = "oven" if strategy == "oven_braise" else "burner"
+
+        sauce_profile = get_sauce_profile(sauce)
+        if sauce_profile:
+            sauce_prep = sauce_profile.prep_instruction
+            selected_broth = next((
+                _clean(item) for item in candidate.get("selected_extras") or []
+                if "broth_liquid" in set(get_ingredient_profile(_clean(item), "ingredient").behavior_family_codes)
+            ), "") or _resolved_requirement_name(candidate, "Broth or water")
+            if selected_broth:
+                sauce_prep = sauce_prep.replace("broth or water", selected_broth)
+            activities.append(_planner_activity(
+                "mix braising sauce", sauce_prep,
+                minutes=max(2, sauce_profile.prep_minutes), human_busy=True,
+                stage="early", depends_on=prep_ids or ["gather:meal"], equipment="counter",
+            ))
+            brown_dependencies = ["mix braising sauce:meal"]
+        else:
+            brown_dependencies = [main_prep]
+
+        activities.append(_planner_activity(
+            "brown main protein",
+            (
+                f"Heat the braising vessel, add a thin coating of the selected cooking fat if needed, "
+                f"and brown {protein} on its broad sides. Work in batches only when the pieces would crowd the vessel."
+            ),
+            minutes=8, human_busy=True, stage="early", depends_on=brown_dependencies, equipment="burner",
+        ))
+        seasoning_names = _resolved_requirements_by_ko(
+            candidate, family_codes=("dry_seasoning", "salt_seasoning")
+        )
+        sauce_text = (
+            sauce_profile.cook_instruction if sauce_profile
+            else "Add enough broth or water to come one-third to halfway up the meat and scrape up the browned bits."
+        )
+        build_parts = [sauce_text]
+        if seasoning_names and not sauce_profile:
+            build_parts.append(f"Stir in {_join(seasoning_names)}.")
+        if early_vegetables:
+            build_parts.append(f"Add {_join(early_vegetables)} around the meat.")
+        build_parts.append(
+            "Bring the liquid to a gentle simmer, then cover the vessel."
+            if strategy == "braise" else
+            "Bring the liquid to a simmer, cover the vessel, and transfer it to a 325°F oven."
+        )
+        activities.append(_planner_activity(
+            "build braise", " ".join(build_parts), minutes=4, human_busy=True,
+            stage="early", depends_on=["brown main protein:meal"],
+            equipment="burner",
+        ))
+
+        main_profile = get_ingredient_profile(protein, "protein")
+        total_braise = max(60, int(main_profile.cook_minutes or 120))
+        final_window = 15 if raw_supporting or ready_supporting or late_vegetables or foundation else 0
+        first_window = max(1, total_braise - final_window)
+        activities.append(_planner_activity(
+            "covered braise",
+            (
+                f"Cook {protein} covered over very gentle heat for about {first_window} minutes. "
+                "Keep the liquid below a hard boil and add a small splash only if the vessel is becoming dry."
+            ),
+            minutes=first_window, human_busy=False, stage="middle",
+            depends_on=["build braise:meal"], equipment=heat_equipment,
+        ))
+        finish_dependency = "covered braise:meal"
+        if final_window:
+            additions = [*raw_supporting, *ready_supporting, *late_vegetables]
+            if foundation:
+                additions.append(foundation)
+            raw_instruction = (
+                f"Nestle {_join(raw_supporting)} into the simmering liquid and cook until safely done "
+                "(165°F for poultry sausage; 160°F for pork or beef sausage). "
+                if raw_supporting else ""
+            )
+            ready_instruction = (
+                f"Add {_join([*ready_supporting, *late_vegetables, foundation])} only for the final heating window so they hold their texture. "
+                if any([*ready_supporting, *late_vegetables, foundation]) else ""
+            )
+            activities.append(_planner_activity(
+                "finish braise together",
+                (
+                    raw_instruction + ready_instruction
+                    + f"Continue the covered braise for about {final_window} minutes. "
+                    + f"Check {protein}: a fork should enter easily and the meat should yield without springing back."
+                ),
+                minutes=final_window, human_busy=False, stage="late",
+                depends_on=[finish_dependency], equipment=heat_equipment,
+            ))
+            finish_dependency = "finish braise together:meal"
+
+        finish_text = (
+            "Uncover the braise. If the sauce is thin, move the meat to a plate and simmer the liquid briefly; "
+            "if it is already glossy and spoonable, leave it alone. Taste before adding more salt or heat."
+        )
+        if any(_clean(item).lower() == "hot sauce" for item in candidate.get("selected_extras") or []):
+            finish_text += " Add Hot sauce a little at a time, tasting before adding more."
+        if finish_components:
+            finish_text += f" Take the vessel off the heat, then add {_join(finish_components)} juice or wedges to taste."
+        activities.append(_planner_activity(
+            "finish braise", finish_text, minutes=3, human_busy=True, stage="finish",
+            depends_on=[finish_dependency], equipment="burner" if strategy == "braise" else "counter",
+        ))
+        activities.append(_planner_activity(
+            "finish and serve",
+            f"Slice or portion {protein}; distribute {_join([*[_clean(item.get('name')) for item in supporting], *vegetables, foundation])} through the meal and spoon the braising sauce over everything.",
+            minutes=3, human_busy=True, stage="finish",
+            depends_on=["finish braise:meal"], equipment="counter",
+        ))
+        return activities
+
     if strategy == "soup":
         # Soup is shared-vessel orchestration. Ingredient KOs still own prep
         # knowledge, but their separate skillet/pot cooking activities must not
@@ -499,6 +674,10 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
                 activity.component == protein
                 and "cooked" in protein_state.lower()
             )
+        ]
+        finish_only_activities = [
+            activity for activity in ko_activities
+            if activity.activity_type == "assemble" or activity.stage == "finish"
         ]
         for activity in prep_activities:
             if activity.component in vegetables:
@@ -532,7 +711,14 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             ))
             previous = ["optional sear:meal", *[item for item in prep_ids if item not in protein_prep]]
 
-        sturdy_components = _join([*vegetables, foundation])
+        finish_names = {activity.component for activity in finish_only_activities}
+        early_vegetables = [name for name in vegetables if name not in finish_names]
+        foundation_profile = get_ingredient_profile(foundation, "foundation") if foundation else None
+        foundation_is_late = any(
+            activity.component == foundation and activity.stage in {"late", "finish"}
+            for activity in ko_activities
+        )
+        sturdy_components = _join([*early_vegetables, "" if foundation_is_late else foundation])
         soup_liquid = _clean(candidate.get("soup_liquid")) or "broth or water"
         soup_liquid_quantity = _clean(candidate.get("soup_liquid_quantity")) or "enough to cover the ingredients"
         soup_liquid_measure = soup_liquid_quantity.split(",", 1)[0]
@@ -582,10 +768,9 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
                 or "The meat is fork-tender and yields without springing back."
             )
             simmer_instruction = (
-                f"Cover the pot and keep {protein or 'the soup ingredients'}, "
-                f"{_join(vegetables)}, and {foundation or 'the remaining ingredients'} "
+                f"Cover the pot and keep {_join([protein, *early_vegetables, '' if foundation_is_late else foundation]) or 'the soup ingredients'} "
                 f"together in the same pot. Gently simmer for about {simmer_minutes} minutes, "
-                f"then check the KO tenderness cue: {tenderness_cue} "
+                f"then check for tenderness: {tenderness_cue} "
                 "Crack the lid only if the soup needs to reduce."
             )
         elif raw_protein and "safety-critical" in protein_physical:
@@ -626,6 +811,16 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             equipment="burner",
         ))
         finish_dependency = "shared simmer:meal"
+        late_names = [*([foundation] if foundation_is_late else []), *finish_names]
+        cooking_late_names = [name for name in late_names if name not in finish_names]
+        if cooking_late_names:
+            activities.append(_planner_activity(
+                "late soup additions",
+                f"Stir in {_join(cooking_late_names)} and heat gently only until steaming hot so it keeps its texture.",
+                minutes=4, human_busy=True, stage="finish",
+                depends_on=[finish_dependency], equipment="burner",
+            ))
+            finish_dependency = "late soup additions:meal"
         if not raw_protein and "legume" in protein_families:
             energy_allows_blending = energy not in {"low", "very low", "barely breathing"}
             equipment = " ".join(candidate.get("available_equipment") or []).lower()
@@ -653,10 +848,15 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             ))
             finish_dependency = "texture soup:meal"
         soup_extras = _extras_instruction(candidate, strategy)
+        citrus_finish = " ".join(
+            activity.instruction for activity in finish_only_activities
+            if activity.component in finish_names
+        )
         activities.append(_planner_activity(
             "finish soup",
             " ".join(filter(None, (
                 "Taste the soup. Adjust salt and the other seasonings only as needed.",
+                citrus_finish,
                 soup_extras,
                 "Serve from the pot.",
             ))),
@@ -760,7 +960,7 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         plated_components = _join([foundation, *vegetables]) or "the cooked components"
         protein_label = _join(protein_names)
         protein_has_slice = any(
-            activity.component in protein_names and activity.activity_type == "slice"
+            activity.component in protein_names and activity.activity_type in {"slice", "rest"}
             for activity in ko_activities
         )
         if protein_has_slice:
@@ -778,13 +978,21 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
                 f"Spoon the finished vegetables and sauce into bowls, add {protein_label}, and serve immediately."
             )
         elif meal_structure == "integrated" and strategy == "skillet":
-            service_instruction = (
-                f"Divide {foundation} among plates or shallow bowls, then spoon everything in the skillet over it and serve immediately."
-                if foundation and not any(
+            foundation_is_separate = foundation and not any(
                     _clean(candidate.get("component_forms", {}).get(foundation)).lower() == value
                     for value in ("canned", "cooked", "ready to eat")
-                ) else
+                )
+            sliced_protein = (
+                f"Slice the rested {protein_label}. " if protein_has_slice else ""
+            )
+            service_instruction = (
+                f"{sliced_protein}Divide {foundation} among plates or shallow bowls, add {protein_label}, "
+                "then spoon the vegetables and pan sauce over everything and serve immediately."
+                if foundation_is_separate else
                 "Spoon everything in the skillet onto plates or into shallow bowls and serve immediately."
+                if one_pan_ground_meat else
+                f"{sliced_protein}Add {protein_label} to the skillet, coat it with the vegetables and sauce, "
+                "then serve immediately."
             )
         else:
             service_instruction = (
@@ -894,7 +1102,7 @@ def consolidate_kitchen_activities(
             needs_cutting_allowance = any(
                 _clean(getattr(activity, "component", "")).lower() in timed_components
                 and re.search(
-                    r"\b(?:slice|sliced|slicing|chop|chopped|chopping|dice|diced|dicing)\b",
+                    r"\b(?:cut|cutting|slice|sliced|slicing|chop|chopped|chopping|dice|diced|dicing)\b",
                     _clean(getattr(activity, "instruction", "")).lower(),
                 )
                 for activity in selected
@@ -902,6 +1110,8 @@ def consolidate_kitchen_activities(
 
             if needs_cutting_allowance:
                 calculated_minutes += 1
+            if protein and vegetables and _clean(candidate.get("foundation")):
+                calculated_minutes = max(5, calculated_minutes)
         heading = "Prepare these first:" if activity_type == "launch prep" else "Ingredient Prep:"
         formatted_instructions = "\n\n".join(
             f"- {instruction}." for instruction in instructions
@@ -927,12 +1137,19 @@ def consolidate_kitchen_activities(
     strategy = _strategy(candidate)
     sauce_profile = get_sauce_profile(sauce)
     sauce_instruction = (
-        "" if strategy == "soup"
+        "" if strategy in {"soup", "braise", "oven_braise"}
         else _comfort_sauce_prep(candidate or {}, sauce_profile.prep_instruction)
         if sauce_profile and sauce_profile.name == "simple comfort pan sauce"
         else sauce_profile.prep_instruction if sauce_profile
         else (f"measure and mix {sauce}" if sauce else "")
     )
+    if sauce_profile and sauce_profile.name == "BBQ Sauce":
+        selected_broth = next((
+            _clean(item) for item in (candidate or {}).get("selected_extras") or []
+            if "broth_liquid" in set(get_ingredient_profile(_clean(item), "ingredient").behavior_family_codes)
+        ), "")
+        if selected_broth:
+            sauce_instruction = sauce_instruction.replace("broth or water", selected_broth)
     if general_prep or sauce_instruction:
         external_prep_dependencies = [
             dependency
@@ -2109,53 +2326,6 @@ def _format_action_substeps(message: str) -> str:
     return "\n\n".join(substeps)
 
 
-def _wait_explanation(
-    schedule: List[ScheduledActivity],
-    start_minute: int,
-    end_minute: int,
-    next_activity: KitchenActivity,
-) -> str:
-    """Explain deliberate slack instead of presenting it as unexplained idleness."""
-    ongoing = [
-        item for item in schedule
-        if not item.activity.human_busy
-        and item.start_minute < end_minute
-        and item.end_minute > start_minute
-    ]
-    progress = ""
-    if ongoing:
-        phases = {_clean(item.activity.activity_type).lower() for item in ongoing}
-        current = ongoing[-1].activity
-        component = _clean(current.component)
-        activity_type = _clean(current.activity_type).lower()
-        if len(phases & {"pressurize", "pressure cook", "natural release"}) > 1:
-            progress = f"The {component.lower()} is in its longest unattended pressure-cooker window. "
-        elif activity_type == "pressurize":
-            progress = f"The {component.lower()} is coming to pressure. "
-        elif activity_type == "pressure cook":
-            progress = f"The {component.lower()} is pressure-cooking. "
-        elif activity_type == "natural release":
-            progress = f"The {component.lower()} is completing its natural pressure release. "
-        elif component and component != "meal":
-            progress = f"The {component.lower()} continues cooking without your attention. "
-
-    if next_activity.activity_type == "thaw":
-        component = _clean(next_activity.component).lower() or "protein"
-        reason = (
-            f"We are timing the defrosting so the {component} can move directly from thawing "
-            "into prep and cooking instead of sitting while the other components catch up."
-        )
-    else:
-        reason = (
-            "This pause keeps the next component from finishing too early while the rest of "
-            "the meal catches up."
-        )
-    return (
-        f"Minutes {start_minute}–{end_minute}: {progress}{reason} "
-        f"Begin the next step at minute {end_minute}."
-    )
-
-
 def generate_human_plan_items(candidate: dict) -> List[dict]:
     """Render interleaved information and actions for the public cooking plan."""
 
@@ -2173,8 +2343,12 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
     if _clean(candidate.get("quantity_note")):
         items.append({"kind": "info", "text": _clean(candidate.get("quantity_note"))})
 
+    protein_components = [
+        item.get("name") for item in candidate.get("proteins") or []
+        if isinstance(item, dict)
+    ] or [candidate.get("protein")]
     components = _join([
-        candidate.get("protein"),
+        *protein_components,
         *_split_joined_items(candidate.get("vegetable")),
         candidate.get("foundation"),
     ])
@@ -2253,17 +2427,6 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
                 message = f"{transition} {message}"
             else:
                 message = f"{message} {transition}"
-        if (
-            activity.human_busy
-            and previous_action_end is not None
-            and item.start_minute > previous_action_end
-        ):
-            items.append({
-                "kind": "info",
-                "text": _wait_explanation(
-                    schedule, previous_action_end, item.start_minute, activity
-                ),
-            })
         items.append({
             "kind": "action" if activity.human_busy else "info",
             "text": f"{time_window}: {(_format_action_substeps(message) if activity.human_busy else ' '.join(message.split()))}",

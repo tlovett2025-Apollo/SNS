@@ -137,6 +137,15 @@ FAMILY_LIBRARY: Dict[str, BehaviorFamily] = {
             "A fork enters easily and the meat yields without springing back.",
             "A short hot cook leaves the meat safe but unpleasantly tough.",
             "Add liquid, cover, lower the heat, and continue until tender.", "excellent",
+        ), method(
+            "oven_braise", ("fresh raw", "frozen raw"), "covered moderate oven",
+            "rich oven-braising liquid", 4, 150, 15, .15, "oven", "early",
+            "Cut {name} into even pieces when appropriate; thaw before browning.",
+            "Brown {name}, add braising liquid, cover tightly, and cook in a 325°F oven until fork-tender.",
+            "Fork-tender meat with connective tissue softened into the cooking liquid.",
+            "A fork enters easily and the meat yields without springing back.",
+            "An uncovered or dry vessel leaves the meat tough and can scorch the sauce.",
+            "Add hot liquid, cover tightly, and continue at 325°F until tender.", "excellent",
         ), READY_REHEAT),
         ("long-lead", "wet-cook"),
     ),
@@ -825,7 +834,7 @@ for _family_code in (
     _add_family_method(_family_code, grill_method(
         ("fresh", "fresh raw", "frozen"), 5, 10, 6, "middle",
         "Prepare {name} in pieces large enough for the grates, or use skewers or a grill basket; dry, oil lightly, and season.",
-        "Grill {name} over medium to medium-high heat, turning after clear marks form, until its KO endpoint is reached.",
+        "Grill {name} over medium to medium-high heat, turning after clear marks form, until its stated doneness cue is reached.",
         "Defined pieces with browned grill marks and an appropriately tender center.",
         "The thickest pieces are tender at the center while still holding their intended shape.",
         "Small pieces fall through grates; excess oil causes flare-ups; sugary finishes burn.",
@@ -1600,6 +1609,10 @@ def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> Res
             "brief_heat", "reheat", "assemble",
         }
         casserole_methods = {"roast", "bake", "reheat", "assemble", "simmer"}
+        oven_braise_methods = {
+            "oven_braise", "roast", "bake", "reheat", "assemble", "simmer",
+            "saute", "saute_steam", "bloom", "wilt", "brief_heat",
+        }
         braise_methods = {
             "braise", "simmer", "saute", "saute_steam", "bloom", "wilt",
             "brief_heat", "reheat", "assemble", "skillet",
@@ -1613,6 +1626,8 @@ def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> Res
                 strategy_key == "soup" and candidate.method in soup_methods
             ) or (
                 strategy_key == "casserole" and candidate.method in casserole_methods
+            ) or (
+                strategy_key == "oven_braise" and candidate.method in oven_braise_methods
             ) or (
                 strategy_key == "braise" and candidate.method in braise_methods
             ) or (

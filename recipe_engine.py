@@ -13,6 +13,7 @@ from cooking_planner import (
 )
 from culinary_opportunities import discover_opportunities, serialize_opportunities
 from sauce_profiles import SauceIngredient, get_sauce_profile
+from recipe_validation import validate_recipe
 from math import ceil
 
 
@@ -148,11 +149,16 @@ def _quarter_pound_up(ounces):
     return ceil(max(0, ounces) / 4.0) / 4.0
 
 
-def _quantity_plan(components, component_forms, inventory_lots, servings, eater_profiles, use_all_cans):
+def _quantity_plan(
+    components, component_forms, inventory_lots, servings, eater_profiles,
+    use_all_cans, component_roles=None,
+):
     """Build practical cook amounts; package fractions stay estimates, never fake exact counts."""
     effective = _effective_portions(servings, eater_profiles)
     lots = {_key(item.get("name")): item for item in (inventory_lots or []) if isinstance(item, dict)}
     forms = {_key(name): _key(form) for name, form in (component_forms or {}).items()}
+    roles = {_key(name): _key(role) for name, role in (component_roles or {}).items()}
+    vegetable_count = max(1, sum(role == "vegetable" for role in roles.values()))
     plan = {}
     notes = []
     for name in components:
@@ -167,6 +173,11 @@ def _quantity_plan(components, component_forms, inventory_lots, servings, eater_
         family = behavior.primary_family
         basis = family.portion_basis if family else "flexible"
         amount = family.portion_per_standard if family else 1.0
+        role = roles.get(key, "")
+        # Supporting proteins flavor or stretch the main item. They must not
+        # silently become another full entree merely because their KO normally
+        # portions them as a main protein.
+        amount *= .25 if role == "supporting" else .15 if role == "accent" else 1.0
         stretchable = bool(family and family.stretchable)
         is_canned = "canned" in form or unit in {"can", "cans"}
         if is_canned:
@@ -188,10 +199,14 @@ def _quantity_plan(components, component_forms, inventory_lots, servings, eater_
         elif basis == "pieces":
             pieces = max(1, ceil(effective * amount))
             label = family.portion_label
-            plan[key] = {"display": f"{pieces} {label}{'' if pieces == 1 else 's'}"}
+            plan[key] = {
+                "display": f"{pieces} {label}{'' if pieces == 1 else 's'}",
+                "planned": pieces, "available": available,
+                "shortfall": max(0, pieces - available) if available else 0,
+            }
             if unit in {"piece", "pieces"} and available and available < pieces:
                 notes.append(
-                    f"Only {available:g} {label}{'s are' if available != 1 else ' is'} recorded for {pieces} planned. Divide the cooked amount across the meal or use a KO-approved stretch component."
+                    f"Only {available:g} {label}{'s are' if available != 1 else ' is'} recorded for {pieces} planned. Slice or divide it through the meal, or add a bean, grain, or vegetable that fits the dish."
                 )
         elif basis == "dry_cups":
             cups = ceil(effective * amount * 4) / 4.0
@@ -201,7 +216,7 @@ def _quantity_plan(components, component_forms, inventory_lots, servings, eater_
             plan[key] = {"display": f"about {cups:g} cup{'s' if cups != 1 else ''}"}
         elif basis == "weight_oz":
             pounds = _quarter_pound_up(effective * amount)
-            plan[key] = {"display": f"{pounds:g} lb"}
+            plan[key] = {"display": f"{pounds:g} lb", "planned": pounds, "available": available}
             available_pounds = available if unit in {"lb", "pound", "pounds"} else 0
             package_weight = float(lot.get("package_weight_oz") or 0)
             if unit in {"package", "packages"} and package_weight:
@@ -214,6 +229,11 @@ def _quantity_plan(components, component_forms, inventory_lots, servings, eater_
                 notes.append(
                     f"The {available:g}-package estimate for {name} is approximate because the original package weight is unknown."
                 )
+        elif role == "vegetable":
+            # Produce varies in physical size, so cups prepared are more useful
+            # and more honest than invented piece counts.
+            cups = ceil(max(.5, effective * .5 / vegetable_count) * 4) / 4.0
+            plan[key] = {"display": f"about {cups:g} cup{'s' if cups != 1 else ''} prepared"}
     note = " ".join(dict.fromkeys(notes))
     return effective, plan, note
 
@@ -346,6 +366,10 @@ def _method_is_eligible(method, available, foundation, equipment):
         return _inventory_has_ko(
             available, physical_traits=("collagen-rich",), relationship_traits=("wet-cook",)
         )
+    if method == "oven_braise":
+        return _inventory_has_ko(
+            available, physical_traits=("collagen-rich",), relationship_traits=("wet-cook",)
+        )
     if method == "casserole":
         return bool(foundation) or _inventory_has_ko(
             available, culinary_functions=("sauce-builder", "thickens", "adds-richness")
@@ -366,7 +390,7 @@ def _serving_styles(method):
     """Return presentation choices independently from cooking method."""
     if method == "soup":
         return ["bowl", "cup"]
-    if method == "braise":
+    if method in {"braise", "oven_braise"}:
         return ["plate", "bowl"]
     if method == "handheld":
         return ["handheld", "plate"]
@@ -434,6 +458,10 @@ def generate_candidates(
     selected_components = _unique([*proteins, *_clean(vegetable).split(" & "), foundation])
     extras = _unique(list(selected_extras or []))
     component_forms = dict(component_forms or {})
+    if foundation and not _clean(component_forms.get(foundation)):
+        foundation_behavior = resolve_behavior(foundation, "foundation", db_path=DB_PATH)
+        if foundation_behavior.primary_family and foundation_behavior.primary_family.portion_basis == "cans":
+            component_forms[foundation] = "Canned"
     planned_purchase_keys = {_key(item) for item in (planned_purchase_items or [])}
     available = _unique(list(available_items or []) + [
         item for item in selected_components if _key(item) not in planned_purchase_keys
@@ -461,6 +489,7 @@ def generate_candidates(
         {"strategy": "grill", "cooking_method": "grill", "label": "Grill", "title": f"Grilled {cuisine} {base}", "minutes": 25, "energy": "Medium", "energy_rank": 2, "budget": "Moderate", "budget_rank": 2, "why": "direct high-heat cooking with simple sides"},
         {"strategy": "cold_meal", "cooking_method": "cold_meal", "label": "Cold Meal", "title": f"Cold {cuisine} {base} Meal", "minutes": 12, "energy": "Very Low", "energy_rank": 0, "budget": "Budget", "budget_rank": 1, "why": "no-cook or low-cook assembly"},
         {"strategy": "braise", "cooking_method": "braise", "label": "Stovetop Braise", "title": f"{cuisine} {base} Stovetop Braise", "minutes": 120, "energy": "Low", "energy_rank": 1, "budget": "Moderate", "budget_rank": 2, "why": "a patient covered cook makes a collagen-rich cut tender"},
+        {"strategy": "oven_braise", "cooking_method": "oven_braise", "label": "Oven Braise", "title": f"{cuisine} {base} Oven Braise", "minutes": 150, "energy": "Low", "energy_rank": 1, "budget": "Moderate", "budget_rank": 2, "why": "a covered moderate oven makes a collagen-rich cut tender"},
     ]
     requested = _clean(requested_method)
     requested_methods = {requested} if requested else set()
@@ -469,6 +498,8 @@ def generate_candidates(
     # forced through quick-skillet grammar.
     if requested == "skillet":
         requested_methods.add("braise")
+    if requested == "casserole":
+        requested_methods.add("oven_braise")
     methods = [
         method for method in methods
         if _method_is_eligible(method["cooking_method"], method_resources, foundation, equipment)
@@ -496,16 +527,16 @@ def generate_candidates(
         if incompatible:
             continue
         is_soup = method["cooking_method"] == "soup"
-        is_braise = method["cooking_method"] == "braise"
+        is_braise = method["cooking_method"] in {"braise", "oven_braise"}
         is_grill = method["cooking_method"] == "grill"
         method_sauce = "rustic broth soup" if is_soup else "simple sauce" if is_grill else sauce
         method_ingredients = (
             _soup_ingredients(method_resources)
-            if is_soup or is_braise
+            if is_soup
             else (
                 get_sauce_profile(method_sauce).ingredients
                 if get_sauce_profile(method_sauce)
-                else []
+                else (_soup_ingredients(method_resources) if is_braise else [])
             )
         )
         fallback_requirements = (
@@ -527,6 +558,14 @@ def generate_candidates(
             for item in [*method_ingredients, *requested_requirements]
         ]
         ingredient_checks = component_checks + requirement_checks
+        for check in ingredient_checks:
+            check["planned_purchase"] = _key(check.get("name")) in planned_purchase_keys
+            # Selecting an extra in Build My Meal is an explicit request to use
+            # it, even when that ingredient is optional in the generic profile.
+            if _key(check.get("name")) in {_key(item) for item in extras}:
+                check["required"] = True
+                if check["status"] == "Omit":
+                    check.update(status="Need", omission_consequence=None)
 
         # A structural ingredient and a supporting seasoning may express the
         # same flavor identity.  KO attributes—not ingredient-name branches—
@@ -570,14 +609,38 @@ def generate_candidates(
         c["serving_style"] = c["serving_styles"][0]
         c["experience_overlays"] = _experience_overlays(cooking_for_kids, kid_theme)
         c["combination_reasons"] = combination_reasons
+        component_roles = {
+            **{name: _clean(protein_roles.get(name)) or ("main" if name == protein else "supporting") for name in proteins},
+            **{name: "vegetable" for name in _clean(vegetable).split(" & ") if _clean(name)},
+            **({foundation: "foundation"} if foundation else {}),
+        }
         effective, quantity_plan, quantity_note = _quantity_plan(
             selected_components, component_forms, inventory_lots, servings,
-            eater_profiles, use_all_cans,
+            eater_profiles, use_all_cans, component_roles,
         )
+        primary_quantity = quantity_plan.get(_key(protein), {})
+        if (
+            _clean(meal_structure) == "composed_plate"
+            and float(primary_quantity.get("shortfall") or 0) > 0
+        ):
+            # A composed plate promises a discrete entree portion to each
+            # diner. Do not offer it when the recorded main protein cannot
+            # physically satisfy that promise; integrated structures may
+            # instead distribute a smaller amount transparently.
+            continue
         c["effective_portions"] = effective
         c["quantity_plan"] = quantity_plan
         c["quantity_note"] = quantity_note
         c["inventory_lots"] = list(inventory_lots or [])
+        for check in component_checks:
+            planned = quantity_plan.get(_key(check.get("name")), {})
+            shortfall = float(planned.get("shortfall") or 0)
+            if shortfall > 0:
+                check.update(
+                    status="Short", required=True, quantity_shortfall=shortfall,
+                    planned_quantity=planned.get("planned"), available_quantity=planned.get("available"),
+                )
+                needed.append(f"{check['name']} ({shortfall:g} more)")
 
         protein_profiles = [
             (name, get_ingredient_profile(name, "protein"), _clean(protein_states.get(name)) or (protein_state if name == protein else "Fresh Raw"))
@@ -669,6 +732,12 @@ def generate_candidates(
         c["active_minutes"] = sum(item.attention_minutes for item in schedule)
         c["passive_minutes"] = max(0, c["minutes"] - c["active_minutes"])
         c["effort_score"] = calculate_effort_score(c, schedule)
+        active_ratio = c["active_minutes"] / c["minutes"] if c["minutes"] else 1
+        c["energy"] = (
+            "Low" if c["active_minutes"] <= 30 and active_ratio <= .35
+            else "Medium" if c["active_minutes"] <= 40 and active_ratio <= .65
+            else "High"
+        )
         feasibility = assess_time_feasibility(c, time_limit)
         c.update(feasibility)
         if not c["time_feasible"]:
@@ -686,6 +755,9 @@ def build_recipe_from_candidate(candidate):
     action_steps = [item["text"] for item in plan_items if item["kind"] == "action"]
     activity_debug = summarize_cooking_activities(candidate)
     lane_debug = summarize_kitchen_lanes(candidate)
+    validation = validate_recipe(candidate, plan_items)
+    if validation["errors"]:
+        raise ValueError("Recipe validation failed: " + " ".join(validation["errors"]))
 
     return {
         "name": candidate.get("title", "Generated Meal"),
@@ -703,6 +775,7 @@ def build_recipe_from_candidate(candidate):
         "serving_styles": list(candidate.get("serving_styles") or []),
         "experience_overlays": list(candidate.get("experience_overlays") or []),
         "quantity_note": candidate.get("quantity_note") or "",
+        "validation": validation,
         "summary": f"{candidate.get('label')} · {candidate.get('energy')} energy · {candidate.get('budget')} · {candidate.get('minutes')} min · serves {candidate.get('servings', 4)}",
     }
 

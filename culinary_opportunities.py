@@ -69,7 +69,7 @@ def discover_opportunities(candidate: dict) -> List[Opportunity]:
     if browning:
         discovered.append(_opportunity(
             "ko_dry_browning", "Dry-Browning Opportunity", "flavor",
-            "A KO can brown before liquid enters, creating concentrated flavor for the rest of the meal.",
+            "An ingredient can brown before liquid enters, creating concentrated flavor for the rest of the meal.",
             browning,
         ))
 
@@ -77,7 +77,7 @@ def discover_opportunities(candidate: dict) -> List[Opportunity]:
     if carriers:
         discovered.append(_opportunity(
             "ko_flavor_carrier", "Flavor-Carrier Opportunity", "flavor",
-            "A foundation KO can carry broth, aromatics, sauce, or finishing flavor instead of remaining isolated.",
+            "A foundation can carry broth, aromatics, sauce, or finishing flavor instead of remaining isolated.",
             carriers,
         ))
 
@@ -88,7 +88,7 @@ def discover_opportunities(candidate: dict) -> List[Opportunity]:
     if late:
         discovered.append(_opportunity(
             "ko_late_addition", "Late-Addition Opportunity", "texture",
-            "A KO retains more aroma, color, or texture when it joins near the finish.",
+            "An ingredient retains more aroma, color, or texture when it joins near the finish.",
             late,
         ))
 
@@ -98,7 +98,7 @@ def discover_opportunities(candidate: dict) -> List[Opportunity]:
         matched = list(dict.fromkeys([anchors[0], depth[0]]))
         discovered.append(_opportunity(
             "ko_savory_depth_pairing", "Savory-Depth Opportunity", "flavor relationship",
-            "A savory-depth KO can reinforce the main protein without requiring a conventional named pairing.",
+            "A savory ingredient can reinforce the main protein without requiring a conventional named pairing.",
             matched,
         ))
 
@@ -106,7 +106,7 @@ def discover_opportunities(candidate: dict) -> List[Opportunity]:
     if anchors and stretchers:
         discovered.append(_opportunity(
             "ko_protein_stretch", "Protein-Stretch Opportunity", "economy",
-            "A protein-contributing KO can increase meal volume while keeping the main protein in the anchor role.",
+            "A protein-contributing ingredient can increase meal volume while keeping the main protein in the anchor role.",
             [anchors[0], stretchers[0]],
         ))
 

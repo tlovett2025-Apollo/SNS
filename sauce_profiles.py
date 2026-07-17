@@ -98,10 +98,54 @@ SIMPLE_COMFORT_PAN_SAUCE = SauceProfile(
 )
 
 
+BBQ_BRAISING_SAUCE = SauceProfile(
+    name="BBQ Sauce",
+    ingredients=[
+        SauceIngredient(
+            "Broth or water", "1–1 1/2 cups, or enough to come one-third to halfway up the meat",
+            substitutes=("Chicken broth", "Beef broth", "Vegetable broth", "Water"),
+        ),
+        SauceIngredient("BBQ sauce", "1/2 cup"),
+        SauceIngredient(
+            "Worcestershire sauce", "1 tablespoon", pantry_optional=True,
+            omission_consequence="The braise will be slightly less savory but will still work.",
+        ),
+        SauceIngredient(
+            "Mustard", "1 tablespoon", pantry_optional=True,
+            omission_consequence="The sauce will have less tang but will still work.",
+        ),
+        SauceIngredient(
+            "Ketchup", "2 tablespoons", pantry_optional=True,
+            omission_consequence="The BBQ sauce already supplies sweetness and tomato flavor.",
+        ),
+        SauceIngredient(
+            "Hot sauce", "to taste", pantry_optional=True,
+            omission_consequence="Serve the finished braise without additional heat.",
+        ),
+        SauceIngredient("Garlic powder", "1/2 teaspoon", pantry_optional=True),
+        SauceIngredient("Onion powder", "1/2 teaspoon", pantry_optional=True),
+        SauceIngredient("Black pepper", "1/4 teaspoon", pantry_optional=True),
+    ],
+    prep_instruction=(
+        "Whisk 1/2 cup BBQ sauce with the broth or water. Add 1 tablespoon each Worcestershire sauce "
+        "and mustard and 2 tablespoons ketchup when using, plus the measured garlic powder, onion powder, and black pepper. "
+        "Keep the hot sauce for the final taste."
+    ),
+    cook_instruction=(
+        "Pour the measured BBQ braising liquid around the browned meat, using only enough to come "
+        "one-third to halfway up it. Scrape up the browned bits, cover, and cook gently."
+    ),
+    prep_minutes=3,
+    finish_minutes=2,
+)
+
+
 def get_sauce_profile(name: str):
     key = str(name or "").strip().lower()
     if key == "simple stir-fry sauce" or "stir-fry" in key:
         return SIMPLE_STIR_FRY_SAUCE
     if key == "simple comfort pan sauce" or "gravy or cream" in key:
         return SIMPLE_COMFORT_PAN_SAUCE
+    if key == "bbq sauce" or "barbecue" in key:
+        return BBQ_BRAISING_SAUCE
     return None

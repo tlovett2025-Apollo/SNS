@@ -36,10 +36,11 @@ _MEAL_SHAPES = {
     "cold_meal": "plate",
     "grill": "plate",
     "braise": "plate",
+    "oven_braise": "plate",
 }
 
 _LIVE_PLANNER_METHODS = {
-    "skillet", "casserole", "soup", "handheld", "grill", "braise"
+    "skillet", "casserole", "soup", "handheld", "grill", "braise", "oven_braise"
 }
 
 _BUILDER_METHODS = (
@@ -47,7 +48,7 @@ _BUILDER_METHODS = (
     {"id": "soup", "label": "Soup or Stew", "description": "A liquid-led one-vessel meal; SNS chooses the suitable owned pot."},
     {"id": "casserole", "label": "Oven Bake", "description": "An oven-baked meal assembled in one baking dish."},
     {"id": "handheld", "label": "Handheld", "description": "Components cooked as needed, then assembled with bread or a wrap."},
-    {"id": "grill", "label": "Grill", "description": "Direct and indirect grill zones with KO-specific doneness, flare-up, basket, and resting guidance."},
+    {"id": "grill", "label": "Grill", "description": "Direct and indirect grill zones with ingredient-specific doneness, flare-up, basket, and resting guidance."},
 )
 
 _BUILDER_EXTRA_NAMES = (
@@ -578,11 +579,13 @@ def _dish_family(candidate: dict) -> str:
             return "hash"
         if family_code in {"legume", "prepared_legume", "ready_protein"}:
             return "pantry_supper"
-        return "one_pot_supper"
+        return "skillet_supper" if candidate.get("foundation") else "one_pot_supper"
     if method == "soup":
         return "bean_soup" if family_code in {"legume", "prepared_legume"} else "rustic_soup"
     if method == "braise":
         return "slow_braise"
+    if method == "oven_braise":
+        return "oven_braise"
     if method == "casserole":
         return "baked_casserole"
     if method == "handheld":
@@ -596,9 +599,11 @@ _FAMILY_LABELS = {
     "hash": "Hash",
     "pantry_supper": "Pantry Supper",
     "one_pot_supper": "One-Pot Supper",
+    "skillet_supper": "Skillet Supper",
     "bean_soup": "Bean Soup",
     "rustic_soup": "Rustic Soup",
     "slow_braise": "Slow Braise",
+    "oven_braise": "Oven Braise",
     "baked_casserole": "Casserole",
     "wrap_or_sandwich": "Wrap or Sandwich",
     "composed_plate": "Composed Plate",
@@ -625,7 +630,7 @@ def _production_strategy(candidate: dict) -> str:
 
 def _heat_source(candidate: dict) -> str:
     method = _clean(candidate.get("cooking_method", candidate.get("strategy")))
-    if method == "casserole":
+    if method in {"casserole", "oven_braise"}:
         return "oven"
     if method == "handheld":
         return "mixed"
@@ -749,7 +754,7 @@ def _score_make_candidate(candidate: dict, engine_request: dict) -> dict:
         relationships = set(protein_behavior.primary_family.relationship_traits)
         if method == "soup" and "soup-friendly" in relationships:
             score += 18
-            reasons.append("the protein's KO is especially well suited to soup")
+            reasons.append("the protein is especially well suited to soup")
     if candidate.get("protein_state") in {"Cooked", "Canned"} and effort_level in {"Very Low", "Low"}:
         score += 8
         reasons.append("starts with a cooked or canned protein")
@@ -904,6 +909,7 @@ def _concept_title(candidate: dict) -> str:
         "soup": "Soup",
         "handheld": "Wrap or Sandwich",
         "braise": "Stovetop Braise",
+        "oven_braise": "Oven Braise",
     }
     return f"{component_text} {endings.get(method, 'Meal')}"
 
@@ -992,6 +998,10 @@ def _candidate_ingredient_lines(
         requirement = requirements.get(key)
         planned = (candidate.get("quantity_plan") or {}).get(key, {})
         quantity = _clean(planned.get("display")) or (_clean(requirement.get("quantity")) if requirement else "")
+        if float(planned.get("shortfall") or 0) > 0:
+            available = float(planned.get("available") or 0)
+            target = float(planned.get("planned") or 0)
+            quantity = f"{available:g} on hand · {target:g} planned"
         if quantity:
             details.append(quantity)
 
@@ -1362,7 +1372,7 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
     missing_items = [
         item["name"]
         for item in recipe.get("inventory_requirements") or []
-        if item.get("status") == "Need" and item.get("required", True)
+        if item.get("status") in {"Need", "Short"} and item.get("required", True)
     ]
     return {
         "api_version": CONTRACT_VERSION,
@@ -1402,6 +1412,7 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
             if item.get("status") in {"Substitute", "Omit"}
         ],
         "quantity_note": recipe.get("quantity_note") or "",
+        "recipe_validation": recipe.get("validation") or {},
         "serving_styles": list(recipe.get("serving_styles") or []),
         "serving_style": candidate.get("serving_style"),
         "build_provenance": provenance,

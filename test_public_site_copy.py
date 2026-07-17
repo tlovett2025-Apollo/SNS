@@ -42,7 +42,7 @@ def test_recipe_page_exposes_inventory_resolutions_and_preserves_substep_breaks(
     css = (PUBLIC_FLOW.parent / "sns-flow.css").read_text(encoding="utf-8")
 
     assert "data-kitchen-check" in recipe_page
-    assert '["Need", "Substitute", "Omit"].includes(item?.status)' in flow
+    assert '["Need", "Short", "Substitute", "Omit"].includes(item?.status)' in flow
     assert "item.omission_consequence" in flow
     assert "item.resolved_name" in flow
     assert "white-space: pre-wrap" in css

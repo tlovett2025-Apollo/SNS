@@ -104,6 +104,96 @@ def cooked_bean_soup_payload(energy="Low", equipment=None):
 
 
 class APIServiceTests(unittest.TestCase):
+    def test_builder_braise_treats_kielbasa_as_a_supporting_protein(self):
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": {
+                "inventory": [
+                    {"name": "Beef broth", "form": "Shelf-stable", "amount": "plenty"},
+                    {"name": "Garlic powder", "form": "Shelf-stable", "amount": "plenty"},
+                    {"name": "Onion powder", "form": "Shelf-stable", "amount": "plenty"},
+                    {"name": "Black pepper", "form": "Shelf-stable", "amount": "plenty"},
+                ],
+                "equipment": [{"name": "Stovetop"}],
+            },
+            "selections": {
+                "proteins": [
+                    {"name": "Beef brisket", "state": "Fresh Raw", "role": "main"},
+                    {"name": "Kielbasa", "state": "Fresh Raw", "role": "supporting"},
+                ],
+                "produce": [], "foundation": "",
+                "extras": ["Ketchup", "Mustard", "BBQ sauce", "Hot sauce", "Worcestershire sauce"],
+                "cuisine": "BBQ", "cooking_method": "skillet",
+                "meal_structure": "integrated", "serving_temperature": "hot",
+                "energy": "Low", "time_minutes": 240, "servings": 4,
+            },
+        }
+
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+        plan = " ".join(recipe["instructions"])
+
+        self.assertTrue(any(line.startswith("Kielbasa — Fresh Raw · 1 piece") for line in recipe["ingredients"]))
+        self.assertNotIn("KO-approved", plan)
+        self.assertNotIn("thaw before browning", plan.lower())
+        self.assertNotIn("Thaw Kielbasa", plan)
+        self.assertIn("final", plan.lower())
+        self.assertIn("165°F for poultry sausage; 160°F for pork or beef sausage", plan)
+        self.assertNotIn("Serve Ketchup & Mustard & BBQ sauce", plan)
+        self.assertLess(recipe["active_minutes"], 30)
+
+    def test_chicken_tomato_spaghetti_uses_every_ingredient_and_names_two_vessels_honestly(self):
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": {
+                "inventory": [
+                    {"name": "Chicken breast", "form": "Fresh Raw", "quantity": 4, "unit": "piece"},
+                    {"name": "Tomatoes", "form": "Fresh", "amount": "plenty"},
+                    {"name": "Spaghetti", "form": "Dry", "amount": "plenty"},
+                    {"name": "Butter", "form": "Refrigerated", "amount": "plenty"},
+                    {"name": "Garlic powder", "form": "Shelf-stable", "amount": "plenty"},
+                    {"name": "Onion powder", "form": "Shelf-stable", "amount": "plenty"},
+                    {"name": "Black pepper", "form": "Shelf-stable", "amount": "plenty"},
+                    {"name": "Chicken broth", "form": "Shelf-stable", "amount": "plenty"},
+                    {"name": "Milk", "form": "Refrigerated", "amount": "plenty"},
+                ],
+                "equipment": [{"name": "Stovetop"}],
+            },
+            "selections": {
+                "protein": "Chicken breast", "protein_state": "Fresh Raw",
+                "produce": ["Tomatoes"], "foundation": "Spaghetti", "extras": ["Butter"],
+                "cuisine": "Comfort Food", "cooking_method": "skillet",
+                "meal_structure": "integrated", "serving_temperature": "hot",
+                "energy": "Low", "time_minutes": 60, "servings": 4,
+            },
+        }
+
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+        plan = " ".join(recipe["steps"])
+
+        self.assertIn("Skillet Supper", choice["title"])
+        self.assertNotIn("One-Pot", choice["title"])
+        self.assertIn("Heat Butter in the skillet", plan)
+        self.assertIn("Season with Garlic powder & Onion powder & Black pepper", plan)
+        self.assertNotIn("Thaw", plan)
+        self.assertIn("reduce the heat to low", plan)
+        self.assertIn("without letting the sauce boil", plan)
+        self.assertIn("Slice the rested Chicken breast", plan)
+        self.assertTrue(recipe["recipe_validation"]["production_ready"])
+
+    def test_composed_plate_is_not_offered_when_one_chicken_breast_cannot_make_four_entrees(self):
+        candidates = generate_candidates(
+            "Chicken breast", "Tomatoes & Zucchini", "", "Comfort Food",
+            "Low", "Budget", 60, 4, 10,
+            vegetable_names=["Tomatoes", "Zucchini"], protein_state="Fresh Raw",
+            available_items=["Chicken breast", "Tomatoes", "Zucchini"],
+            inventory_lots=[{"name": "Chicken breast", "form": "Fresh Raw", "quantity": 1, "unit": "piece"}],
+            meal_structure="composed_plate",
+        )
+
+        self.assertEqual(candidates, [])
+
     def test_builder_brisket_supports_planning_ahead_stovetop_braise(self):
         request = {
             "mode": "build_your_meal",
@@ -126,6 +216,26 @@ class APIServiceTests(unittest.TestCase):
         self.assertLessEqual(choice["total_minutes"], 240)
         self.assertIn("Braise", choice["title"])
 
+    def test_builder_brisket_has_a_trained_oven_braise_route(self):
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": {"inventory": [], "equipment": [{"name": "Oven"}, {"name": "Stovetop"}]},
+            "selections": {
+                "protein": "Beef brisket", "protein_state": "Fresh Raw",
+                "produce": ["Onions"], "foundation": "", "extras": ["Beef broth", "BBQ sauce"],
+                "cuisine": "BBQ", "cooking_method": "casserole",
+                "meal_structure": "integrated", "serving_temperature": "hot",
+                "energy": "Low", "time_minutes": 360, "servings": 4,
+            },
+        }
+
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+
+        self.assertEqual(choice["cooking_method"], "oven_braise")
+        self.assertIn("325°F oven", " ".join(recipe["steps"]))
+        self.assertNotIn("Onions does not yet have", " ".join(recipe["instructions"]))
+
     def test_builder_brisket_explains_when_selected_time_is_too_short(self):
         request = {
             "mode": "build_your_meal",
@@ -141,6 +251,34 @@ class APIServiceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(APIContractError, "needs a little more time"):
             get_recipe_list(request)
+
+    def test_brisket_bean_soup_stages_canned_beans_and_lime_at_the_finish(self):
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": {"inventory": [], "equipment": [{"name": "Stovetop"}]},
+            "selections": {
+                "protein": "Beef brisket", "protein_state": "Fresh Raw",
+                "produce": ["Limes", "Onions"], "foundation": "Pinto beans",
+                "extras": ["Beef broth"], "cuisine": "Mexican",
+                "cooking_method": "soup", "meal_structure": "integrated",
+                "serving_temperature": "hot", "energy": "Low",
+                "time_minutes": 240, "servings": 4,
+            },
+        }
+
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+        actions = recipe["steps"]
+        instructions = recipe["instructions"]
+        simmer = next(step for step in instructions if "gently simmer for about" in step.lower())
+        finish = next(step for step in actions if "Limes" in step and "finish" in step.lower())
+
+        self.assertNotIn("Limes", simmer)
+        self.assertNotIn("Pinto beans", simmer)
+        self.assertIn("Pinto beans", " ".join(actions))
+        self.assertIn("juice or wedges", finish)
+        self.assertNotIn("KO tenderness", " ".join(recipe["instructions"]))
+        self.assertNotIn("This pause keeps", " ".join(recipe["instructions"]))
 
     def test_soup_places_selected_sauces_before_the_long_simmer(self):
         request = {
@@ -630,7 +768,11 @@ class APIServiceTests(unittest.TestCase):
 
     def test_numbered_plan_contains_actions_and_handles_frozen_ground_beef(self):
         kitchen = frozen_ground_beef_payload()
-        candidate = get_recipe_list(kitchen)["candidates"][0]
+        kitchen["effort"] = "High"
+        candidate = next(
+            item for item in get_recipe_list(kitchen)["candidates"]
+            if item.get("foundation") == "White rice"
+        )
 
         recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
         plan = " ".join(recipe["steps"])

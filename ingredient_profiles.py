@@ -8,6 +8,7 @@ planner. Ingredient names are data, never branching logic.
 from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 import sqlite3
 from typing import List, Optional
 
@@ -25,6 +26,32 @@ def _clean(value):
 
 def _key(value):
     return _clean(value).lower().replace("-", " ")
+
+
+def _handling_for_state(template: str, name: str, state_name: str) -> str:
+    """Render handling language that agrees with the selected physical state."""
+    text = (template or "").format(name=name)
+    if _key(state_name) == "frozen raw":
+        return text
+    # KO templates describe all supported forms. Remove frozen-only clauses
+    # when the selected item is already fresh rather than telling every cook to
+    # thaw every protein defensively.
+    patterns = (
+        rf"Thaw {re.escape(name)} when frozen[.,]\s*",
+        rf"Thaw {re.escape(name)} safely,\s*",
+        rf"Thaw {re.escape(name)},\s*",
+        r"Thaw safely,\s*",
+        r";\s*thaw before browning",
+        r"\.\s*Thaw first when frozen\.",
+    )
+    for pattern in patterns:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s{2,}", " ", text).strip(" ;")
+    return re.sub(
+        r"(^|[.!?]\s+)([a-z])",
+        lambda match: match.group(1) + match.group(2).upper(),
+        text,
+    )
 
 
 @dataclass
@@ -151,7 +178,7 @@ def _family_activities(self, strategy="", state_name=""):
             source="ko_gate", activity_id=f"method_conflict:{self.name}",
         )]
 
-    handling = rule.handling_template.format(name=self.name)
+    handling = _handling_for_state(rule.handling_template, self.name, state_name)
     operation = rule.instruction_template.format(name=self.name)
     outcome = rule.desired_outcome.strip()
     if outcome and outcome.lower() not in operation.lower():

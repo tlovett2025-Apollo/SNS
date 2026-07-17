@@ -1276,7 +1276,7 @@ const SNS = (() => {
     }
     document.querySelector("[data-ingredients]").innerHTML = (recipe.ingredients || []).map(x => `<li>${escapeHtml(x)}</li>`).join("");
     const kitchenItems = (recipe.inventory_requirements || [])
-      .filter(item => ["Need", "Substitute", "Omit"].includes(item?.status))
+      .filter(item => ["Need", "Short", "Substitute", "Omit"].includes(item?.status))
       .filter(item => item.status !== "Omit" || item.omission_consequence)
       .map(item => {
         if (item.status === "Substitute") {
@@ -1285,9 +1285,16 @@ const SNS = (() => {
         if (item.status === "Omit") {
           return `${item.name} — omit it. ${item.omission_consequence || "The meal remains valid without it."}`;
         }
+        if (item.status === "Short") {
+          const shortfall = Number(item.quantity_shortfall || 0);
+          return `${item.name} — ${shortfall || "more"} additional ${shortfall === 1 ? "portion is" : "portions are"} needed for the planned servings.`;
+        }
         const options = (item.substitutions || []).length
           ? ` Possible substitutes: ${item.substitutions.join(", ")}.`
           : "";
+        if (item.planned_purchase) {
+          return `${item.name} — add it to the shopping list.${options}`;
+        }
         return `${item.name} — not listed in My Kitchen.${options}`;
       });
     const kitchenCheck = document.querySelector("[data-kitchen-check]");
