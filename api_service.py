@@ -588,7 +588,11 @@ def _heat_source(candidate: dict) -> str:
 
 
 def _selection_title(candidate: dict) -> str:
-    ingredients = [candidate.get("protein"), *str(candidate.get("vegetable") or "").split(" & ")]
+    proteins = [
+        item.get("name") for item in candidate.get("proteins") or []
+        if isinstance(item, dict)
+    ]
+    ingredients = [*(proteins or [candidate.get("protein")]), *str(candidate.get("vegetable") or "").split(" & ")]
     structure = _clean(candidate.get("meal_structure")) or "integrated"
     if structure in {"composed_plate", "layered_bowl"}:
         ingredients.append(candidate.get("foundation"))
@@ -625,7 +629,8 @@ def _effort_target(level) -> int:
 
 
 _GENERATOR_REQUEST_FIELDS = {
-    "protein_name", "vegetable_name", "foundation_name", "cuisine_name",
+    "protein_name", "protein_names", "protein_states", "protein_roles",
+    "vegetable_name", "foundation_name", "cuisine_name",
     "energy_level", "budget_level", "time_minutes", "servings", "max_results",
     "vegetable_names", "protein_state", "available_items", "requested_items",
     "available_equipment", "excluded_items", "planned_purchase_items",
@@ -850,8 +855,12 @@ def _concept_title(candidate: dict) -> str:
 
 def _candidate_ingredients(candidate: dict) -> list[str]:
     ingredients = []
+    proteins = [
+        item.get("name") for item in candidate.get("proteins") or []
+        if isinstance(item, dict)
+    ]
     for item in (
-        candidate.get("protein"),
+        *(proteins or [candidate.get("protein")]),
         *str(candidate.get("vegetable") or "").split(" & "),
         candidate.get("foundation"),
     ):
@@ -903,6 +912,10 @@ def _candidate_ingredient_lines(
     for item in resolved:
         resolved_by_name.setdefault(_key(item.name), item)
 
+    protein_states = {
+        _key(item.get("name")): _clean(item.get("state"))
+        for item in candidate.get("proteins") or [] if isinstance(item, dict)
+    }
     protein_key = _key(candidate.get("protein"))
     lines = []
     seen = set()
@@ -914,7 +927,9 @@ def _candidate_ingredient_lines(
 
         details = []
         resolved_item = resolved_by_name.get(key)
-        if key == protein_key and _clean(candidate.get("protein_state")):
+        if key in protein_states:
+            details.append(protein_states[key])
+        elif key == protein_key and _clean(candidate.get("protein_state")):
             details.append(_clean(candidate.get("protein_state")))
         elif resolved_item and _clean(resolved_item.form_name):
             details.append(_clean(resolved_item.form_name))
@@ -967,6 +982,7 @@ def _candidate_view(candidate: dict) -> dict:
         "selection_reasons": list(candidate.get("selection_reasons") or []),
         "dish_family": candidate.get("dish_family") or _dish_family(candidate),
         "protein": candidate.get("protein"),
+        "proteins": list(candidate.get("proteins") or []),
         "vegetable": candidate.get("vegetable"),
         "foundation": candidate.get("foundation"),
         "cuisine": candidate.get("cuisine"),
@@ -993,7 +1009,27 @@ def _builder_candidates(payload: dict, db_path: str | Path):
     selections = payload.get("selections") if isinstance(payload.get("selections"), dict) else {}
     snapshot, resolved, pending, engine_request = _engine_request(kitchen, db_path)
 
-    protein = _clean(selections.get("protein"))
+    raw_proteins = selections.get("proteins") or []
+    if isinstance(raw_proteins, (str, dict)):
+        raw_proteins = [raw_proteins]
+    protein_selections = []
+    for index, item in enumerate(raw_proteins):
+        if isinstance(item, dict):
+            name = _clean(item.get("name"))
+            state = _clean(item.get("state"))
+            role = _clean(item.get("role"))
+        else:
+            name, state, role = _clean(item), "", ""
+        if name and not any(_key(existing["name"]) == _key(name) for existing in protein_selections):
+            protein_selections.append({"name": name, "state": state, "role": role})
+    legacy_protein = _clean(selections.get("protein"))
+    if not protein_selections and legacy_protein:
+        protein_selections = [{
+            "name": legacy_protein,
+            "state": _clean(selections.get("protein_state")),
+            "role": "main",
+        }]
+    protein = protein_selections[0]["name"] if protein_selections else ""
     produce = selections.get("produce") or []
     if isinstance(produce, str):
         produce = [produce]
@@ -1007,9 +1043,20 @@ def _builder_candidates(payload: dict, db_path: str | Path):
     method = _clean(selections.get("cooking_method"))
     meal_structure = _clean(selections.get("meal_structure")) or "integrated"
     if not protein:
-        raise APIContractError("Build Your Meal requires one protein.")
+        raise APIContractError("Build Your Meal requires at least one protein.")
+    protein_selections[0]["role"] = "main"
+    for item in protein_selections[1:]:
+        if not item["role"]:
+            key = _key(item["name"])
+            item["role"] = (
+                "stretch" if any(word in key for word in ("bean", "lentil", "chickpea"))
+                else "accent" if any(word in key for word in ("bacon", "sausage", "ham", "chorizo"))
+                else "supporting"
+            )
     if method not in _LIVE_PLANNER_METHODS:
         raise APIContractError("Choose a currently supported cooking method.")
+    if len(protein_selections) > 1 and method != "skillet":
+        raise APIContractError("Multiple proteins are currently trained for stovetop meals; choose Stovetop Meal.")
     if meal_structure not in {"integrated", "composed_plate", "layered_bowl"}:
         raise APIContractError("Choose a supported meal structure.")
     if method != "skillet" and meal_structure != "integrated":
@@ -1018,11 +1065,12 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         raise APIContractError("Cold meal planning is visible but is not trained yet.")
 
     with closing(sqlite3.connect(db_path)) as con:
-        valid_protein = con.execute(
-            """SELECT 1 FROM proteins p JOIN ingredients i USING (ingredient_id)
-               WHERE p.verified=1 AND i.active=1 AND lower(i.name)=lower(?)""",
-            (protein,),
-        ).fetchone()
+        valid_proteins = {
+            _key(row[0]) for row in con.execute(
+                """SELECT i.name FROM proteins p JOIN ingredients i USING (ingredient_id)
+                   WHERE p.verified=1 AND i.active=1"""
+            ).fetchall()
+        }
         valid_produce = {
             _key(row[0]) for row in con.execute(
                 """SELECT i.name FROM vegetables v JOIN ingredients i USING (ingredient_id)
@@ -1036,8 +1084,9 @@ def _builder_candidates(payload: dict, db_path: str | Path):
                 "SELECT name FROM foundations WHERE verified=1"
             ).fetchall()
         }
-    if not valid_protein:
-        raise APIContractError(f"Unknown or untrained protein: {protein}")
+    unknown_proteins = [item["name"] for item in protein_selections if _key(item["name"]) not in valid_proteins]
+    if unknown_proteins:
+        raise APIContractError(f"Unknown or untrained protein: {unknown_proteins[0]}")
     unknown_produce = [name for name in produce if _key(name) not in valid_produce]
     if unknown_produce:
         raise APIContractError(f"Unknown produce selection: {unknown_produce[0]}")
@@ -1053,14 +1102,20 @@ def _builder_candidates(payload: dict, db_path: str | Path):
     for item in _inventory_from(kitchen):
         raw_key = _key(item.get("name"))
         owned_keys.add(_key(_BUILDER_EXTRA_ALIASES.get(raw_key, item.get("name"))))
-    selected_components = [protein, *produce, foundation, *extras]
+    selected_components = [*[item["name"] for item in protein_selections], *produce, foundation, *extras]
     planned_purchases = [
         name for name in selected_components if name and _key(name) not in owned_keys
     ]
     owned_protein = resolved_by_name.get(_key(protein))
+    protein_states = {}
+    protein_roles = {}
+    for item in protein_selections:
+        owned_item = resolved_by_name.get(_key(item["name"]))
+        protein_states[item["name"]] = _protein_state(owned_item) if owned_item else (item["state"] or "Fresh Raw")
+        protein_roles[item["name"]] = item["role"]
     component_forms = {
         name: resolved_by_name[_key(name)].form_name
-        for name in [protein, *produce, foundation]
+        for name in [*[item["name"] for item in protein_selections], *produce, foundation]
         if name and _key(name) in resolved_by_name and resolved_by_name[_key(name)].form_name
     }
     for name in produce:
@@ -1068,7 +1123,10 @@ def _builder_candidates(payload: dict, db_path: str | Path):
             component_forms[name] = _clean(produce_forms.get(name))
     engine_request.update({
         "protein_name": protein,
-        "protein_state": _protein_state(owned_protein) if owned_protein else (_clean(selections.get("protein_state")) or "Fresh Raw"),
+        "protein_names": [item["name"] for item in protein_selections],
+        "protein_states": protein_states,
+        "protein_roles": protein_roles,
+        "protein_state": protein_states[protein],
         "vegetable_name": produce[0] if produce else "",
         "vegetable_names": produce,
         "foundation_name": foundation,

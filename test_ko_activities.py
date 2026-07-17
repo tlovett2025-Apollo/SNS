@@ -573,8 +573,8 @@ def test_pressure_cooker_rice_has_all_equipment_owned_phases():
     graph = build_activity_graph(candidate)
 
     assert graph["pressurize:Basmati rice"].minutes == 10
-    assert graph["pressure cook:Basmati rice"].minutes == 15
-    assert graph["natural release:Basmati rice"].minutes == 8
+    assert graph["pressure cook:Basmati rice"].minutes == 5
+    assert graph["natural release:Basmati rice"].minutes == 10
     assert graph["natural release:Basmati rice"].equipment == "pressure cooker"
 
 
@@ -688,5 +688,6 @@ def test_pressure_cooker_wait_describes_long_window_without_false_phase_claim():
     )[0]
     text = generate_human_instructions(candidate)
 
-    assert "longest unattended pressure-cooker window" in text
+    assert "Cook the rice at high pressure for 4 minutes" in text
+    assert "10-minute natural release" in text
     assert not ("Minutes 4–19" in text and "is coming to pressure" in text)

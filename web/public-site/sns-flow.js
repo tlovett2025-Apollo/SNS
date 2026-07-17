@@ -49,6 +49,22 @@ const SNS = (() => {
     "breakfast sausage": { unit: "lb", step: 0.25 },
     "bacon": { unit: "package", step: 1 }
   };
+  const unitRules = {
+    "canned chicken": ["can"], "white beans": ["can"], "cream of chicken soup": ["can"],
+    "lasagna noodles": ["piece", "box", "package"], "spaghetti": ["box", "package", "lb"],
+    "white rice": ["cup", "bag", "lb"], "chicken broth": ["carton", "can", "cup"],
+    "eggs": ["egg"], "milk": ["cup", "carton"], "cheese": ["cup", "package", "lb"],
+    "chicken breast": ["piece", "lb", "package"], "ground beef": ["lb", "package"],
+    "fish": ["piece", "lb", "package"], "breakfast sausage": ["lb", "package"],
+    "bacon": ["package", "lb"], "bread": ["loaf", "package"],
+    "onions": ["piece", "lb", "bag"], "potatoes": ["piece", "lb", "bag"],
+    "carrots": ["piece", "lb", "bag"], "tomatoes": ["piece", "lb", "package"],
+    "mushrooms": ["package", "cup", "lb"], "zucchini": ["piece", "lb", "bag"],
+    "spinach": ["bunch", "bag", "package"], "kale": ["bunch", "bag"],
+    "swiss chard": ["bunch"], "romaine lettuce": ["piece", "package"],
+    "frozen vegetables": ["bag", "package", "cup"], "prepared meal": ["meal", "portion", "package"],
+    "cooked leftovers": ["portion", "cup", "package"]
+  };
   const kitchenStorageKey = "snsKitchenStateV1";
   const mealHistoryKey = "snsMealHistoryV1";
   const defaultForms = {
@@ -126,13 +142,12 @@ const SNS = (() => {
   function renderHome() {
     const target = document.querySelector("[data-welcome-name]");
     if (!target) return;
-    let kitchen = {};
     let auth = {};
-    try { kitchen = JSON.parse(localStorage.getItem(kitchenStorageKey) || "{}"); } catch {}
     try { auth = JSON.parse(sessionStorage.getItem("snsAuthPrototype") || "{}"); } catch {}
-    const memberName = (kitchen.household_members || []).find(member => String(member.name || "").trim())?.name;
     const emailName = String(auth.email || "").split("@")[0].replace(/[._-]+/g, " ").trim();
-    target.textContent = memberName || emailName || "Susie-Q";
+    target.textContent = String(auth.displayName || "").trim() || emailName || "there";
+    let kitchen = {};
+    try { kitchen = JSON.parse(localStorage.getItem(kitchenStorageKey) || "{}"); } catch {}
     const count = (kitchen.foods || []).filter(item => Number(item.quantity || 0) > 0).length;
     const countTarget = document.querySelector("[data-home-kitchen-count]");
     if (countTarget) countTarget.textContent = count ? `${count} foods remembered` : "My Kitchen is ready";
@@ -161,9 +176,19 @@ const SNS = (() => {
     return 0;
   }
 
-  function unitOptions(selected) {
-    return inventoryUnits.map(([value, label]) =>
-      `<option value="${value}"${value === selected ? " selected" : ""}>${label}</option>`
+  function allowedUnits(name) {
+    const key = String(name || "").trim().toLowerCase();
+    if (unitRules[key]) return unitRules[key];
+    if (key.startsWith("canned ")) return ["can"];
+    if (/powder|seasoning|spice|salt|pepper|granule/.test(key)) return ["jar", "bottle", "package"];
+    return [quantityProfile(name).unit, "package"].filter((value, index, list) => list.indexOf(value) === index);
+  }
+
+  function unitOptions(selected, name) {
+    const allowed = allowedUnits(name);
+    const safeSelected = allowed.includes(selected) ? selected : allowed[0];
+    return inventoryUnits.filter(([value]) => allowed.includes(value)).map(([value, label]) =>
+      `<option value="${value}"${value === safeSelected ? " selected" : ""}>${label}</option>`
     ).join("");
   }
 
@@ -229,6 +254,57 @@ const SNS = (() => {
       .replaceAll("'", "&#039;");
   }
 
+  const commonKitchenCatalog = [
+    "Asparagus", "Bacon", "Basmati rice", "Black olives", "Breakfast sausage", "Broccoli",
+    "Canned chicken", "Carrots", "Chicken breast", "Chicken broth", "Chickpeas", "Cream of chicken soup",
+    "Eggs", "Garlic", "Ground beef", "Kale", "Lasagna noodles", "Mayonnaise", "Milk", "Mushrooms",
+    "Navy beans", "Okra", "Onions", "Potatoes", "Romaine lettuce", "Salsa", "Spaghetti", "Spinach",
+    "Swiss chard", "Tomatoes", "White beans", "White rice", "Zucchini"
+  ];
+  const kitchenAliases = {
+    "chikn brest": "Chicken breast", "chicken breasts": "Chicken breast", "chikn breast": "Chicken breast",
+    "zukini": "Zucchini", "zuchini": "Zucchini", "zuccini": "Zucchini", "mayo": "Mayonnaise"
+  };
+
+  function normalizedFoodName(value) {
+    return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  }
+
+  function editDistance(left, right) {
+    const a = normalizedFoodName(left), b = normalizedFoodName(right);
+    const row = [...Array(b.length + 1).keys()];
+    for (let i = 1; i <= a.length; i += 1) {
+      let previous = row[0]; row[0] = i;
+      for (let j = 1; j <= b.length; j += 1) {
+        const held = row[j];
+        row[j] = Math.min(row[j] + 1, row[j - 1] + 1, previous + (a[i - 1] === b[j - 1] ? 0 : 1));
+        previous = held;
+      }
+    }
+    return row[b.length];
+  }
+
+  function canonicalSuggestions(value) {
+    const query = normalizedFoodName(value);
+    if (query.length < 2) return [];
+    const catalog = [...new Set([
+      ...commonKitchenCatalog,
+      ...[...document.querySelectorAll("[data-food]")].map(row => row.dataset.food)
+    ])];
+    const alias = kitchenAliases[query];
+    return catalog.map(name => ({
+      name, score: alias === name ? -10 : normalizedFoodName(name).startsWith(query) ? -5 : editDistance(query, name)
+    })).filter(item => item.score <= Math.max(2, Math.floor(query.length * .35)))
+      .sort((a, b) => a.score - b.score || a.name.localeCompare(b.name)).slice(0, 5);
+  }
+
+  function canonicalFoodName(value) {
+    const query = normalizedFoodName(value);
+    if (kitchenAliases[query]) return kitchenAliases[query];
+    const best = canonicalSuggestions(value)[0];
+    return best && best.score <= Math.max(1, Math.floor(query.length * .25)) ? best.name : String(value || "").trim();
+  }
+
   function browserKitchenState() {
     return {
       foods: [...document.querySelectorAll("[data-food]")].map(row => ({
@@ -292,7 +368,7 @@ const SNS = (() => {
       </label>
       <label class="quantity-unit">
         <span class="sr-only">${escapeHtml(name)} unit</span>
-        <select data-unit>${unitOptions(selectedUnit)}</select>
+        <select data-unit>${unitOptions(selectedUnit, name)}</select>
       </label>
       <details class="inventory-detail" data-inventory-detail>
         <summary>Dates and package details</summary>
@@ -347,6 +423,65 @@ const SNS = (() => {
     return row;
   }
 
+  function inventoryGroup(name, storage) {
+    const key = normalizedFoodName(name);
+    if (storage === "Fresh") {
+      if (/apple|banana|berry|berries|citrus|lemon|lime|orange|peach|pear|fruit/.test(key)) return "Fruit";
+      if (/basil|cilantro|dill|mint|parsley|rosemary|sage|thyme|herb/.test(key)) return "Herbs";
+      return "Vegetables";
+    }
+    if (storage === "Pantry") {
+      if (/powder|seasoning|spice|salt|pepper|paprika|cumin|oregano|thyme|granule/.test(key)) return "Spices & seasonings";
+      if (/rice|oat|quinoa|barley|grain|flour/.test(key)) return "Grains & baking";
+      if (/bread|bun|tortilla|wrap|pita|cracker/.test(key)) return "Bread & crackers";
+      if (/pasta|spaghetti|noodle|macaroni|lasagna/.test(key)) return "Pasta & noodles";
+      if (/cereal|granola/.test(key)) return "Cereal";
+      if (/oil|butter|shortening|lard/.test(key)) return "Fats & oils";
+      if (/salsa|sauce|mayo|mayonnaise|mustard|ketchup|broth|stock|soup/.test(key)) return "Sauces & cooking helpers";
+      if (/fruit|peach|pear|pineapple|applesauce/.test(key)) return "Fruit";
+      if (/bean|chickpea|tomato|corn|pea|vegetable/.test(key)) return "Vegetables & legumes";
+      return "Other pantry food";
+    }
+    if (storage === "Freezer") {
+      if (/chicken|beef|pork|fish|steak|sausage|bacon|turkey/.test(key)) return "Proteins";
+      if (/vegetable|broccoli|spinach|pea|corn|fruit|berry/.test(key)) return "Produce";
+      return "Prepared food & bread";
+    }
+    if (storage === "Fridge") {
+      if (/egg|chicken|beef|pork|fish|steak|sausage|bacon|turkey/.test(key)) return "Proteins & eggs";
+      if (/milk|cheese|yogurt|cream|butter/.test(key)) return "Dairy";
+      if (/sauce|salsa|mayo|mayonnaise|mustard|ketchup|pickle/.test(key)) return "Condiments";
+      return "Prepared food & leftovers";
+    }
+    return "Other";
+  }
+
+  function organizeInventorySection(section) {
+    if (!section || section.dataset.section === "Equipment") return;
+    const list = section.querySelector(".item-list");
+    if (!list) return;
+    const rows = [...list.querySelectorAll("[data-food]")].sort((a, b) =>
+      a.dataset.food.localeCompare(b.dataset.food, undefined, { sensitivity: "base" })
+    );
+    const groups = new Map();
+    rows.forEach(row => {
+      const label = inventoryGroup(row.dataset.food, row.dataset.storage);
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push(row);
+    });
+    list.replaceChildren(...[...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([label, items]) => {
+      const group = document.createElement("section");
+      group.className = "inventory-subgroup";
+      group.innerHTML = `<h3>${escapeHtml(label)}</h3><div class="inventory-subgroup-items"></div>`;
+      group.querySelector(".inventory-subgroup-items").append(...items);
+      return group;
+    }));
+  }
+
+  function organizeInventory() {
+    document.querySelectorAll("[data-section]").forEach(organizeInventorySection);
+  }
+
   function findFoodRow(name, storage) {
     return [...document.querySelectorAll("[data-food]")].find(row =>
       row.dataset.food.toLowerCase() === name.toLowerCase()
@@ -395,7 +530,8 @@ const SNS = (() => {
     const effort = document.querySelector("[data-make-effort]");
     if (effort && state.tonight_effort) effort.value = state.tonight_effort;
 
-    (state.foods || []).forEach(food => {
+    (state.foods || []).forEach(originalFood => {
+      const food = { ...originalFood, name: canonicalFoodName(originalFood.name) };
       let row = findFoodRow(food.name, food.storage);
       if (!row && food.custom) {
         const list = document.querySelector(`[data-section="${food.storage}"] .item-list`);
@@ -571,11 +707,12 @@ const SNS = (() => {
     const addForm = document.querySelector("[data-dialog-form]");
     const addQuantity = document.querySelector("[data-dialog-quantity]");
     const addUnit = document.querySelector("[data-dialog-unit]");
+    const suggestions = document.querySelector("[data-inventory-suggestions]");
     let addSection = "";
 
     function updateDialogUnit() {
       const profile = quantityProfile(addName.value);
-      addUnit.innerHTML = unitOptions(profile.unit);
+      addUnit.innerHTML = unitOptions(profile.unit, addName.value);
       addQuantity.step = quantityStepForUnit(profile.unit);
       const garlic = addName.value.trim().toLowerCase() === "garlic";
       const note = document.querySelector("[data-dialog-form-note]");
@@ -583,6 +720,14 @@ const SNS = (() => {
         ? "Tell SNS which garlic: fresh intact bulb, peeled/cut fresh, jarred minced, dried minced, granules, powder, garlic salt, or a seasoning blend."
         : "Form changes how SNS stores, preps, and cooks an ingredient.";
       if (garlic && ["", "shelf-stable", "fresh", "refrigerated", "on hand"].includes(addForm.value.trim().toLowerCase())) addForm.value = "";
+    }
+
+    function showNameSuggestions() {
+      const matches = canonicalSuggestions(addName.value);
+      suggestions.hidden = !matches.length;
+      suggestions.innerHTML = matches.map(item =>
+        `<button type="button" data-canonical-name="${escapeHtml(item.name)}">${escapeHtml(item.name)}</button>`
+      ).join("");
     }
 
     function openAddDialog(sectionName) {
@@ -600,7 +745,15 @@ const SNS = (() => {
       setTimeout(() => addName.focus(), 0);
     }
 
-    addName?.addEventListener("change", updateDialogUnit);
+    addName?.addEventListener("input", () => { updateDialogUnit(); showNameSuggestions(); });
+    suggestions?.addEventListener("click", event => {
+      const button = event.target.closest("[data-canonical-name]");
+      if (!button) return;
+      addName.value = button.dataset.canonicalName;
+      suggestions.hidden = true;
+      updateDialogUnit();
+      addQuantity.focus();
+    });
     addUnit?.addEventListener("change", () => {
       addQuantity.step = quantityStepForUnit(addUnit.value);
     });
@@ -618,8 +771,14 @@ const SNS = (() => {
     document.querySelector("[data-dialog-cancel]")?.addEventListener("click", () => dialog.close());
     dialogForm?.addEventListener("submit", event => {
       event.preventDefault();
-      const name = addName.value.trim();
+      let name = addName.value.trim();
       if (!name) return;
+      const canonical = canonicalSuggestions(name)[0];
+      if (canonical && canonical.score <= Math.max(1, Math.floor(normalizedFoodName(name).length * .25))) {
+        name = canonical.name;
+        addName.value = name;
+        updateDialogUnit();
+      }
       if (name.toLowerCase() === "garlic" && !addForm.value.trim()) {
         addForm.setCustomValidity("Choose the kind of garlic so SNS knows how to store and use it.");
         addForm.reportValidity();
@@ -654,6 +813,7 @@ const SNS = (() => {
           document.querySelector(`[data-section="${addSection}"] .item-list`)?.append(row);
           bindQuantityEditor(row.querySelector(".amount"));
           ensureRemoveControl(row);
+          organizeInventorySection(document.querySelector(`[data-section="${addSection}"]`));
         } else {
           setRowQuantity(row, Number(addQuantity.value), addUnit.value);
         }
@@ -776,26 +936,48 @@ const SNS = (() => {
       options = fallbackBuilderOptions;
     }
 
-    const protein = form.querySelector("[data-builder-protein]");
-    protein.innerHTML = `<option value="">Choose one protein</option>` + (options.proteins || []).map(item =>
-      `<option value="${escapeHtml(item.name)}" data-form="${escapeHtml(item.form || "")}">${escapeHtml(choiceLabel(item, owned))}</option>`
-    ).join("");
-
-    const proteinForm = form.querySelector("[data-protein-state]");
-    const syncProteinForm = () => {
-      const selected = protein.selectedOptions[0];
-      const name = String(selected?.value || "").toLowerCase();
-      const savedForm = String(selected?.dataset.form || "").toLowerCase();
-      let locked = "";
-      if (name.startsWith("canned ") || savedForm.includes("canned")) locked = "Canned";
-      else if (name.includes("rotisserie") || ["cooked", "prepared", "ready to eat", "leftover"].some(term => savedForm.includes(term))) locked = "Cooked";
-      if (locked) proteinForm.value = locked;
-      proteinForm.disabled = Boolean(locked);
-      form.querySelector("[data-protein-form-note]").textContent = locked
-        ? `${locked} comes from My Kitchen and will be used automatically.`
-        : "Choose the form you have or plan to buy.";
+    const proteinHolder = form.querySelector("[data-protein-options]");
+    const inferProteinState = item => {
+      const name = String(item.name || "").toLowerCase();
+      const savedForm = String(item.form || "").toLowerCase();
+      if (name.startsWith("canned ") || savedForm.includes("canned")) return "Canned";
+      if (name.includes("rotisserie") || ["cooked", "prepared", "ready to eat", "leftover"].some(term => savedForm.includes(term))) return "Cooked";
+      if (savedForm.includes("frozen")) return "Frozen Raw";
+      return "Fresh Raw";
     };
-    protein.addEventListener("change", syncProteinForm);
+    proteinHolder.innerHTML = (options.proteins || []).map(item => {
+      const isOwned = item.owned ?? owned.has(String(item.name).toLowerCase());
+      const state = inferProteinState(item);
+      return `<label class="produce-choice protein-choice" data-protein-choice data-search-name="${escapeHtml(item.name.toLowerCase())}">
+        <input type="checkbox" name="protein" value="${escapeHtml(item.name)}">
+        <span>${escapeHtml(item.name)}</span>
+        <small data-protein-role>${isOwned ? `In My Kitchen${item.form ? ` · ${escapeHtml(item.form)}` : ""}` : "Need to buy"}</small>
+        <select data-protein-state aria-label="${escapeHtml(item.name)} form"${isOwned ? " disabled" : ""}>
+          <option${state === "Fresh Raw" ? " selected" : ""}>Fresh Raw</option>
+          <option${state === "Frozen Raw" ? " selected" : ""}>Frozen Raw</option>
+          <option${state === "Cooked" ? " selected" : ""}>Cooked</option>
+          <option${state === "Canned" ? " selected" : ""}>Canned</option>
+        </select>
+      </label>`;
+    }).join("");
+    const syncProteinRoles = () => {
+      const selected = [...proteinHolder.querySelectorAll('input[name="protein"]:checked')];
+      selected.forEach((input, index) => {
+        const role = input.closest("[data-protein-choice]").querySelector("[data-protein-role]");
+        const name = input.value.toLowerCase();
+        const inferred = index === 0 ? "Main protein" :
+          /bean|lentil|chickpea/.test(name) ? "Stretch protein" :
+          /bacon|sausage|ham|chorizo/.test(name) ? "Flavor accent" : "Supporting protein";
+        role.textContent = `${inferred} · ${role.textContent.replace(/^(Main protein|Stretch protein|Flavor accent|Supporting protein) · /, "")}`;
+      });
+    };
+    proteinHolder.addEventListener("change", syncProteinRoles);
+    form.querySelector("[data-protein-search]")?.addEventListener("input", event => {
+      const query = event.target.value.trim().toLowerCase();
+      form.querySelectorAll("[data-protein-choice]").forEach(choice => {
+        choice.hidden = Boolean(query) && !choice.dataset.searchName.includes(query);
+      });
+    });
 
     const foundation = form.querySelector("[data-builder-foundation]");
     foundation.innerHTML = `<option value="">No foundation</option>` + (options.foundations || []).map(item =>
@@ -915,8 +1097,15 @@ const SNS = (() => {
       mode: "build_your_meal",
       kitchen,
       selections: {
-        protein: form.querySelector("[data-builder-protein]").value,
-        protein_state: form.querySelector("[data-protein-state]").value,
+        proteins: [...form.querySelectorAll('input[name="protein"]:checked')].map((input, index) => {
+          const name = input.value;
+          const key = name.toLowerCase();
+          return {
+            name,
+            state: input.closest("[data-protein-choice]")?.querySelector("[data-protein-state]")?.value || "Fresh Raw",
+            role: index === 0 ? "main" : /bean|lentil|chickpea/.test(key) ? "stretch" : /bacon|sausage|ham|chorizo/.test(key) ? "accent" : "supporting"
+          };
+        }),
         produce: [...form.querySelectorAll('input[name="produce"]:checked')].map(item => item.value),
         produce_forms: Object.fromEntries([...form.querySelectorAll('input[name="produce"]:checked')].map(item => [
           item.value, item.closest("[data-produce-choice]")?.querySelector("[data-produce-form]")?.value || ""
@@ -935,9 +1124,14 @@ const SNS = (() => {
         use_all_cans: Boolean(form.querySelector("[data-use-all-cans]")?.checked)
       }
     };
-    if (!payload.selections.protein) {
-      status.textContent = "Choose one protein first.";
-      form.querySelector("[data-builder-protein]").focus();
+    if (!payload.selections.proteins.length) {
+      status.textContent = "Choose at least one protein first.";
+      form.querySelector('input[name="protein"]')?.focus();
+      return;
+    }
+    if (payload.selections.proteins.length > 1 && payload.selections.cooking_method !== "skillet") {
+      status.textContent = "Multiple-protein planning is trained for Stovetop Meal first. Choose Stovetop Meal for this combination.";
+      form.querySelector('input[name="cooking-method"][value="skillet"]')?.focus();
       return;
     }
     if (people < 1) {
@@ -1108,6 +1302,7 @@ const SNS = (() => {
     installAppShell();
     upgradeQuantityEditors();
     restoreBrowserKitchen();
+    organizeInventory();
     bindAmounts();
     bindKitchenDashboard();
     updateCount();

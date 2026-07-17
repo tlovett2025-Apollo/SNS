@@ -153,6 +153,61 @@ class APIServiceTests(unittest.TestCase):
         self.assertIn("Onions", recipe["missing_items"])
         self.assertTrue(any("Mayonnaise" in step and "Salsa" in step for step in recipe["steps"]))
 
+    def test_builder_multiple_proteins_keep_main_and_accent_roles(self):
+        kitchen = kitchen_payload()
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": kitchen,
+            "selections": {
+                "proteins": [
+                    {"name": "Chicken breast", "state": "Frozen Raw", "role": "main"},
+                    {"name": "Bacon", "state": "Fresh Raw", "role": "accent"},
+                ],
+                "produce": ["Mushrooms"],
+                "foundation": "White rice",
+                "cooking_method": "skillet",
+                "meal_structure": "layered_bowl",
+                "serving_temperature": "hot",
+                "time_minutes": 60,
+                "servings": 4,
+            },
+        }
+
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+        plan = " ".join(recipe["steps"])
+
+        self.assertEqual([item["role"] for item in choice["proteins"]], ["main", "accent"])
+        self.assertIn("Chicken breast, Bacon", choice["title"])
+        self.assertTrue(any(line.startswith("Bacon — Fresh Raw") for line in recipe["ingredients"]))
+        self.assertIn("Cook Bacon first", plan)
+        self.assertLess(plan.index("Cook Bacon first"), plan.index("Heat a lightly oiled skillet"))
+
+    def test_layered_bowl_tomatoes_remain_distinct_instead_of_becoming_sauce(self):
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": kitchen_payload(),
+            "selections": {
+                "protein": "Chicken breast",
+                "protein_state": "Frozen Raw",
+                "produce": ["Tomatoes"],
+                "foundation": "White rice",
+                "cooking_method": "skillet",
+                "meal_structure": "layered_bowl",
+                "serving_temperature": "hot",
+                "time_minutes": 60,
+                "servings": 4,
+            },
+        }
+
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+        plan = " ".join(recipe["steps"])
+
+        self.assertIn("Keep Tomatoes distinct", plan)
+        self.assertIn("do not fry it into an accidental sauce", plan)
+        self.assertNotIn("Add Tomatoes to the skillet and cook until ready", plan)
+
     def test_builder_recognizes_custom_mayo_and_salsa_as_owned_extras(self):
         kitchen = kitchen_payload()
         kitchen["inventory"].extend([
@@ -502,8 +557,8 @@ class APIServiceTests(unittest.TestCase):
         ))
         thaw_step = next(step for step in recipe["steps"] if "microwave defrost setting" in step)
         prep_step = next(step for step in recipe["steps"] if "finishes defrosting" in step)
-        self.assertTrue(thaw_step.startswith("Minutes 14–21:"))
-        self.assertTrue(prep_step.startswith("Minutes 18–20:"))
+        self.assertTrue(thaw_step.startswith("Minutes 5–12:"))
+        self.assertTrue(prep_step.startswith("Minutes 9–11:"))
         self.assertIn("\n\n", prep_step)
         self.assertEqual(recipe["missing_items"], [])
         adjustments = {item["name"]: item for item in recipe["ingredient_adjustments"]}

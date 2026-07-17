@@ -346,9 +346,15 @@ def generate_candidates(
     use_all_cans=False,
     cooking_for_kids=False,
     kid_theme="",
+    protein_names=None,
+    protein_states=None,
+    protein_roles=None,
 ):
-    protein = _clean(protein_name)
-    protein_state = _clean(protein_state) or "Fresh Raw"
+    proteins = _unique(list(protein_names or []) or [_clean(protein_name)])
+    protein = proteins[0] if proteins else ""
+    protein_states = dict(protein_states or {})
+    protein_roles = dict(protein_roles or {})
+    protein_state = _clean(protein_states.get(protein) or protein_state) or "Fresh Raw"
 
     if vegetable_names:
         vegetable = _join(vegetable_names)
@@ -358,7 +364,7 @@ def generate_candidates(
     foundation = _clean(foundation_name)
     cuisine = _clean(cuisine_name) or "Comfort Food"
     sauce = _sauce_for_cuisine(cuisine)
-    selected_components = _unique([protein, *_clean(vegetable).split(" & "), foundation])
+    selected_components = _unique([*proteins, *_clean(vegetable).split(" & "), foundation])
     extras = _unique(list(selected_extras or []))
     component_forms = dict(component_forms or {})
     planned_purchase_keys = {_key(item) for item in (planned_purchase_items or [])}
@@ -466,7 +472,11 @@ def generate_candidates(
         c["quantity_note"] = quantity_note
         c["inventory_lots"] = list(inventory_lots or [])
 
-        protein_profile = get_ingredient_profile(protein, "protein") if protein else None
+        protein_profiles = [
+            (name, get_ingredient_profile(name, "protein"), _clean(protein_states.get(name)) or (protein_state if name == protein else "Fresh Raw"))
+            for name in proteins
+        ]
+        protein_profile = protein_profiles[0][1] if protein_profiles else None
         vegetable_profiles = [
             get_ingredient_profile(v, "vegetable")
             for v in vegetable.split(" & ")
@@ -475,35 +485,35 @@ def generate_candidates(
         foundation_profile = get_ingredient_profile(foundation, "foundation") if foundation else None
 
         active_minutes = 0
-        if protein_profile:
-            selected_state = protein_profile.get_state(protein_state)
+        for _protein_name, current_profile, current_state in protein_profiles:
+            selected_state = current_profile.get_state(current_state)
             if selected_state:
                 active_minutes += selected_state.prep_minutes + selected_state.active_minutes
             else:
-                active_minutes += protein_profile.total_active_minutes
+                active_minutes += current_profile.total_active_minutes
         for vegetable_profile in vegetable_profiles:
             active_minutes += vegetable_profile.total_active_minutes
         if foundation_profile:
             active_minutes += foundation_profile.total_active_minutes
 
         passive_minutes = 0
-        if protein_profile:
-            selected_state = protein_profile.get_state(protein_state)
+        for _protein_name, current_profile, current_state in protein_profiles:
+            selected_state = current_profile.get_state(current_state)
             if selected_state:
-                passive_minutes = max(passive_minutes, selected_state.passive_minutes + protein_profile.rest_minutes)
+                passive_minutes = max(passive_minutes, selected_state.passive_minutes + current_profile.rest_minutes)
             else:
-                passive_minutes = max(passive_minutes, protein_profile.total_passive_minutes)
+                passive_minutes = max(passive_minutes, current_profile.total_passive_minutes)
         for vegetable_profile in vegetable_profiles:
             passive_minutes = max(passive_minutes, vegetable_profile.total_passive_minutes)
         if foundation_profile:
             passive_minutes = max(passive_minutes, foundation_profile.total_passive_minutes)
 
         attention_score = 0
-        if protein_profile:
-            selected_state = protein_profile.get_state(protein_state)
+        for _protein_name, current_profile, current_state in protein_profiles:
+            selected_state = current_profile.get_state(current_state)
             attention_score = max(
                 attention_score,
-                selected_state.attention_score if selected_state else protein_profile.attention_score,
+                selected_state.attention_score if selected_state else current_profile.attention_score,
             )
         for vegetable_profile in vegetable_profiles:
             attention_score = max(attention_score, vegetable_profile.attention_score)
@@ -515,6 +525,14 @@ def generate_candidates(
             "sauce": method_sauce,
             "protein": protein,
             "protein_state": protein_state,
+            "proteins": [
+                {
+                    "name": name,
+                    "state": _clean(protein_states.get(name)) or (protein_state if name == protein else "Fresh Raw"),
+                    "role": _clean(protein_roles.get(name)) or ("main" if name == protein else "supporting"),
+                }
+                for name in proteins
+            ],
             "vegetable": vegetable,
             "foundation": foundation,
             "selected_extras": extras,

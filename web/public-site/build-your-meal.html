@@ -28,10 +28,13 @@
     <p class="notice" data-builder-loading>Loading the meal choices…</p>
     <div data-builder-fields hidden>
       <section class="builder-section">
-        <div class="builder-section-heading"><span>1</span><div><h2>Choose the food</h2><p>One protein for now; as many vegetables or fruits as you want.</p></div></div>
+        <div class="builder-section-heading"><span>1</span><div><h2>Choose the food</h2><p>Choose a main protein and any supporting proteins, vegetables, or fruits.</p></div></div>
+        <div class="produce-picker protein-picker">
+          <label class="builder-field"><span>Proteins <em>Choose one or more</em></span><input type="search" data-protein-search placeholder="Search chicken, beans, eggs…"></label>
+          <p class="builder-help">The first selection is the main protein. Additional proteins are treated as supporting, stretching, or flavor accents—not as several full entrées.</p>
+          <div class="produce-options" data-protein-options></div>
+        </div>
         <div class="builder-two-column">
-          <label class="builder-field"><span>Protein <em>Choose one</em></span><select required data-builder-protein></select></label>
-          <label class="builder-field"><span>Protein form</span><select data-protein-state><option>Fresh Raw</option><option>Frozen Raw</option><option>Cooked</option><option>Canned</option></select><small class="field-note" data-protein-form-note>Choose the form you have or plan to buy.</small></label>
           <label class="builder-field"><span>Foundation <em>Optional</em></span><select data-builder-foundation></select></label>
           <label class="builder-field"><span>Cuisine direction</span><select data-builder-cuisine></select></label>
         </div>

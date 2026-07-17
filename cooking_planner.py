@@ -11,7 +11,7 @@ from math import ceil
 import re
 from datetime import date
 from typing import Dict, List, Optional
-from ingredient_profiles import KitchenActivity, get_ingredient_profile
+from ingredient_profiles import KitchenActivity, get_ingredient_profile, ingredient_relationships
 from equipment_profiles import build_rice_equipment_activities, choose_rice_equipment
 from sauce_profiles import get_sauce_profile
 from planner_voice import (
@@ -345,6 +345,11 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
     """Collect KO-published activities and add only meal-level orchestration."""
 
     protein = _clean(candidate.get("protein"))
+    protein_specs = [
+        item for item in candidate.get("proteins") or []
+        if isinstance(item, dict) and _clean(item.get("name"))
+    ] or [{"name": protein, "state": _clean(candidate.get("protein_state")) or "Fresh Raw", "role": "main"}]
+    protein_names = [_clean(item.get("name")) for item in protein_specs]
     vegetables = _split_joined_items(candidate.get("vegetable"))
     foundation = _clean(candidate.get("foundation"))
     strategy = _clean(candidate.get("strategy")) or "plate"
@@ -355,7 +360,7 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
     }
     sauce = _clean(candidate.get("sauce")) or "simple sauce"
     sauce_profile = get_sauce_profile(sauce)
-    components = [item for item in [protein, *vegetables, foundation] if item]
+    components = [item for item in [*protein_names, *vegetables, foundation] if item]
 
     activities: List[KitchenActivity] = [
         _planner_activity(
@@ -374,10 +379,10 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
                 strategy, component_forms.get(foundation.lower(), "")
             )
         )
-    if protein:
-        activities.extend(
-            get_ingredient_profile(protein, "protein").publish_activities(strategy, protein_state)
-        )
+    for item in protein_specs:
+        name = _clean(item.get("name"))
+        state = _clean(item.get("state")) or (protein_state if name == protein else "Fresh Raw")
+        activities.extend(get_ingredient_profile(name, "protein").publish_activities(strategy, state))
     for vegetable in vegetables:
         activities.extend(
             get_ingredient_profile(vegetable, "vegetable").publish_activities(
@@ -717,23 +722,24 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         )
         meal_structure = _clean(candidate.get("meal_structure")) or "integrated"
         plated_components = _join([foundation, *vegetables]) or "the cooked components"
+        protein_label = _join(protein_names)
         protein_has_slice = any(
-            activity.component == protein and activity.activity_type == "slice"
+            activity.component in protein_names and activity.activity_type == "slice"
             for activity in ko_activities
         )
         if protein_has_slice:
             protein_service = (
-                f"Slice {protein or 'the protein'} after its full rest, add it to the plates, and serve immediately."
+                f"Slice any rested protein that needs slicing, add {protein_label} to the plates, and serve immediately."
             )
-        elif protein:
-            protein_service = f"Add {protein} to the plates and serve immediately."
+        elif protein_names:
+            protein_service = f"Add {protein_label} to the plates and serve immediately."
         else:
             protein_service = "Serve immediately."
         if meal_structure == "layered_bowl":
             service_instruction = (
-                f"Divide {foundation} among bowls, then spoon the finished vegetables, sauce, and {protein} over it. Serve immediately."
+                f"Divide {foundation} among bowls, then arrange the finished vegetables, sauce, and {protein_label} over it. Serve immediately."
                 if foundation else
-                f"Spoon the finished vegetables, sauce, and {protein} into bowls and serve immediately."
+                f"Spoon the finished vegetables and sauce into bowls, add {protein_label}, and serve immediately."
             )
         elif meal_structure == "integrated" and strategy == "skillet":
             service_instruction = (
@@ -754,7 +760,7 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             minutes=2,
             stage="finish",
             depends_on=(
-                terminal_ids([*vegetables, foundation, protein])
+                terminal_ids([*vegetables, foundation, *protein_names])
                 + ["finish sauce:meal"]
             ),
             equipment="counter",
@@ -1113,10 +1119,13 @@ def consolidate_skillet_vegetables(
         any("tomato" in name for name in names)
         and any(any(word in name for word in ("onion", "pepper")) for name in names)
     )
+    okra_with_tomato = any("okra" in name for name in names) and any("tomato" in name for name in names)
     if mushroom_first:
         head_start, together_minutes = 6, 6
     elif rustic_sauce:
         head_start, together_minutes = 4, 8
+    elif okra_with_tomato:
+        head_start, together_minutes = 6, 4
     else:
         base_minutes = max(2, max(int(activity.minutes or 0) for activity in vegetable_activities))
         head_start = min(3, max(1, base_minutes // 3))
@@ -1173,6 +1182,10 @@ def consolidate_skillet_vegetables(
         outcome_parts.append("the chard stems are tender and the leaves are wilted")
     if any("mushroom" in name for name in names):
         outcome_parts.append("the mushrooms are browned")
+    if any("tomato" in name for name in names) and not rustic_sauce:
+        outcome_parts.append("the tomatoes are warm and softened but still hold some shape")
+    if any("okra" in name for name in names):
+        outcome_parts.append("the okra is tender with browned edges")
     outcome = "; ".join(outcome_parts) or "the vegetables are tender and ready for the sauce"
     shared = _planner_activity(
         "cook vegetables",
@@ -1207,6 +1220,90 @@ def consolidate_skillet_vegetables(
         rewritten.append(activity)
     rewritten.append(shared)
     return rewritten
+
+
+def apply_vegetable_relationship_intelligence(
+    activities: List[KitchenActivity], candidate: dict,
+) -> List[KitchenActivity]:
+    """Apply KO relationship/outcome rules before shared-vessel consolidation."""
+    structure = _clean(candidate.get("meal_structure")) or "integrated"
+    vegetables = _split_joined_items(candidate.get("vegetable"))
+    for activity in activities:
+        if activity.component not in vegetables or activity.activity_type not in {"cook", "saute"}:
+            continue
+        rules = ingredient_relationships(activity.component)
+        if not rules:
+            continue
+        key = activity.component.lower()
+        if "tomato" in key:
+            if structure in {"layered_bowl", "composed_plate"}:
+                activity.activity_type = "finish produce"
+                activity.instruction = (
+                    f"Keep {activity.component} distinct: cut it into bite-size pieces and season lightly. "
+                    "Use it fresh, or briefly blister it only if you want it warm; do not fry it into an accidental sauce."
+                )
+                activity.minutes = 2
+                activity.human_busy = True
+                activity.attention_load = 1.0
+                activity.stage = "finish"
+                activity.equipment = "counter"
+            elif len(vegetables) == 1:
+                activity.instruction = (
+                    f"Add {activity.component} near the end and cook for 3–4 minutes, just until warmed and beginning to soften. "
+                    "Stop while the pieces still hold their shape; continue longer only when you intentionally want tomato sauce."
+                )
+                activity.minutes = 4
+                activity.stage = "late"
+        elif "okra" in key:
+            activity.instruction = (
+                f"Pat {activity.component} dry. Cook it in a lightly oiled, uncrowded skillet over medium-high heat, "
+                "stirring only as needed, until browned at the edges and tender. Do not add water unless this is intentionally becoming a stew or gumbo."
+            )
+            activity.minutes = 9
+            activity.attention_load = 0.65
+    return activities
+
+
+def apply_protein_role_intelligence(
+    activities: List[KitchenActivity], candidate: dict,
+) -> List[KitchenActivity]:
+    """Turn extra proteins into accents/supports instead of duplicate entrées."""
+    specs = [item for item in candidate.get("proteins") or [] if isinstance(item, dict)]
+    if len(specs) < 2:
+        return activities
+    primary = _clean(specs[0].get("name"))
+    primary_start = next((
+        activity for activity in activities
+        if activity.component == primary and activity.activity_type in {"cook", "saute", "reheat"}
+    ), None)
+    for spec in specs[1:]:
+        name = _clean(spec.get("name"))
+        role = _clean(spec.get("role")).lower() or "supporting"
+        state = _clean(spec.get("state")).lower()
+        protein_work = [
+            activity for activity in activities
+            if activity.component == name and activity.activity_type in {"cook", "saute", "reheat"}
+        ]
+        for activity in protein_work:
+            if role == "accent" and any(word in name.lower() for word in ("bacon", "sausage", "ham", "chorizo")):
+                activity.instruction = (
+                    f"Cook {name} first until browned and safely cooked. Transfer it to a plate, leave only a light coating "
+                    "of the flavorful fat in the skillet, and reserve it to fold into the meal near the end."
+                )
+                activity.minutes = max(6, int(activity.minutes or 0))
+                activity.stage = "early"
+                activity.attention_load = 0.65
+                if primary_start and _activity_id(activity) not in primary_start.depends_on:
+                    primary_start.depends_on.append(_activity_id(activity))
+            elif state in {"cooked", "canned", "ready to eat"}:
+                activity.activity_type = "reheat"
+                activity.instruction = (
+                    f"Fold in {name} near the end and heat it gently until hot; it is a {role} protein, so do not recook it."
+                )
+                activity.minutes = 4
+                activity.stage = "late"
+                activity.attention_load = 0.5
+    return activities
 
 
 def consolidate_integrated_skillet_reheating(
@@ -1427,6 +1524,8 @@ def build_activity_graph(candidate: dict) -> Dict[str, KitchenActivity]:
                     and prep_id not in activity.depends_on
                 ):
                     activity.depends_on.append(prep_id)
+    activities = apply_protein_role_intelligence(activities, candidate)
+    activities = apply_vegetable_relationship_intelligence(activities, candidate)
     activities = consolidate_skillet_vegetables(activities, candidate)
     activities = consolidate_integrated_skillet_reheating(activities, candidate)
     activities = constrain_single_skillet_environment(activities, candidate)

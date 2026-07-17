@@ -39,6 +39,12 @@ def build_rice_equipment_activities(rice_name: str, equipment_name: str) -> List
                             attention_load=0.0, equipment="counter", stage="finish", depends_on=[f"cook:{rice_name}"], activity_id=f"rest:{rice_name}"),
         ]
     if equipment == "pressure cooker":
+        rice_key = rice_name.strip().lower()
+        # White and basmati rice need a short pressure phase.  The old generic
+        # 15-minute phase treated every rice like brown rice and made the rest
+        # of the meal wait for overcooked grains.
+        pressure_minutes = 5 if "basmati" in rice_key else 4
+        release_minutes = 10
         return [
             KitchenActivity(rice_name, "prep", "Measure the rice and water for the pressure cooker.", 2, True,
                             equipment="counter", stage="early", activity_id=prep_id),
@@ -46,9 +52,9 @@ def build_rice_equipment_activities(rice_name: str, equipment_name: str) -> List
                             equipment="pressure cooker", stage="early", depends_on=[prep_id], activity_id=f"start:{rice_name}"),
             KitchenActivity(rice_name, "pressurize", "Allow approximately 10 minutes for the cooker to come to pressure.", 10, False,
                             attention_load=0.0, equipment="pressure cooker", stage="early", depends_on=[f"start:{rice_name}"], activity_id=f"pressurize:{rice_name}"),
-            KitchenActivity(rice_name, "pressure cook", "Cook the rice at pressure for 15 minutes.", 15, False,
+            KitchenActivity(rice_name, "pressure cook", f"Cook the rice at high pressure for {pressure_minutes} minutes.", pressure_minutes, False,
                             attention_load=0.0, equipment="pressure cooker", stage="early", depends_on=[f"pressurize:{rice_name}"], activity_id=f"pressure cook:{rice_name}"),
-            KitchenActivity(rice_name, "natural release", "Leave the valve closed and allow an 8-minute natural pressure release before opening safely.", 8, False,
+            KitchenActivity(rice_name, "natural release", f"Leave the valve closed for a {release_minutes}-minute natural release, then vent any remaining pressure before opening safely.", release_minutes, False,
                             attention_load=0.0, equipment="pressure cooker", stage="finish", depends_on=[f"pressure cook:{rice_name}"], activity_id=f"natural release:{rice_name}"),
         ]
     return []

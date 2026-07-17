@@ -53,10 +53,10 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
     builder_page = (PUBLIC_FLOW.parent / "build-your-meal.html").read_text(encoding="utf-8")
 
-    assert "data-build-meal" in kitchen_page
-    assert "Help Me Build My Meal" in kitchen_page
-    assert "Give Me Meal Ideas" in kitchen_page
-    assert "Signature Recipes" in kitchen_page
+    assert "Help Me Build My Meal" in flow
+    assert "Give Me Meal Ideas" in flow
+    assert "Signature Recipes" in flow
+    assert "my-kitchen.html?start=builder" in flow
     assert 'mode: "build_your_meal"' in flow
     assert "await requestRecipe(candidate.candidate_id" in flow
     assert "One protein for now" in builder_page
@@ -109,13 +109,35 @@ def test_make_a_meal_exposes_effort_and_selection_context():
 
 
 def test_three_meal_paths_have_distinct_jobs():
-    kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    home_page = (PUBLIC_FLOW.parent / "home.html").read_text(encoding="utf-8")
     builder_page = (PUBLIC_FLOW.parent / "build-your-meal.html").read_text(encoding="utf-8")
     signature_page = (PUBLIC_FLOW.parent / "signature-recipes.html").read_text(encoding="utf-8")
 
-    assert "Give Me Meal Ideas" in kitchen_page
-    assert "Help Me Build My Meal" in kitchen_page
-    assert "Signature Recipes" in kitchen_page
+    assert "Give Me Meal Ideas" in flow
+    assert "Help Me Build My Meal" in flow
+    assert "Signature Recipes" in flow
+    assert "My Favorite Recipes" in home_page
     assert "Choose the cooking environment" in builder_page
     assert "meal structure, effort, liquid, and ingredient behavior" in builder_page
     assert "known recipe" in signature_page
+
+
+def test_logged_in_home_and_left_navigation_are_connected():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    css = (PUBLIC_FLOW.parent / "sns-flow.css").read_text(encoding="utf-8")
+    home_page = (PUBLIC_FLOW.parent / "home.html").read_text(encoding="utf-8")
+    login_page = (PUBLIC_FLOW.parent / "login.html").read_text(encoding="utf-8")
+    kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
+
+    assert "Welcome back" in home_page
+    assert "Why a remembered pantry changes dinner" in home_page
+    assert "installAppShell()" in flow
+    assert "Pantry 101" in flow
+    assert "Kitchen Training" in flow
+    assert "Household Preferences" in flow
+    assert "data-save-kitchen" in flow
+    assert "app-sidebar" in css
+    assert "position:fixed" in css
+    assert 'data-app-shell' in kitchen_page
+    assert 'location.href = "home.html"' in login_page

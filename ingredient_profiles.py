@@ -173,6 +173,13 @@ class IngredientProfile:
     work_score: int = 5
     cleanup_score: int = 5
     mental_load_score: int = 5
+    # Relationship rules describe what the ingredient needs from the meal,
+    # rather than pretending every vegetable is an isolated burner task.
+    solo_methods: tuple = ()
+    companion_methods: tuple = ()
+    preferred_companions: tuple = ()
+    avoid_solo_methods: tuple = ()
+    structure_outcomes: dict = field(default_factory=dict)
 
     @property
     def total_active_minutes(self):
@@ -555,6 +562,71 @@ ASPARAGUS = IngredientProfile(
     mental_load_score=3,
 )
 
+TOMATO_RELATIONSHIPS = {
+    "solo_methods": ("fresh", "brief blister", "roast", "bake", "broil", "grill"),
+    "companion_methods": ("saute", "simmer", "build sauce"),
+    "preferred_companions": ("onions", "peppers", "garlic", "zucchini", "beans"),
+    "avoid_solo_methods": ("long skillet fry",),
+    "structure_outcomes": {
+        "integrated": "softened into the shared dish or deliberately made sauce-like",
+        "layered_bowl": "fresh, briefly blistered, or roasted while still holding its identity",
+        "composed_plate": "fresh, roasted, baked, grilled, or briefly blistered as a distinct component",
+    },
+}
+
+OKRA_RELATIONSHIPS = {
+    "solo_methods": ("dry saute", "roast", "bread and fry", "grill"),
+    "companion_methods": ("gumbo", "stew", "tomato braise"),
+    "preferred_companions": ("tomatoes", "onions", "peppers", "corn"),
+    "avoid_solo_methods": ("generic wet simmer",),
+    "structure_outcomes": {
+        "integrated": "either dry-cooked for defined pieces or intentionally used to thicken a stew",
+        "layered_bowl": "browned or roasted with defined edges",
+        "composed_plate": "roasted, grilled, or breaded and fried as a distinct component",
+    },
+}
+
+
+def ingredient_relationships(name):
+    """Return KO relationship intelligence used by every meal path."""
+    key = _key(name)
+    if "tomato" in key:
+        return TOMATO_RELATIONSHIPS
+    if "okra" in key:
+        return OKRA_RELATIONSHIPS
+    if "mushroom" in key:
+        return {
+            "solo_methods": ("dry brown", "roast"),
+            "companion_methods": ("saute", "simmer"),
+            "preferred_companions": ("onions", "garlic", "zucchini"),
+            "avoid_solo_methods": ("wet cook before browning",),
+            "structure_outcomes": {"integrated": "browned before the pan becomes wet"},
+        }
+    if any(word in key for word in ("onion", "carrot", "pepper")):
+        return {
+            "solo_methods": ("saute", "roast"),
+            "companion_methods": ("soften", "build sauce", "simmer"),
+            "preferred_companions": (),
+            "avoid_solo_methods": (),
+            "structure_outcomes": {"integrated": "given an early head start to soften and develop flavor"},
+        }
+    if any(word in key for word in ("zucchini", "asparagus", "spinach", "chard")):
+        return {
+            "solo_methods": ("quick saute", "roast", "grill"),
+            "companion_methods": ("late saute", "brief simmer"),
+            "preferred_companions": (),
+            "avoid_solo_methods": ("long simmer",),
+            "structure_outcomes": {"integrated": "added late enough to keep useful color and texture"},
+        }
+    return {}
+
+
+def _attach_relationships(profile):
+    rules = ingredient_relationships(profile.name)
+    for field_name, value in rules.items():
+        setattr(profile, field_name, value)
+    return profile
+
 
 def _rice_activities(self, strategy="", state_name=""):
     prep_id = f"prep:{self.name}"
@@ -864,7 +936,7 @@ def get_ingredient_profile(name, role="ingredient"):
     if role == "vegetable" and k == "broccoli":
         profile = IngredientProfile(name=cleaned_name, role=role, prep_minutes=2, cook_minutes=6, holdability="fair")
         profile.publish_activities = _broccoli_activities.__get__(profile, IngredientProfile)
-        return profile
+        return _attach_relationships(profile)
     ckb_profile = _ckb_profile(cleaned_name, role)
     if ckb_profile is not None:
         # The verified CKB still contains the older cook-from-frozen activity
@@ -880,9 +952,9 @@ def get_ingredient_profile(name, role="ingredient"):
                 return publish_from_ckb(strategy, state_name)
 
             ckb_profile.publish_activities = publish_chicken.__get__(ckb_profile, IngredientProfile)
-        return ckb_profile
+        return _attach_relationships(ckb_profile) if role == "vegetable" else ckb_profile
     if k == "swiss chard":
-        return SWISS_CHARD
+        return _attach_relationships(SWISS_CHARD)
     if k == "chicken breast":
         return CHICKEN_BREAST
     if k == "black olives":
@@ -894,11 +966,12 @@ def get_ingredient_profile(name, role="ingredient"):
         profile.publish_activities = _rice_activities.__get__(profile, IngredientProfile)
         return profile
     if k == "mushrooms":
-        return MUSHROOMS
+        return _attach_relationships(MUSHROOMS)
     if k == "asparagus":
-        return ASPARAGUS
+        return _attach_relationships(ASPARAGUS)
     if k in {"lemon", "lemons", "lime", "limes"}:
         profile = IngredientProfile(name=cleaned_name, role=role, prep_minutes=2, cook_minutes=0)
         profile.publish_activities = _citrus_activities.__get__(profile, IngredientProfile)
         return profile
-    return IngredientProfile(name=cleaned_name, role=role)
+    profile = IngredientProfile(name=cleaned_name, role=role)
+    return _attach_relationships(profile) if role == "vegetable" else profile
