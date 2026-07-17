@@ -39,6 +39,10 @@ class TimelineBlock:
 def _clean(value):
     return "" if value is None else str(value).strip()
 
+
+def _strategy(candidate):
+    return _clean((candidate or {}).get("strategy") or (candidate or {}).get("cooking_method")) or "plate"
+
 def _join(items):
     cleaned = []
     for item in items:
@@ -352,7 +356,7 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
     protein_names = [_clean(item.get("name")) for item in protein_specs]
     vegetables = _split_joined_items(candidate.get("vegetable"))
     foundation = _clean(candidate.get("foundation"))
-    strategy = _clean(candidate.get("strategy")) or "plate"
+    strategy = _strategy(candidate)
     protein_state = _clean(candidate.get("protein_state")) or "Fresh Raw"
     component_forms = {
         _clean(name).lower(): _clean(form)
@@ -837,7 +841,7 @@ def consolidate_kitchen_activities(
     def consolidated_prep(activity_type, selected, depends_on, extra_instruction="", extra_minutes=0):
         instructions = []
         ground_meat_skillet = (
-            _clean((candidate or {}).get("strategy")) == "skillet"
+            _strategy(candidate) == "skillet"
             and "ground" in _clean((candidate or {}).get("protein")).lower()
         )
         for activity in selected:
@@ -899,7 +903,7 @@ def consolidate_kitchen_activities(
     if launch_prep:
         replacements.append(consolidated_prep("launch prep", launch_prep, ["gather:meal"]))
     sauce = _clean((candidate or {}).get("sauce"))
-    strategy = _clean((candidate or {}).get("strategy"))
+    strategy = _strategy(candidate)
     sauce_profile = get_sauce_profile(sauce)
     sauce_instruction = (
         "" if strategy == "soup"
@@ -995,7 +999,7 @@ def consolidate_skillet_vegetables(
     start for the sturdier ingredient, not in consecutive isolated recipes.
     """
     if (
-        _clean(candidate.get("strategy")) != "skillet"
+        _strategy(candidate) != "skillet"
         or _clean(candidate.get("meal_structure")) == "composed_plate"
     ):
         return activities
@@ -1312,7 +1316,7 @@ def consolidate_integrated_skillet_reheating(
 ) -> List[KitchenActivity]:
     """Bring ready-to-eat components into one skillet after browning/softening."""
     if (
-        _clean(candidate.get("strategy")) != "skillet"
+        _strategy(candidate) != "skillet"
         or _clean(candidate.get("meal_structure")) == "composed_plate"
     ):
         return activities
@@ -1396,7 +1400,7 @@ def constrain_single_skillet_environment(
     activities. This pass protects those cooking environments from unrelated
     burner work while still allowing a separate foundation pot or appliance.
     """
-    if _clean(candidate.get("strategy")) != "skillet":
+    if _strategy(candidate) != "skillet":
         return activities
     foundation = _clean(candidate.get("foundation"))
     skillet_work = [
@@ -1514,7 +1518,7 @@ def build_activity_graph(candidate: dict) -> Dict[str, KitchenActivity]:
     activities = build_cooking_activities(candidate)
     activities = assign_available_equipment(activities, candidate)
     activities = consolidate_kitchen_activities(activities, candidate)
-    if _clean(candidate.get("strategy")) == "skillet":
+    if _strategy(candidate) == "skillet":
         prep_id = "prep:meal"
         if any(_activity_id(activity) == prep_id for activity in activities):
             for activity in activities:
@@ -1855,7 +1859,7 @@ def build_cooking_plan(candidate: dict) -> List[CookingStep]:
     foundation = _clean(candidate.get("foundation"))
     sauce = _clean(candidate.get("sauce")) or "simple sauce"
     cuisine = _clean(candidate.get("cuisine")) or "Comfort Food"
-    strategy = _clean(candidate.get("strategy")) or "plate"
+    strategy = _strategy(candidate)
     protein_state = _clean(candidate.get("protein_state")) or "Fresh Raw"
 
     components = _join([protein, vegetable, foundation])

@@ -12,6 +12,8 @@ from pathlib import Path
 import sqlite3
 from typing import List, Optional
 
+from ko_behavior import resolve_behavior
+
 try:
     from config import DB_PATH
 except Exception:
@@ -918,6 +920,105 @@ BLACK_OLIVES.publish_activities = _olive_activities.__get__(BLACK_OLIVES, Ingred
 RICE.publish_activities = _rice_activities.__get__(RICE, IngredientProfile)
 
 
+def _family_activities(self, strategy="", state_name=""):
+    """Publish activities inherited from a reusable KO behavior family."""
+    resolved = resolve_behavior(self.name, self.role, state_name, strategy, DB_PATH)
+    rule = resolved.method
+    if rule is None:
+        # This profile is classified, but the requested environment is not.
+        # An explicit incompatibility activity prevents the old generic
+        # "cook until ready" fallback from masquerading as knowledge.
+        return [KitchenActivity(
+            component=self.name,
+            activity_type="method_conflict",
+            instruction=resolved.incompatibility_reason or
+                f"Choose a trained cooking method for {self.name} in its {state_name or 'saved'} form.",
+            minutes=0, human_busy=False, attention_load=0,
+            stage="early", parallel_ok=False, equipment="counter",
+            source="ko_family_gate", activity_id=f"method_conflict:{self.name}",
+        )]
+
+    handling = rule.handling_template.format(name=self.name)
+    if resolved.primary_family.code == "ready_protein":
+        handling = (
+            f"Drain {self.name} and break it into serving-size pieces."
+            if _key(self.name).startswith("canned ") else
+            f"Remove any bones or skin as desired, then slice or shred {self.name}."
+        )
+    state_key = _key(state_name)
+    if state_key == "canned" and self.role in {"foundation", "vegetable"} and "bean" in _key(self.name):
+        handling = f"Drain and rinse {self.name}. Leave them whole, or mash some for a creamier texture."
+    if state_key == "frozen raw" and resolved.primary_family.code == "ground_meat":
+        handling = f"Transfer the thawed {self.name.lower()} to a clean plate and keep it separate from ready-to-eat food."
+    operation = rule.instruction_template.format(name=self.name)
+    if state_key == "canned" and "bean" in _key(self.name):
+        operation = f"Stir in {self.name}, mash or purée some if desired, and heat it gently until steaming hot."
+    endpoint = rule.doneness_cue.strip()
+    if endpoint and endpoint.lower() not in operation.lower():
+        operation = f"{operation} Stop when {endpoint[0].lower() + endpoint[1:]}"
+    prep_id = f"prep:{self.name}"
+    if rule.method == "assemble" or rule.cook_minutes == 0:
+        return [KitchenActivity(
+            component=self.name, activity_type="assemble",
+            instruction=f"{handling} {operation}",
+            minutes=max(rule.prep_minutes, rule.active_minutes), human_busy=True,
+            attention_load=rule.attention_load, stage=rule.stage,
+            parallel_ok=True, equipment=rule.equipment,
+            source="ko", activity_id=f"assemble:{self.name}",
+        )]
+    activities = [
+        KitchenActivity(
+            component=self.name, activity_type="prep", instruction=handling,
+            minutes=rule.prep_minutes, human_busy=True, attention_load=1,
+            stage="early" if rule.stage == "early" else "middle",
+            parallel_ok=True, equipment="counter", source="ko",
+            activity_id=prep_id,
+        ),
+        KitchenActivity(
+            component=self.name,
+            activity_type="reheat" if rule.method == "reheat" else "cook",
+            instruction=operation, minutes=rule.cook_minutes,
+            human_busy=True, attention_load=rule.attention_load,
+            stage=rule.stage, parallel_ok=False, equipment=rule.equipment,
+            depends_on=[prep_id], source="ko",
+            activity_id=f"{'reheat' if rule.method == 'reheat' else 'cook'}:{self.name}",
+        ),
+    ]
+    if state_key == "frozen raw" and resolved.primary_family.code == "ground_meat":
+        thaw_id = f"thaw:{self.name}"
+        activities.insert(0, KitchenActivity(
+            component=self.name, activity_type="thaw",
+            instruction=(
+                f"Remove all packaging and place {self.name} on a microwave-safe plate. "
+                "Use the microwave defrost setting for about 7 minutes per pound as a starting point, "
+                "turning it and scraping away softened portions as they thaw. Cook it immediately."
+            ),
+            minutes=7, human_busy=True, attention_load=.65,
+            stage="early", parallel_ok=False, equipment="microwave",
+            source="ko", activity_id=thaw_id,
+        ))
+        activities[1].depends_on = [thaw_id]
+    return activities
+
+
+def _family_profile(name, role):
+    resolved = resolve_behavior(name, role, db_path=DB_PATH)
+    if not resolved.primary_family or not resolved.method:
+        return None
+    rule = resolved.method
+    profile = IngredientProfile(
+        name=name, role=role, prep_minutes=rule.prep_minutes,
+        cook_minutes=rule.cook_minutes, active_minutes=rule.active_minutes,
+        attention_score=round(rule.attention_load * 10), add_stage=rule.stage,
+        holdability=rule.holdability, preferred_method=rule.method,
+        desired_outcome=rule.desired_outcome, failure_mode=rule.failure_mode,
+        recovery_hint=rule.recovery_hint, handling_note=rule.handling_template.format(name=name),
+        cooking_note=rule.instruction_template.format(name=name),
+    )
+    profile.publish_activities = _family_activities.__get__(profile, IngredientProfile)
+    return profile
+
+
 def get_ingredient_profile(name, role="ingredient"):
     """Return a smart profile or a safe generic fallback profile."""
 
@@ -973,5 +1074,8 @@ def get_ingredient_profile(name, role="ingredient"):
         profile = IngredientProfile(name=cleaned_name, role=role, prep_minutes=2, cook_minutes=0)
         profile.publish_activities = _citrus_activities.__get__(profile, IngredientProfile)
         return profile
+    family_profile = _family_profile(cleaned_name, role)
+    if family_profile is not None:
+        return _attach_relationships(family_profile) if role == "vegetable" else family_profile
     profile = IngredientProfile(name=cleaned_name, role=role)
     return _attach_relationships(profile) if role == "vegetable" else profile

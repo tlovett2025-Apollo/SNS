@@ -7,9 +7,11 @@ from contextlib import closing
 from pathlib import Path
 
 from ckb_training import (
-    ACTIVITY_COLUMNS, FORM_COLUMNS, PROFILE_COLUMNS, STATE_COLUMNS,
+    ACTIVITY_COLUMNS, BEHAVIOR_FAMILY_COLUMNS, BEHAVIOR_MEMBERSHIP_COLUMNS,
+    FAMILY_METHOD_COLUMNS, FORM_COLUMNS, PROFILE_COLUMNS, STATE_COLUMNS,
     import_training_rows, validate_alpha_gal_classification, validate_training_file,
 )
+from ko_behavior import resolve_behavior
 from schema import MIGRATIONS, SCHEMA_SQL
 
 
@@ -241,6 +243,47 @@ class CKBTrainingSafetyTests(unittest.TestCase):
                 "SELECT knowledge_status FROM ingredients WHERE name='Centauran Gotlet Ribs'"
             ).fetchone()[0]
         self.assertEqual("fictional_test", status)
+
+    def test_family_method_and_membership_training_make_a_new_ko_operational(self):
+        family_path = self._write_csv("family.csv", BEHAVIOR_FAMILY_COLUMNS, [{
+            "family_code": "fictional_roast", "family_name": "Fictional roast",
+            "role": "protein", "description": "A test roast family",
+            "physical_traits": "large,raw", "verified": "1",
+        }])
+        rows, _ = validate_training_file(family_path, "Behavior Families", self.db_path)
+        import_training_rows(rows, "Behavior Families", self.db_path)
+
+        method_path = self._write_csv("method.csv", FAMILY_METHOD_COLUMNS, [{
+            "family_code": "fictional_roast", "method_name": "roast",
+            "form_name": "Fresh Raw", "cooking_environment": "preheated oven",
+            "creates_environment": "roasting pan", "prep_minutes": "5",
+            "cook_minutes": "40", "active_minutes": "5", "attention_load": ".2",
+            "equipment_name": "oven", "add_stage": "early",
+            "desired_outcome": "Tender slices", "handling_template": "Prepare {name}.",
+            "instruction_template": "Roast {name} evenly.",
+            "doneness_cue": "The verified fictional endpoint is reached.",
+            "failure_mode": "It may remain tough.",
+            "recovery_hint": "Continue roasting gently.", "holdability": "good",
+            "verified": "1",
+        }])
+        rows, _ = validate_training_file(method_path, "Family Methods", self.db_path)
+        import_training_rows(rows, "Family Methods", self.db_path)
+
+        membership_path = self._write_csv("membership.csv", BEHAVIOR_MEMBERSHIP_COLUMNS, [{
+            "ingredient_name": "Centauran Gotlet Ribs", "family_code": "fictional_roast",
+            "form_name": "", "priority": "100", "is_primary": "1",
+            "notes": "Importer contract test", "verified": "1",
+        }])
+        rows, _ = validate_training_file(
+            membership_path, "Ingredient Behavior Memberships", self.db_path
+        )
+        import_training_rows(rows, "Ingredient Behavior Memberships", self.db_path)
+
+        behavior = resolve_behavior(
+            "Centauran Gotlet Ribs", "protein", "Fresh Raw", "roast", self.db_path
+        )
+        self.assertEqual("fictional_roast", behavior.primary_family.code)
+        self.assertEqual(40, behavior.method.cook_minutes)
 
 
 if __name__ == "__main__":

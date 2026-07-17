@@ -42,6 +42,23 @@ INGREDIENT_METADATA_COLUMNS = [
     "ingredient_name", "knowledge_status", "reason", "verified",
 ]
 
+BEHAVIOR_FAMILY_COLUMNS = [
+    "family_code", "family_name", "role", "description", "physical_traits", "verified",
+]
+
+FAMILY_METHOD_COLUMNS = [
+    "family_code", "method_name", "form_name", "cooking_environment",
+    "creates_environment", "prep_minutes", "cook_minutes", "active_minutes",
+    "attention_load", "equipment_name", "add_stage", "desired_outcome",
+    "handling_template", "instruction_template", "doneness_cue", "failure_mode",
+    "recovery_hint", "holdability", "verified",
+]
+
+BEHAVIOR_MEMBERSHIP_COLUMNS = [
+    "ingredient_name", "family_code", "form_name", "priority", "is_primary",
+    "notes", "verified",
+]
+
 TRAINING_COLUMNS = {
     "Ingredient Forms": FORM_COLUMNS,
     "Ingredient States": STATE_COLUMNS,
@@ -50,6 +67,9 @@ TRAINING_COLUMNS = {
     "Protein Safety Corrections": PROTEIN_SAFETY_COLUMNS,
     "Ingredient Form Corrections": FORM_CORRECTION_COLUMNS,
     "Ingredient Metadata Corrections": INGREDIENT_METADATA_COLUMNS,
+    "Behavior Families": BEHAVIOR_FAMILY_COLUMNS,
+    "Family Methods": FAMILY_METHOD_COLUMNS,
+    "Ingredient Behavior Memberships": BEHAVIOR_MEMBERSHIP_COLUMNS,
 }
 
 FLAG_VALUES = {"0", "1", "false", "true", "no", "yes", "n", "y"}
@@ -174,12 +194,80 @@ def validate_training_file(csv_path, import_type, db_path):
         cur = con.cursor()
         seen = set()
         for row_number, row in enumerate(rows, start=2):
-            ingredient_name = _require_text(row, "ingredient_name", row_number)
+            ingredient_name = clean(row.get("ingredient_name"))
             ingredient_id = None
-            if import_type not in {"KO Profiles", "KO Activities"}:
+            if import_type not in {"Behavior Families", "Family Methods"}:
+                ingredient_name = _require_text(row, "ingredient_name", row_number)
+            if import_type not in {"KO Profiles", "KO Activities", "Behavior Families", "Family Methods"}:
                 ingredient_id = _ingredient_id(cur, ingredient_name, row_number)
 
-            if import_type == "Ingredient Forms":
+            if import_type == "Behavior Families":
+                family_code = _require_text(row, "family_code", row_number).lower()
+                role = _require_text(row, "role", row_number).lower()
+                _require_text(row, "family_name", row_number)
+                _require_text(row, "description", row_number)
+                flag(row["verified"], "verified", row_number)
+                if role not in ROLES:
+                    raise ValueError(f"Invalid role on CSV row {row_number}: {role!r}")
+                _reject_duplicates(seen, family_code, row_number)
+                if cur.execute("SELECT 1 FROM ko_behavior_families WHERE family_code=?", (family_code,)).fetchone():
+                    raise ValueError(f"Behavior family already exists on CSV row {row_number}: {family_code}")
+
+            elif import_type == "Family Methods":
+                family_code = _require_text(row, "family_code", row_number).lower()
+                method_name = _require_text(row, "method_name", row_number).lower()
+                form_name = clean(row["form_name"])
+                family = cur.execute(
+                    "SELECT family_id FROM ko_behavior_families WHERE family_code=? AND verified=1",
+                    (family_code,),
+                ).fetchone()
+                if not family:
+                    raise ValueError(f"Verified behavior family not found on CSV row {row_number}: {family_code}")
+                for field in ["cooking_environment", "desired_outcome", "instruction_template", "doneness_cue", "failure_mode", "recovery_hint"]:
+                    _require_text(row, field, row_number)
+                for field in ["prep_minutes", "cook_minutes", "active_minutes"]:
+                    integer(row[field], field, row_number)
+                decimal(row["attention_load"], "attention_load", row_number, 0.0, 1.0)
+                flag(row["verified"], "verified", row_number)
+                if clean(row["add_stage"]).lower() not in STAGES:
+                    raise ValueError(f"Invalid add_stage on CSV row {row_number}: {row['add_stage']!r}")
+                if clean(row["holdability"]).lower() not in HOLDABILITY:
+                    raise ValueError(f"Invalid holdability on CSV row {row_number}: {row['holdability']!r}")
+                key = (family_code, method_name, form_name.lower())
+                _reject_duplicates(seen, key, row_number)
+                if cur.execute(
+                    "SELECT 1 FROM ko_family_methods WHERE family_id=? AND method_name=? AND lower(form_name)=lower(?)",
+                    (family[0], method_name, form_name),
+                ).fetchone():
+                    raise ValueError(f"Family method already exists on CSV row {row_number}: {key}")
+
+            elif import_type == "Ingredient Behavior Memberships":
+                family_code = _require_text(row, "family_code", row_number).lower()
+                form_name = clean(row["form_name"])
+                priority = integer(row["priority"], "priority", row_number, 0)
+                is_primary = flag(row["is_primary"], "is_primary", row_number)
+                verified = flag(row["verified"], "verified", row_number)
+                family = cur.execute(
+                    "SELECT family_id, role FROM ko_behavior_families WHERE family_code=? AND verified=1",
+                    (family_code,),
+                ).fetchone()
+                if not family:
+                    raise ValueError(f"Verified behavior family not found on CSV row {row_number}: {family_code}")
+                key = (ingredient_name.lower(), family_code, form_name.lower())
+                _reject_duplicates(seen, key, row_number)
+                if is_primary and verified and cur.execute(
+                    """SELECT 1 FROM ingredient_behavior_memberships
+                       WHERE ingredient_id=? AND form_name=? AND is_primary=1 AND verified=1""",
+                    (ingredient_id, form_name),
+                ).fetchone():
+                    raise ValueError(f"Ingredient already has a verified primary family on CSV row {row_number}: {ingredient_name}")
+                if cur.execute(
+                    "SELECT 1 FROM ingredient_behavior_memberships WHERE ingredient_id=? AND family_id=? AND form_name=?",
+                    (ingredient_id, family[0], form_name),
+                ).fetchone():
+                    raise ValueError(f"Behavior membership already exists on CSV row {row_number}: {key}")
+
+            elif import_type == "Ingredient Forms":
                 form_name = _require_text(row, "form_name", row_number)
                 key = (ingredient_name.lower(), form_name.lower())
                 _reject_duplicates(seen, key, row_number)
@@ -332,16 +420,64 @@ def import_training_rows(rows, import_type, db_path):
     try:
         cur = con.cursor()
         for row in rows:
-            ingredient_name = clean(row["ingredient_name"])
+            ingredient_name = clean(row.get("ingredient_name"))
             ingredient_id = None
             component_name = ingredient_name
             if import_type in {"KO Profiles", "KO Activities"}:
                 role = clean(row["role"]).lower()
                 ingredient_id, component_name = _component(cur, ingredient_name, role, imported + 2)
-            else:
+            elif import_type not in {"Behavior Families", "Family Methods"}:
                 ingredient_id = _ingredient_id(cur, ingredient_name, imported + 2)
 
-            if import_type == "Ingredient Forms":
+            if import_type == "Behavior Families":
+                cur.execute(
+                    """INSERT INTO ko_behavior_families
+                       (family_code, family_name, role, description, physical_traits, verified)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (clean(row["family_code"]).lower(), clean(row["family_name"]),
+                     clean(row["role"]).lower(), clean(row["description"]),
+                     clean(row["physical_traits"]), flag(row["verified"], "verified", 0)),
+                )
+
+            elif import_type == "Family Methods":
+                family_id = cur.execute(
+                    "SELECT family_id FROM ko_behavior_families WHERE family_code=?",
+                    (clean(row["family_code"]).lower(),),
+                ).fetchone()[0]
+                cur.execute(
+                    """INSERT INTO ko_family_methods
+                       (family_id, method_name, form_name, cooking_environment,
+                        creates_environment, prep_minutes, cook_minutes, active_minutes,
+                        attention_load, equipment_name, add_stage, desired_outcome,
+                        handling_template, instruction_template, doneness_cue,
+                        failure_mode, recovery_hint, holdability, verified)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (family_id, clean(row["method_name"]).lower(), clean(row["form_name"]),
+                     clean(row["cooking_environment"]), clean(row["creates_environment"]),
+                     int(row["prep_minutes"]), int(row["cook_minutes"]), int(row["active_minutes"]),
+                     float(row["attention_load"]), clean(row["equipment_name"]),
+                     clean(row["add_stage"]).lower(), clean(row["desired_outcome"]),
+                     clean(row["handling_template"]), clean(row["instruction_template"]),
+                     clean(row["doneness_cue"]), clean(row["failure_mode"]),
+                     clean(row["recovery_hint"]), clean(row["holdability"]).lower(),
+                     flag(row["verified"], "verified", 0)),
+                )
+
+            elif import_type == "Ingredient Behavior Memberships":
+                family_id = cur.execute(
+                    "SELECT family_id FROM ko_behavior_families WHERE family_code=?",
+                    (clean(row["family_code"]).lower(),),
+                ).fetchone()[0]
+                cur.execute(
+                    """INSERT INTO ingredient_behavior_memberships
+                       (ingredient_id, family_id, form_name, priority, is_primary, notes, verified)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (ingredient_id, family_id, clean(row["form_name"]), int(row["priority"]),
+                     flag(row["is_primary"], "is_primary", 0), clean(row["notes"]),
+                     flag(row["verified"], "verified", 0)),
+                )
+
+            elif import_type == "Ingredient Forms":
                 cur.execute(
                     "INSERT INTO ingredient_forms (ingredient_id, form_name, pantry_style, notes) VALUES (?, ?, ?, ?)",
                     (ingredient_id, clean(row["form_name"]), clean(row["pantry_style"]), clean(row["notes"])),

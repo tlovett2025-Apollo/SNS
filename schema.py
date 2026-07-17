@@ -363,6 +363,84 @@ CREATE TABLE IF NOT EXISTS ko_activities (
     FOREIGN KEY (ingredient_id) REFERENCES ingredients(ingredient_id)
 );
 
+-- Reusable KO behavior families.  An ingredient can belong to several
+-- families: one operational family plus trait/relationship families.
+CREATE TABLE IF NOT EXISTS ko_behavior_families (
+    family_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    family_code TEXT NOT NULL UNIQUE,
+    family_name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    description TEXT NOT NULL,
+    physical_traits TEXT,
+    verified INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS ko_family_methods (
+    family_method_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    family_id INTEGER NOT NULL,
+    method_name TEXT NOT NULL,
+    form_name TEXT NOT NULL DEFAULT '',
+    cooking_environment TEXT NOT NULL,
+    creates_environment TEXT,
+    prep_minutes INTEGER DEFAULT 0,
+    cook_minutes INTEGER DEFAULT 0,
+    active_minutes INTEGER DEFAULT 0,
+    attention_load REAL DEFAULT 1.0,
+    equipment_name TEXT,
+    add_stage TEXT DEFAULT 'middle',
+    desired_outcome TEXT NOT NULL,
+    handling_template TEXT,
+    instruction_template TEXT NOT NULL,
+    doneness_cue TEXT NOT NULL,
+    failure_mode TEXT NOT NULL,
+    recovery_hint TEXT NOT NULL,
+    holdability TEXT,
+    verified INTEGER DEFAULT 0,
+    UNIQUE(family_id, method_name, form_name),
+    FOREIGN KEY (family_id) REFERENCES ko_behavior_families(family_id)
+);
+
+CREATE TABLE IF NOT EXISTS ingredient_behavior_memberships (
+    membership_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ingredient_id INTEGER NOT NULL,
+    family_id INTEGER NOT NULL,
+    form_name TEXT NOT NULL DEFAULT '',
+    priority INTEGER DEFAULT 100,
+    is_primary INTEGER DEFAULT 0,
+    notes TEXT,
+    verified INTEGER DEFAULT 0,
+    UNIQUE(ingredient_id, family_id, form_name),
+    FOREIGN KEY (ingredient_id) REFERENCES ingredients(ingredient_id),
+    FOREIGN KEY (family_id) REFERENCES ko_behavior_families(family_id)
+);
+
+CREATE TABLE IF NOT EXISTS ko_relationship_rules (
+    relationship_rule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    family_id INTEGER NOT NULL,
+    relationship_type TEXT NOT NULL,
+    target_family_code TEXT,
+    target_ingredient_name TEXT,
+    meal_structure TEXT,
+    cooking_environment TEXT,
+    rule_text TEXT NOT NULL,
+    priority INTEGER DEFAULT 100,
+    verified INTEGER DEFAULT 0,
+    FOREIGN KEY (family_id) REFERENCES ko_behavior_families(family_id)
+);
+
+CREATE TABLE IF NOT EXISTS ko_ingredient_exceptions (
+    exception_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ingredient_id INTEGER NOT NULL,
+    form_name TEXT NOT NULL DEFAULT '',
+    method_name TEXT NOT NULL DEFAULT '',
+    field_name TEXT NOT NULL,
+    override_value TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    verified INTEGER DEFAULT 0,
+    UNIQUE(ingredient_id, form_name, method_name, field_name),
+    FOREIGN KEY (ingredient_id) REFERENCES ingredients(ingredient_id)
+);
+
 CREATE TABLE IF NOT EXISTS ckb_change_log (
     change_id INTEGER PRIMARY KEY AUTOINCREMENT,
     change_type TEXT NOT NULL,
@@ -420,6 +498,8 @@ def create_schema():
     with sqlite3.connect(DB_PATH) as conn:
         conn.executescript(SCHEMA_SQL)
         _run_migrations(conn)
+        from ko_behavior import seed_behavior_memberships
+        seed_behavior_memberships(conn)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_user_inventory_household ON user_inventory(household_id)"
         )

@@ -1,4 +1,6 @@
 from ingredient_profiles import get_ingredient_profile
+from ko_behavior import resolve_behavior
+from config import DB_PATH
 from cooking_planner import (
     assess_time_feasibility,
     build_kitchen_lane_schedule,
@@ -402,6 +404,24 @@ def generate_candidates(
 
     candidates = []
     for method in methods:
+        # A classified ingredient may only enter a cooking environment for
+        # which its KO family has an explicit method. Unclassified legacy KOs
+        # remain visible for migration; classified-but-incompatible ones do
+        # not fall through to invented generic cooking language.
+        environment = method["cooking_method"]
+        behavior_components = [
+            *[(name, "protein", _clean(protein_states.get(name)) or (protein_state if name == protein else "Fresh Raw")) for name in proteins],
+            *[(name, "vegetable", _clean(component_forms.get(name)) or "Fresh") for name in _clean(vegetable).split(" & ") if _clean(name)],
+            *([(foundation, "foundation", _clean(component_forms.get(foundation)) or "")] if foundation else []),
+        ]
+        incompatible = False
+        for component_name, component_role, component_form in behavior_components:
+            behavior = resolve_behavior(component_name, component_role, component_form, environment, DB_PATH)
+            if behavior.primary_family and behavior.method is None:
+                incompatible = True
+                break
+        if incompatible:
+            continue
         is_soup = method["cooking_method"] == "soup"
         method_sauce = "rustic broth soup" if is_soup else sauce
         method_ingredients = (
