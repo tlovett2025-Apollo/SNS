@@ -58,6 +58,60 @@ class APIHTTPTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["household_id"], "house-1")
 
+    def test_my_kitchen_can_request_server_owned_inventory_contracts(self):
+        with patch("api_http._SUPABASE") as gateway:
+            gateway.token_from_authorization.return_value = "user-token"
+            gateway.kitchen_snapshot.return_value = {
+                "household_id": "house-1", "inventory": [], "equipment": []
+            }
+            response = self.client.get(
+                "/api/MyKitchen?include_contracts=true",
+                headers={"Authorization": "Bearer user-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        contracts = {item["name"]: item for item in response.json()["inventory_contracts"]}
+        self.assertIn("Chicken breast", contracts)
+        self.assertIn("lb", contracts["Chicken breast"]["allowed_units"])
+        self.assertEqual(contracts["Chicken broth"]["contract_version"], "inventory-2.0")
+
+    def test_shared_kitchen_save_canonicalizes_alias_form_and_legacy_unit(self):
+        with patch("api_http._SUPABASE") as gateway:
+            gateway.token_from_authorization.return_value = "user-token"
+            gateway.sync_kitchen.return_value = {"household_id": "house-1"}
+            response = self.client.post(
+                "/api/SaveMyKitchen",
+                json={
+                    "inventory": [{
+                        "name": "ribeye", "form": "Refrigerated",
+                        "quantity": 2, "unit": "items", "storage": "Fridge",
+                    }]
+                },
+                headers={"Authorization": "Bearer user-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        saved = gateway.sync_kitchen.call_args.args[1]["inventory"][0]
+        self.assertEqual(saved["name"], "Ribeye steak")
+        self.assertEqual(saved["unit"], "piece")
+
+    def test_shared_kitchen_save_rejects_an_impossible_unit(self):
+        with patch("api_http._SUPABASE") as gateway:
+            gateway.token_from_authorization.return_value = "user-token"
+            response = self.client.post(
+                "/api/SaveMyKitchen",
+                json={
+                    "inventory": [{
+                        "name": "Chicken breast", "form": "Fresh Raw",
+                        "quantity": 1, "unit": "jar", "storage": "Fridge",
+                    }]
+                },
+                headers={"Authorization": "Bearer user-token"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("cannot be stored", response.json()["detail"])
+
     def test_anonymous_kitchen_save_is_rejected(self):
         response = self.client.post("/api/SaveMyKitchen", json=kitchen_payload())
 

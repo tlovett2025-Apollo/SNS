@@ -23,6 +23,11 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from config import DB_PATH
+from inventory_contract import (
+    InventoryContractError,
+    inventory_profile,
+    normalize_unit,
+)
 
 
 MAX_PHOTO_BYTES = 6 * 1024 * 1024
@@ -223,6 +228,25 @@ def normalize_capture_candidates(
         form, storage = _form_and_storage(raw, matched)
         confidence = min(1.0, max(0.0, _float(raw.get("confidence"), match_confidence)))
         unit = _unit(raw.get("unit"), form)
+        if matched:
+            try:
+                profile = inventory_profile(canonical_name, form, db_path=db_path)
+                requested_unit = normalize_unit(raw.get("unit"))
+                # Recognition providers frequently call every retail object a
+                # package. Prefer the ingredient/form contract when the
+                # provider supplied no meaningful unit (for example a can).
+                if (
+                    not requested_unit
+                    or requested_unit not in profile.allowed_units
+                    or (requested_unit == "package" and profile.default_unit == "can")
+                ):
+                    unit = profile.default_unit
+                else:
+                    unit = requested_unit
+                form = profile.default_form
+                storage = profile.default_storage
+            except InventoryContractError:
+                status = "needs_review"
         quantity = _float(raw.get("quantity"), 1.0)
         key = (_key(canonical_name), storage)
         prior = drafts.get(key)

@@ -28,6 +28,7 @@ from inventory_capture import (
     recognize_pantry_photo,
     resolve_barcode,
 )
+from inventory_contract import inventory_catalog
 from recipe_reports import RecipeReportError, normalize_recipe_report
 from supabase_gateway import (
     SupabaseGateway,
@@ -136,28 +137,28 @@ def _durable_payload(payload: dict, authorization: str | None) -> dict:
 def _canonical_sync_payload(payload: dict) -> dict:
     """Resolve known aliases before they become the household source of truth."""
     normalized = normalize_kitchen_snapshot(payload)
-    resolved, _pending = resolve_inventory(normalized, DB_PATH)
+    resolved, _pending = resolve_inventory(
+        normalized, DB_PATH, strict_contract=True
+    )
     canonical = {
-        str(item.source.get("name") or "").strip().lower(): (item.name, item.form_name)
+        str(item.source.get("_requested_name") or item.source.get("name") or "").strip().lower(): item
         for item in resolved
     }
     inventory = []
     for item in normalized["inventory_lots"]:
-        name, form = canonical.get(
-            str(item.get("name") or "").strip().lower(),
-            (item.get("name"), item.get("form")),
-        )
+        resolved_item = canonical.get(str(item.get("name") or "").strip().lower())
+        source = resolved_item.source if resolved_item else item
         inventory.append({
-            "name": name,
-            "form": form,
-            "storage": item.get("storage_location"),
-            "quantity": item.get("quantity"),
-            "unit": item.get("unit"),
-            "origin": item.get("origin"),
-            "opened_at": item.get("opened_at"),
-            "refrigerated_after_opening": item.get("refrigerated_after_opening"),
-            "package_weight_oz": item.get("package_weight_oz"),
-            "expiration_date": item.get("expiration_date"),
+            "name": resolved_item.name if resolved_item else item.get("name"),
+            "form": resolved_item.form_name if resolved_item else item.get("form"),
+            "storage": source.get("storage_location"),
+            "quantity": source.get("quantity"),
+            "unit": source.get("unit"),
+            "origin": source.get("origin"),
+            "opened_at": source.get("opened_at"),
+            "refrigerated_after_opening": source.get("refrigerated_after_opening"),
+            "package_weight_oz": source.get("package_weight_oz"),
+            "expiration_date": source.get("expiration_date"),
         })
     canonical_payload = dict(payload)
     canonical_payload["inventory"] = inventory
@@ -165,10 +166,16 @@ def _canonical_sync_payload(payload: dict) -> dict:
 
 
 @app.get("/api/MyKitchen")
-def get_kitchen_endpoint(authorization: str | None = Header(default=None)) -> dict:
+def get_kitchen_endpoint(
+    authorization: str | None = Header(default=None),
+    include_contracts: bool = False,
+) -> dict:
     """Return the signed-in user's RLS-protected household kitchen."""
     try:
-        return _SUPABASE.kitchen_snapshot(_access_token(authorization))
+        snapshot = _SUPABASE.kitchen_snapshot(_access_token(authorization))
+        if include_contracts:
+            snapshot["inventory_contracts"] = inventory_catalog(DB_PATH)
+        return snapshot
     except Exception as exc:
         raise _domain_error(exc) from exc
 

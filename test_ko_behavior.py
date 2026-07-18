@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from config import DB_PATH
+from inventory_contract import inventory_catalog
 from ko_behavior import (
     FAMILY_LIBRARY,
     family_codes_for,
@@ -174,30 +175,20 @@ class KOBehaviorFamilyTests(unittest.TestCase):
         finally:
             con.close()
 
-    def test_every_real_catalog_form_resolves_to_complete_ko_knowledge(self):
-        con = sqlite3.connect(DB_PATH)
-        try:
-            rows = con.execute(
-                """SELECT i.name,i.category,coalesce(f.form_name,'')
-                     FROM ingredients i LEFT JOIN ingredient_forms f USING(ingredient_id)
-                    WHERE i.active=1 ORDER BY i.name,f.form_name"""
-            ).fetchall()
-            failures = []
-            for name, category, form_name in rows:
-                if name == "Centauran Gotlet Ribs":
-                    continue
-                role = (
-                    "protein" if category.lower() == "protein"
-                    else "foundation" if category.lower() == "foundation"
-                    else "vegetable" if category.lower() in {"vegetable", "fruit"}
-                    else "ingredient"
+    def test_every_editable_inventory_contract_resolves_to_complete_ko_knowledge(self):
+        failures = []
+        profiles = inventory_catalog(DB_PATH)
+        self.assertGreaterEqual(len(profiles), 139)
+        for profile in profiles:
+            report = audit_behavior(
+                profile["name"], profile["role"], profile["default_form"],
+                db_path=DB_PATH,
+            )
+            if not report.operational:
+                failures.append(
+                    (profile["name"], profile["default_form"], report.missing)
                 )
-                report = audit_behavior(name, role, form_name, db_path=DB_PATH)
-                if not report.operational:
-                    failures.append((name, form_name, report.missing))
-            self.assertEqual(failures, [])
-        finally:
-            con.close()
+        self.assertEqual(failures, [])
 
     def test_every_family_method_carries_outcome_failure_and_recovery_knowledge(self):
         incomplete = []

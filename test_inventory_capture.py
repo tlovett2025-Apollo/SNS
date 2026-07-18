@@ -67,6 +67,7 @@ class InventoryCaptureTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["name"], "Green beans")
         self.assertEqual(result["items"][0]["form"], "Canned")
         self.assertEqual(result["items"][0]["storage_location"], "Pantry")
+        self.assertEqual(result["items"][0]["unit"], "can")
         self.assertNotIn("saved", result)
 
     def test_barcode_validation_rejects_non_gtin_input_before_lookup(self):

@@ -17,6 +17,7 @@ from datetime import date
 from config import DB_PATH
 from build_provenance import DEPLOYED_BUILD_PROVENANCE, public_build_provenance
 from household_inventory import replace_household_inventory, submit_pending_items
+from inventory_contract import InventoryContractError, normalize_inventory_lot
 from ko_behavior import default_form_for, resolve_behavior
 from recipe_engine import build_recipe_from_candidate, generate_candidates
 
@@ -220,7 +221,12 @@ def _form_row(con: sqlite3.Connection, ingredient_id: int, form_name: str | None
     ).fetchone()
 
 
-def resolve_inventory(payload: dict, db_path: str | Path = DB_PATH) -> tuple[list[ResolvedIngredient], list[dict]]:
+def resolve_inventory(
+    payload: dict,
+    db_path: str | Path = DB_PATH,
+    *,
+    strict_contract: bool = False,
+) -> tuple[list[ResolvedIngredient], list[dict]]:
     """Resolve household names to CKB identities without editing the CKB."""
     snapshot = normalize_kitchen_snapshot(payload)
     resolved: list[ResolvedIngredient] = []
@@ -236,14 +242,32 @@ def resolve_inventory(payload: dict, db_path: str | Path = DB_PATH) -> tuple[lis
                     "section": item["storage_location"],
                 })
                 continue
-            form = _form_row(con, int(row["ingredient_id"]), item["form"])
+            try:
+                normalized_item, _profile = normalize_inventory_lot(
+                    item, str(row["name"]), db_path=db_path, strict=strict_contract
+                )
+                normalized_item["_requested_name"] = item["name"]
+            except InventoryContractError as exc:
+                raise APIContractError(str(exc)) from exc
+            except sqlite3.OperationalError:
+                # Tiny legacy/test databases can predate the KO contract
+                # tables. Their existing local persistence path remains
+                # usable; production's complete CKB always takes the strict
+                # branch above.
+                normalized_item = dict(item)
+            form = _form_row(
+                con, int(row["ingredient_id"]), normalized_item["form"]
+            )
             resolved.append(ResolvedIngredient(
                 ingredient_id=int(row["ingredient_id"]),
                 name=str(row["name"]),
                 category=str(row["category"]),
                 form_id=int(form["form_id"]) if form else None,
-                form_name=str(form["form_name"]) if form else item["form"],
-                source=item,
+                form_name=(
+                    str(form["form_name"])
+                    if form else normalized_item["form"]
+                ),
+                source=normalized_item,
             ))
     return resolved, pending
 
@@ -350,7 +374,7 @@ def save_my_kitchen(
     db_path: str | Path = DB_PATH,
 ) -> dict:
     """Persist a kitchen after a trusted HTTP/auth layer resolves membership."""
-    resolved, pending = resolve_inventory(payload, db_path)
+    resolved, pending = resolve_inventory(payload, db_path, strict_contract=True)
     items = [{
         "ingredient_id": item.ingredient_id,
         "form_id": item.form_id,

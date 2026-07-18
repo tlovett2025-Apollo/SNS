@@ -20,7 +20,8 @@ const SNS = (() => {
     ["bag", "bags"], ["package", "packages"],
     ["egg", "eggs"], ["piece", "pieces"], ["lb", "pounds"], ["oz", "ounces"],
     ["cup", "cups"], ["carton", "cartons"], ["bottle", "bottles"],
-    ["bunch", "bunches"], ["loaf", "loaves"], ["portion", "portions"],
+    ["bunch", "bunches"], ["loaf", "loaves"], ["slice", "slices"],
+    ["dozen", "dozens"], ["portion", "portions"],
     ["meal", "meals"]
   ];
   const quantityProfiles = {
@@ -199,6 +200,25 @@ const SNS = (() => {
 
   function quantityProfile(name) {
     return quantityProfiles[String(name || "").toLowerCase()] || { unit: "item", step: 1 };
+  }
+
+  function installInventoryContracts(contracts) {
+    if (!Array.isArray(contracts)) return;
+    contracts.forEach(contract => {
+      const key = String(contract?.name || "").trim().toLowerCase();
+      const allowed = Array.isArray(contract?.allowed_units)
+        ? contract.allowed_units.filter(Boolean)
+        : [];
+      if (!key || !allowed.length) return;
+      const unit = allowed.includes(contract.default_unit)
+        ? contract.default_unit
+        : allowed[0];
+      quantityProfiles[key] = {
+        unit,
+        step: Number(contract.quantity_step) || quantityStepForUnit(unit)
+      };
+      unitRules[key] = allowed;
+    });
   }
 
   function quantityStepForUnit(unit) {
@@ -1463,7 +1483,12 @@ const SNS = (() => {
     setKitchenStatus("Loading your shared kitchen…", "loading");
 
     try {
-      let remote = await getJson(API.myKitchen);
+      const kitchenEndpoint = currentPage() === "my-kitchen.html"
+        ? `${API.myKitchen}?include_contracts=true`
+        : API.myKitchen;
+      let remote = await getJson(kitchenEndpoint);
+      installInventoryContracts(remote.inventory_contracts);
+      delete remote.inventory_contracts;
       let legacyLocal = {};
       try { legacyLocal = JSON.parse(localStorage.getItem(legacyKitchenStorageKey) || "{}"); }
       catch { legacyLocal = {}; }

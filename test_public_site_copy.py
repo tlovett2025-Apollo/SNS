@@ -81,6 +81,9 @@ def test_my_kitchen_uses_real_quantities_and_units_for_countable_food():
     assert "data-kitchen-dialog-form novalidate" in kitchen_page
     assert "quantity," in flow
     assert "unit:" in flow
+    assert "function installInventoryContracts(contracts)" in flow
+    assert "?include_contracts=true" in flow
+    assert "allowed_units" in flow
 
 
 def test_my_kitchen_uses_compact_rows_and_a_phone_first_accordion():

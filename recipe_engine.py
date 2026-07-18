@@ -1,4 +1,5 @@
 from ingredient_profiles import get_ingredient_profile
+from inventory_contract import quantity_in_basis
 from ko_behavior import default_form_for, resolve_behavior
 from config import DB_PATH
 from cooking_planner import (
@@ -193,7 +194,7 @@ def _quantity_plan(
         lot = lots.get(key, {})
         form = forms.get(key) or _key(lot.get("form"))
         unit = _key(lot.get("unit"))
-        available = float(lot.get("quantity") or 0)
+        recorded_quantity = float(lot.get("quantity") or 0)
         behavior = resolve_behavior(name, "ingredient", form, db_path=DB_PATH)
         family = behavior.primary_family
         attributes = behavior.attributes or {}
@@ -203,6 +204,14 @@ def _quantity_plan(
         except (TypeError, ValueError):
             amount = family.portion_per_standard if family else 1.0
         quantity_label = attributes.get("quantity_label") or (family.portion_label if family else "")
+        package_weight = float(lot.get("package_weight_oz") or 0)
+        converted_available = quantity_in_basis(
+            recorded_quantity,
+            unit,
+            basis,
+            package_weight_oz=package_weight,
+        )
+        available = float(converted_available or 0)
         role = roles.get(key, "")
         # Supporting proteins flavor or stretch the main item. They must not
         # silently become another full entree merely because their KO normally
@@ -234,10 +243,10 @@ def _quantity_plan(
                 "planned": pieces, "available": available,
                 "shortfall": max(0, pieces - available) if available else 0,
             }
-            if unit in {"piece", "pieces"} and available and available < pieces:
+            if available and available < pieces:
                 shortfall = pieces - available
                 notes.append(
-                    f"Only {available:g} {label}{'s are' if available != 1 else ' is'} recorded for {pieces} planned. "
+                    f"Only about {available:g} {label}{'s are' if available != 1 else ' is'} represented by the amount on hand for {pieces} planned. "
                     f"Add {shortfall:g} more {label}{'' if shortfall == 1 else 's'} before making this meal."
                 )
         elif basis == "dry_cups":
@@ -260,17 +269,14 @@ def _quantity_plan(
         elif basis == "weight_oz":
             pounds = _quarter_pound_up(effective * amount)
             plan[key] = {"display": f"{pounds:g} lb", "planned": pounds, "available": available}
-            available_pounds = available if unit in {"lb", "pound", "pounds"} else 0
-            package_weight = float(lot.get("package_weight_oz") or 0)
-            if unit in {"package", "packages"} and package_weight:
-                available_pounds = available * package_weight / 16.0
+            available_pounds = available
             if available_pounds and available_pounds < pounds:
                 notes.append(
                     f"About {available_pounds:g} lb of {name} is recorded for {pounds:g} lb planned. Stretch it through the selected vegetables or foundation."
                 )
-            elif unit in {"package", "packages"} and available and not package_weight:
+            elif unit in {"package", "packages"} and recorded_quantity and not package_weight:
                 notes.append(
-                    f"The {available:g}-package estimate for {name} is approximate because the original package weight is unknown."
+                    f"The {recorded_quantity:g}-package estimate for {name} is approximate because the original package weight is unknown."
                 )
         elif role == "vegetable":
             # Produce varies in physical size, so cups prepared are more useful
