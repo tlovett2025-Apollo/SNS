@@ -519,6 +519,14 @@ def _concept_requests(engine_request: dict, resolved: list[ResolvedIngredient]):
                 else "layered_bowl" if variant == 2 and request["foundation_name"]
                 else "integrated"
             )
+            # Canned/cooked protein plus skillet vegetables is ordinarily a
+            # warm-together pantry meal. Do not manufacture restaurant-style
+            # separation when no distinct entree treatment supports it.
+            if (
+                request["meal_structure"] == "composed_plate"
+                and _protein_state(protein) in {"Canned", "Cooked", "Ready to Eat"}
+            ):
+                request["meal_structure"] = "integrated"
             signature = (
                 _key(protein.name), tuple(sorted(_key(item) for item in bundle)),
                 _key(request["foundation_name"]), _key(request["cuisine_name"]),

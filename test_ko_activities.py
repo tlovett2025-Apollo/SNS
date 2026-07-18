@@ -176,7 +176,7 @@ def test_integrated_rustic_sauce_softens_aromatics_before_tomatoes_join():
     tomato_join = plan.index("Add Tomatoes")
     assert "Onions & Red bell pepper" in plan
     assert self_soften < tomato_join
-    assert "heat it gently until hot; do not recook it" in plan
+    assert "Do not continue simmering after it is hot" in plan
 
 
 def test_integrated_skillet_protects_one_vessel_from_overlapping_operations():

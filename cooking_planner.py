@@ -453,6 +453,12 @@ def _planner_activity(activity_type, instruction, minutes=None, human_busy=True,
     )
 
 
+def _ready_to_eat_state(value) -> bool:
+    return _clean(value).lower() in {
+        "canned", "cooked", "ready to eat", "ready-to-eat",
+    }
+
+
 def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
     """Collect KO-published activities and add only meal-level orchestration."""
 
@@ -1275,7 +1281,8 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             if activity.component == protein and activity.activity_type in {"cook", "reheat"}
         ), None)
         sauce_dependencies = terminal_ids(vegetables)
-        if protein_gate and protein_gate not in sauce_dependencies:
+        primary_is_ready = _ready_to_eat_state(protein_state)
+        if protein_gate and not primary_is_ready and protein_gate not in sauce_dependencies:
             sauce_dependencies.append(protein_gate)
         if strategy == "grill":
             finish_instruction = (
@@ -1341,7 +1348,7 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
                 "then spoon the vegetables and pan sauce over everything and serve immediately."
                 if foundation_is_separate else
                 "Spoon everything in the skillet onto plates or into shallow bowls and serve immediately."
-                if one_pan_ground_meat else
+                if one_pan_ground_meat or primary_is_ready else
                 f"{sliced_protein}Add {protein_label} to the skillet, coat it with the vegetables and sauce, "
                 "then serve immediately."
             )
@@ -1905,6 +1912,79 @@ def apply_protein_role_intelligence(
     return activities
 
 
+def stage_ready_protein_after_sauce(
+    activities: List[KitchenActivity], candidate: dict,
+) -> List[KitchenActivity]:
+    """Warm canned/cooked protein only after the skillet sauce is ready.
+
+    A ready-to-eat protein does not create fond and should not sit in the pan
+    while a sauce is subsequently reduced.  Reversing that dependency keeps
+    its final heat exposure short and makes "do not recook" operational rather
+    than contradictory prose.
+    """
+    if _strategy(candidate) != "skillet":
+        return activities
+    sauce = next((
+        activity for activity in activities
+        if _activity_id(activity) == "finish sauce:meal"
+    ), None)
+    if sauce is None:
+        return activities
+
+    specs = [
+        item for item in candidate.get("proteins") or []
+        if isinstance(item, dict) and _clean(item.get("name"))
+    ] or [{
+        "name": _clean(candidate.get("protein")),
+        "state": _clean(candidate.get("protein_state")),
+    }]
+    ready_names = {
+        _clean(item.get("name")) for item in specs
+        if _ready_to_eat_state(item.get("state"))
+    }
+    for activity in activities:
+        if activity.component not in ready_names or activity.activity_type != "reheat":
+            continue
+        activity_id = _activity_id(activity)
+        sauce.depends_on = [
+            dependency for dependency in sauce.depends_on
+            if dependency != activity_id
+        ]
+        if "finish sauce:meal" not in activity.depends_on:
+            activity.depends_on.append("finish sauce:meal")
+        activity.stage = "finish"
+        activity.instruction = (
+            f"Fold {activity.component} into the finished sauce and heat gently only until "
+            "steaming hot. Do not continue simmering after it is hot."
+        )
+        activity.minutes = min(4, max(2, int(activity.minutes or 0)))
+        activity.attention_load = min(.5, float(activity.attention_load or .5))
+    return activities
+
+
+def clarify_composed_skillet_transfers(
+    activities: List[KitchenActivity], candidate: dict,
+) -> List[KitchenActivity]:
+    """State when a composed component leaves the shared skillet."""
+    if (
+        _strategy(candidate) != "skillet"
+        or _clean(candidate.get("meal_structure")) != "composed_plate"
+    ):
+        return activities
+    vegetables = set(_split_joined_items(candidate.get("vegetable")))
+    for activity in activities:
+        if (
+            activity.component in vegetables
+            and activity.activity_type in {"cook", "saute"}
+            and (activity.equipment or "").lower() == "burner"
+        ):
+            activity.instruction = (
+                activity.instruction.rstrip()
+                + f" Transfer {activity.component} to a plate and keep it warm before reusing the skillet."
+            )
+    return activities
+
+
 def consolidate_integrated_skillet_reheating(
     activities: List[KitchenActivity],
     candidate: dict,
@@ -1960,9 +2040,12 @@ def consolidate_integrated_skillet_reheating(
         else:
             instructions.append(f"Add {foundation} and heat it through.")
     if any(activity.component == protein for activity in reheats):
-        instructions.append(
+        instructions.append((
+            f"Fold {protein} into the finished sauce and heat gently only until steaming hot. "
+            "Do not continue simmering after it is hot."
+            if "finish sauce:meal" in dependencies else
             f"Fold in {protein} near the end and heat it gently until hot; do not recook it."
-        )
+        ))
     for activity in reheats:
         if activity.component not in {foundation, protein}:
             instructions.append(activity.instruction)
@@ -1971,7 +2054,9 @@ def consolidate_integrated_skillet_reheating(
         "gentle reheat",
         " ".join(instructions),
         minutes=max(4, max(int(activity.minutes or 0) for activity in reheats) + (2 if len(reheats) > 1 else 0)),
-        human_busy=True, stage="late", depends_on=dependencies, equipment="burner",
+        human_busy=True,
+        stage="finish" if "finish sauce:meal" in dependencies else "late",
+        depends_on=dependencies, equipment="burner",
     )
     shared.attention_load = max(float(activity.attention_load or 0) for activity in reheats)
 
@@ -2007,9 +2092,45 @@ def constrain_single_skillet_environment(
     ]
     stage_order = {"early": 0, "middle": 1, "late": 2, "finish": 3}
     position = {id(activity): index for index, activity in enumerate(activities)}
-    skillet_work.sort(key=lambda activity: (
-        stage_order.get(activity.stage, 1), position[id(activity)]
-    ))
+    vegetables = set(_split_joined_items(candidate.get("vegetable")))
+
+    def work_order(activity):
+        finish_order = (
+            0 if activity.activity_type == "finish sauce"
+            else 1 if activity.activity_type in {"reheat", "gentle reheat"}
+            else 0
+        )
+        composed_long_first = (
+            -int(activity.minutes or 0)
+            if _clean(candidate.get("meal_structure")) == "composed_plate"
+            and activity.component in vegetables
+            and activity.activity_type in {"cook", "saute"}
+            else 0
+        )
+        return (
+            stage_order.get(activity.stage, 1), finish_order,
+            composed_long_first, position[id(activity)],
+        )
+
+    # Respect culinary dependencies while serializing the physical skillet.
+    # Sorting alone could put a ready protein before its sauce and then create
+    # a dependency cycle when the skillet chain was added.
+    pending = list(skillet_work)
+    skillet_work = []
+    while pending:
+        pending_ids = {_activity_id(activity) for activity in pending}
+        ready = [
+            activity for activity in pending
+            if not any(dependency in pending_ids for dependency in activity.depends_on)
+        ]
+        if not ready:
+            # The graph validator will report the pre-existing cycle with its
+            # exact activity IDs; do not invent another ordering here.
+            skillet_work.extend(sorted(pending, key=work_order))
+            break
+        selected = min(ready, key=work_order)
+        skillet_work.append(selected)
+        pending.remove(selected)
     previous_id = None
     protein = _clean(candidate.get("protein"))
     protein_verify = next((
@@ -2135,6 +2256,8 @@ def build_activity_graph(candidate: dict) -> Dict[str, KitchenActivity]:
                     activity.depends_on.append(prep_id)
     activities = apply_protein_role_intelligence(activities, candidate)
     activities = apply_vegetable_relationship_intelligence(activities, candidate)
+    activities = stage_ready_protein_after_sauce(activities, candidate)
+    activities = clarify_composed_skillet_transfers(activities, candidate)
     activities = consolidate_skillet_vegetables(activities, candidate)
     activities = consolidate_integrated_skillet_reheating(activities, candidate)
     activities = constrain_single_skillet_environment(activities, candidate)

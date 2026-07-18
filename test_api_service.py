@@ -659,11 +659,61 @@ class APIServiceTests(unittest.TestCase):
         self.assertTrue(any(line.startswith("Navy beans — Canned") for line in recipe["ingredients"]))
         self.assertIn("Drain and rinse Navy beans", plan)
         self.assertIn("slice or shred it as the meal needs", plan)
-        self.assertIn("do not recook it", plan)
+        self.assertIn("Do not continue simmering after it is hot", plan)
         self.assertNotIn("Rotisserie chicken to the skillet and cook until ready", plan)
         self.assertNotIn("Prep is complete", plan)
         self.assertNotIn("Now the cooking begins", plan)
         self.assertNotIn("main cooking is done", plan)
+
+    def test_ready_protein_waits_for_sauce_and_composed_pan_reuse_is_explicit(self):
+        request = dict(
+            protein_name="Canned tuna",
+            vegetable_names=["Broccoli", "Green beans"],
+            cuisine_name="Italian",
+            energy_level="High",
+            budget_level="Budget",
+            time_minutes=45,
+            servings=4,
+            max_results=10,
+            protein_state="Canned",
+            available_items=[
+                "Canned tuna", "Broccoli", "Green beans", "Tomato sauce",
+                "Butter", "Garlic powder", "Black pepper",
+            ],
+            requested_method="skillet",
+            component_forms={
+                "Canned tuna": "Canned", "Broccoli": "Fresh",
+                "Green beans": "Fresh", "Tomato sauce": "Canned",
+            },
+        )
+        composed = generate_candidates(
+            meal_structure="composed_plate", **request,
+        )[0]
+        composed_plan = " ".join(
+            build_recipe_from_candidate(composed)["action_steps"]
+        )
+
+        self.assertIn("Transfer Broccoli to a plate", composed_plan)
+        self.assertIn("Transfer Green beans to a plate", composed_plan)
+        self.assertLess(
+            composed_plan.index("Add the tomato sauce"),
+            composed_plan.index("Fold Canned tuna into the finished sauce"),
+        )
+        self.assertNotIn("Fold in Canned tuna near the end", composed_plan)
+
+        integrated = generate_candidates(
+            meal_structure="integrated", **request,
+        )[0]
+        integrated_plan = " ".join(
+            build_recipe_from_candidate(integrated)["action_steps"]
+        )
+        self.assertLess(
+            integrated_plan.index("Add the tomato sauce"),
+            integrated_plan.index("Fold Canned tuna into the finished sauce"),
+        )
+        self.assertIn("Spoon everything in the skillet", integrated_plan)
+        self.assertLess(integrated["minutes"], composed["minutes"])
+        self.assertLess(integrated["active_minutes"], composed["active_minutes"])
 
     def test_builder_classifies_composed_plate_and_layered_bowl_separately(self):
         kitchen = kitchen_payload()
