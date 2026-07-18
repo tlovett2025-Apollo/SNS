@@ -50,6 +50,8 @@ def test_my_kitchen_uses_compact_rows_and_a_phone_first_accordion():
     assert "grid-template-columns:minmax(150px,1fr) minmax(270px,360px) auto" in css
     assert "@media(max-width:760px)" in css
     assert "grid-column:1/-1;grid-row:2" in css
+    assert '"ribeye": "Ribeye steak"' in flow
+    assert '"corn starch": "Cornstarch"' in flow
 
 
 def test_recipe_page_exposes_inventory_resolutions_and_preserves_substep_breaks():
@@ -87,6 +89,8 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     assert "options.meal_structures" in flow
     assert "options.methods" in flow
     assert "data-protein-search" in builder_page
+    assert "data-browse-catalog" in builder_page
+    assert ".produce-choice[hidden]" in (PUBLIC_FLOW.parent / "sns-flow.css").read_text(encoding="utf-8")
     assert '>Canned</option>' in flow
     assert 'item.id' in flow
     assert 'input[name="extras"]:checked' in flow

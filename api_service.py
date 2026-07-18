@@ -60,7 +60,13 @@ _BUILDER_EXTRA_NAMES = (
     "Cream of mushroom soup", "Cream of chicken soup", "Coconut milk",
     "Peanut butter", "Butter", "Olive oil", "Sesame oil",
 )
-_BUILDER_EXTRA_ALIASES = {"mayo": "Mayonnaise"}
+_BUILDER_EXTRA_ALIASES = {
+    "mayo": "Mayonnaise",
+    "corn starch": "Cornstarch",
+    "cooking oil": "Vegetable oil",
+    "ribeye": "Ribeye steak",
+    "rib eye": "Ribeye steak",
+}
 
 _PROTEIN_CATEGORIES = {
     "beans", "beef", "chicken", "eggs", "plant protein", "pork", "processed meat",
@@ -99,6 +105,20 @@ def _inventory_from(payload: dict) -> list[dict]:
     return [item for item in inventory if isinstance(item, dict) and _clean(item.get("name"))]
 
 
+def _builder_extra_names(db_path: str | Path = DB_PATH) -> tuple[str, ...]:
+    """Expose every trained seasoning plus the curated pantry/fridge helpers."""
+    with closing(sqlite3.connect(db_path)) as con:
+        pantry_rows = con.execute(
+            """SELECT name FROM ingredients
+               WHERE active=1 AND (
+                   lower(category)='spices'
+                   OR lower(name) IN ('salt','cornstarch','canola oil','vegetable oil')
+               )
+               ORDER BY name"""
+        ).fetchall()
+    return tuple(dict.fromkeys([*_BUILDER_EXTRA_NAMES, *(row[0] for row in pantry_rows)]))
+
+
 def _quantity_band(item: dict) -> str | None:
     raw = item.get("quantity_band", item.get("amount"))
     if raw in (None, "", 0, "0", "none"):
@@ -126,6 +146,8 @@ def normalize_kitchen_snapshot(payload: dict) -> dict:
     """Return the canonical, additive v1 representation of a kitchen request."""
     inventory = []
     for item in _inventory_from(payload):
+        raw_name = _clean(item.get("name"))
+        canonical_name = _BUILDER_EXTRA_ALIASES.get(_key(raw_name), raw_name)
         band = _quantity_band(item)
         quantity = item.get("quantity")
         if quantity not in (None, ""):
@@ -142,7 +164,7 @@ def normalize_kitchen_snapshot(payload: dict) -> dict:
         inventory.append({
             "inventory_lot_id": item.get("inventory_lot_id"),
             "ingredient_id": item.get("ingredient_id"),
-            "name": _clean(item.get("name")),
+            "name": canonical_name,
             "form": _clean(item.get("form")) or None,
             "storage_location": _clean(
                 item.get("storage_location", item.get("storage"))
@@ -303,7 +325,7 @@ def get_meal_builder_options(payload: dict | None = None, db_path: str | Path = 
         "proteins": [protein_choice(row["name"]) for row in proteins],
         "produce": [choice(row["name"], kind=row["kind"]) for row in produce],
         "foundations": [choice(row["name"]) for row in foundations],
-        "extras": [choice(name) for name in _BUILDER_EXTRA_NAMES],
+        "extras": [choice(name) for name in _builder_extra_names(db_path)],
         "cuisines": [row["name"] for row in cuisines],
         "methods": methods,
         "meal_structures": [
@@ -1163,7 +1185,7 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         raise APIContractError(f"Unknown produce selection: {unknown_produce[0]}")
     if foundation and _key(foundation) not in valid_foundations:
         raise APIContractError(f"Unknown foundation: {foundation}")
-    valid_extras = {_key(name) for name in _BUILDER_EXTRA_NAMES}
+    valid_extras = {_key(name) for name in _builder_extra_names(db_path)}
     unknown_extras = [name for name in extras if _key(name) not in valid_extras]
     if unknown_extras:
         raise APIContractError(f"Unknown pantry or fridge extra: {unknown_extras[0]}")
@@ -1174,9 +1196,10 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         raw_key = _key(item.get("name"))
         owned_keys.add(_key(_BUILDER_EXTRA_ALIASES.get(raw_key, item.get("name"))))
     selected_components = [*[item["name"] for item in protein_selections], *produce, foundation, *extras]
-    planned_purchases = [
-        name for name in selected_components if name and _key(name) not in owned_keys
-    ]
+    # Every explicit builder selection is eligible for procurement. That
+    # includes topping up an owned ingredient (for example, two steaks on
+    # hand for a four-steak composed plate), not only wholly missing foods.
+    planned_purchases = [name for name in selected_components if name]
     owned_protein = resolved_by_name.get(_key(protein))
     protein_states = {}
     protein_roles = {}
@@ -1184,11 +1207,17 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         owned_item = resolved_by_name.get(_key(item["name"]))
         protein_states[item["name"]] = _protein_state(owned_item) if owned_item else (item["state"] or "Fresh Raw")
         protein_roles[item["name"]] = item["role"]
+    # A pantry can describe raw meat as "Refrigerated" because that is where
+    # it lives. The cooking engine needs the derived culinary state instead.
     component_forms = {
-        name: resolved_by_name[_key(name)].form_name
-        for name in [*[item["name"] for item in protein_selections], *produce, foundation]
-        if name and _key(name) in resolved_by_name and resolved_by_name[_key(name)].form_name
+        item["name"]: protein_states[item["name"]]
+        for item in protein_selections
     }
+    component_forms.update({
+        name: resolved_by_name[_key(name)].form_name
+        for name in [*produce, foundation]
+        if name and _key(name) in resolved_by_name and resolved_by_name[_key(name)].form_name
+    })
     for name in produce:
         if _key(name) not in resolved_by_name and _clean(produce_forms.get(name)):
             component_forms[name] = _clean(produce_forms.get(name))

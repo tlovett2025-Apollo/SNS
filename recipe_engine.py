@@ -752,11 +752,11 @@ def generate_candidates(
         if (
             _clean(meal_structure) == "composed_plate"
             and float(primary_quantity.get("shortfall") or 0) > 0
+            and _key(protein) not in planned_purchase_keys
         ):
             # A composed plate promises a discrete entree portion to each
-            # diner. Do not offer it when the recorded main protein cannot
-            # physically satisfy that promise; integrated structures may
-            # instead distribute a smaller amount transparently.
+            # diner. Inventory-only idea generation must honor that promise;
+            # Build My Meal may satisfy it through the generated grocery list.
             continue
         c["effective_portions"] = effective
         c["quantity_plan"] = quantity_plan

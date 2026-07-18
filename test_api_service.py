@@ -445,8 +445,55 @@ class APIServiceTests(unittest.TestCase):
         self.assertTrue(produce["Mushrooms"])
         self.assertIn("Mayonnaise", {item["name"] for item in options["extras"]})
         self.assertIn("Salsa", {item["name"] for item in options["extras"]})
+        self.assertIn("Italian seasoning", {item["name"] for item in options["extras"]})
+        self.assertIn("Cornstarch", {item["name"] for item in options["extras"]})
         self.assertIn("fruit", {item["kind"] for item in options["produce"]})
         self.assertFalse(next(item for item in options["serving_temperatures"] if item["id"] == "cold")["available"])
+
+    def test_builder_canonicalizes_common_inventory_names_before_matching(self):
+        kitchen = {
+            "inventory": [
+                {"name": "ribeye", "form": "Refrigerated", "quantity": 2, "unit": "items"},
+                {"name": "corn starch", "form": "Shelf-stable", "quantity": 1, "unit": "items"},
+                {"name": "cooking oil", "form": "Shelf-stable", "quantity": 1, "unit": "items"},
+            ]
+        }
+
+        options = get_meal_builder_options(kitchen)
+        proteins = {item["name"]: item for item in options["proteins"]}
+        extras = {item["name"]: item for item in options["extras"]}
+
+        self.assertTrue(proteins["Ribeye steak"]["owned"])
+        self.assertEqual(proteins["Ribeye steak"]["form"], "Refrigerated")
+        self.assertTrue(extras["Cornstarch"]["owned"])
+        self.assertTrue(extras["Vegetable oil"]["owned"])
+
+    def test_builder_tops_up_owned_ribeye_for_a_composed_plate(self):
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": {
+                "inventory": [
+                    {"name": "ribeye", "form": "Refrigerated", "quantity": 2, "unit": "items"},
+                    {"name": "Mushrooms", "form": "Fresh", "quantity": 1, "unit": "packages"},
+                ],
+                "equipment": [{"name": "Stovetop"}],
+            },
+            "selections": {
+                "proteins": [{"name": "Ribeye steak", "state": "Fresh Raw", "role": "main"}],
+                "produce": ["Mushrooms"], "foundation": "", "extras": [],
+                "cuisine": "Comfort Food", "cooking_method": "skillet",
+                "meal_structure": "composed_plate", "serving_temperature": "hot",
+                "energy": "High", "time_minutes": 60, "servings": 4,
+            },
+        }
+
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+        ribeye = next(item for item in recipe["inventory_requirements"] if item["name"] == "Ribeye steak")
+
+        self.assertEqual(ribeye["status"], "Short")
+        self.assertEqual(ribeye["quantity_shortfall"], 2)
+        self.assertIn("Ribeye steak — Fresh Raw · 2 on hand · 4 planned", recipe["ingredients"])
 
     def test_builder_returns_one_exact_method_and_preserves_shopping_needs(self):
         kitchen = kitchen_payload()

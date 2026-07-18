@@ -280,13 +280,15 @@ const SNS = (() => {
   const commonKitchenCatalog = [
     "Asparagus", "Bacon", "Basmati rice", "Black olives", "Breakfast sausage", "Broccoli",
     "Canned chicken", "Carrots", "Chicken breast", "Chicken broth", "Chickpeas", "Cream of chicken soup",
-    "Eggs", "Garlic", "Ground beef", "Kale", "Lasagna noodles", "Mayonnaise", "Milk", "Mushrooms",
+    "Cornstarch", "Eggs", "Garlic", "Ground beef", "Kale", "Lasagna noodles", "Mayonnaise", "Milk", "Mushrooms",
     "Navy beans", "Okra", "Onions", "Potatoes", "Romaine lettuce", "Salsa", "Spaghetti", "Spinach",
-    "Swiss chard", "Tomatoes", "White beans", "White rice", "Zucchini"
+    "Ribeye steak", "Swiss chard", "Tomatoes", "Vegetable oil", "White beans", "White rice", "Zucchini"
   ];
   const kitchenAliases = {
     "chikn brest": "Chicken breast", "chicken breasts": "Chicken breast", "chikn breast": "Chicken breast",
-    "zukini": "Zucchini", "zuchini": "Zucchini", "zuccini": "Zucchini", "mayo": "Mayonnaise"
+    "zukini": "Zucchini", "zuchini": "Zucchini", "zuccini": "Zucchini", "mayo": "Mayonnaise",
+    "ribeye": "Ribeye steak", "rib eye": "Ribeye steak", "corn starch": "Cornstarch",
+    "cooking oil": "Vegetable oil"
   };
 
   function normalizedFoodName(value) {
@@ -863,8 +865,9 @@ const SNS = (() => {
   function initializeKitchenAccordion() {
     if (!document.body.classList.contains("kitchen-page")) return;
     const sections = [...document.querySelectorAll("[data-section]")];
+    const requested = location.hash ? document.querySelector(location.hash) : null;
     sections.forEach((section, index) => {
-      const collapsed = index !== 0;
+      const collapsed = requested ? section !== requested : index !== 0;
       section.classList.toggle("collapsed", collapsed);
       section.querySelector(".section-heading")?.setAttribute("aria-expanded", String(!collapsed));
     });
@@ -1021,6 +1024,9 @@ const SNS = (() => {
         <input type="radio" name="cooking-method" value="${escapeHtml(item.id)}"${index === 0 ? " checked" : ""}${item.available === false ? " disabled" : ""}>
         <span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.note || item.description)}</small></span>
       </label>`).join("");
+    const grillOption = (options.methods || []).find(item => item.id === "grill");
+    const grillNote = form.querySelector("[data-grill-equipment-note]");
+    if (grillNote) grillNote.hidden = grillOption?.available !== false;
     form.querySelector("[data-structure-options]").innerHTML = (options.meal_structures || []).map((item, index) => `
       <label class="builder-choice-card">
         <input type="radio" name="meal-structure" value="${escapeHtml(item.id)}"${index === 0 ? " checked" : ""}>
@@ -1148,11 +1154,19 @@ const SNS = (() => {
     bindOwnedSearch("[data-produce-search]", "[data-produce-choice]");
     bindOwnedSearch("[data-extra-search]", "[data-extra-choice]");
 
-    form.querySelector("[data-open-ingredient-catalog]")?.addEventListener("click", () => {
+    const openCatalog = (filter = "all") => {
+      const filterButton = catalogDialog?.querySelector(`[data-catalog-filter="${filter}"]`)
+        || catalogDialog?.querySelector('[data-catalog-filter="all"]');
+      catalogDialog?.querySelectorAll("[data-catalog-filter]").forEach(item => item.classList.toggle("active", item === filterButton));
       syncPurchaseUI();
       catalogDialog?.showModal();
+      applyCatalogFilter();
       setTimeout(() => catalogDialog?.querySelector("[data-catalog-search]")?.focus(), 0);
-    });
+    };
+    form.querySelector("[data-open-ingredient-catalog]")?.addEventListener("click", () => openCatalog("all"));
+    form.querySelectorAll("[data-browse-catalog]").forEach(button =>
+      button.addEventListener("click", () => openCatalog(button.dataset.browseCatalog))
+    );
     catalogHolder?.addEventListener("click", event => {
       const button = event.target.closest("[data-catalog-item]");
       if (!button) return;
@@ -1386,6 +1400,9 @@ const SNS = (() => {
     if (groceryEmpty) groceryEmpty.hidden = groceryItems.length > 0;
     const kitchenItems = (recipe.inventory_requirements || [])
       .filter(item => ["Substitute", "Omit"].includes(item?.status))
+      .filter(item => !(item.status === "Substitute" && [
+        "cooking oil or butter", "broth or water", "water or broth"
+      ].includes(String(item.name || "").toLowerCase())))
       .filter(item => item.status !== "Omit" || item.omission_consequence)
       .map(item => {
         if (item.status === "Substitute") {
