@@ -388,7 +388,6 @@ const SNS = (() => {
     const profile = quantityProfile(name);
     const selectedUnit = unit || profile.unit;
     return `
-      <button class="quantity-none" data-set-none type="button">None</button>
       <label class="quantity-value">
         <span class="sr-only">${escapeHtml(name)} quantity</span>
         <input data-quantity type="number" min="0" step="${quantityStepForUnit(selectedUnit)}" inputmode="decimal" value="${Number(quantity) || 0}">
@@ -398,7 +397,7 @@ const SNS = (() => {
         <select data-unit>${unitOptions(selectedUnit, name)}</select>
       </label>
       <details class="inventory-detail" data-inventory-detail>
-        <summary>Dates and package details</summary>
+        <summary>More details</summary>
         <div class="inventory-detail-fields">
           <label class="wide"><span>Use-by or best-by date (optional)</span><input type="date" data-expiration-date value="${escapeHtml(expirationDate)}"></label>
           <label data-can-field><span>Opened date</span><input type="date" data-opened-at value="${escapeHtml(openedAt)}"></label>
@@ -686,6 +685,10 @@ const SNS = (() => {
       document.querySelectorAll("[data-section]").forEach(section => {
         if (!query || section.dataset.section === "Equipment") return section.hidden = false;
         section.hidden = !section.querySelector("[data-food].search-match");
+        if (!section.hidden) {
+          section.classList.remove("collapsed");
+          section.querySelector(".section-heading")?.setAttribute("aria-expanded", "true");
+        }
       });
       if (empty) empty.hidden = !query || matches > 0;
     }
@@ -710,7 +713,13 @@ const SNS = (() => {
 
     document.querySelectorAll(".section-heading").forEach(button => button.addEventListener("click", () => {
       const section = button.closest("[data-section]");
-      section.classList.toggle("collapsed");
+      const opening = section.classList.contains("collapsed");
+      document.querySelectorAll("[data-section]").forEach(other => {
+        if (other === section) return;
+        other.classList.add("collapsed");
+        other.querySelector(".section-heading")?.setAttribute("aria-expanded", "false");
+      });
+      section.classList.toggle("collapsed", !opening);
       button.setAttribute("aria-expanded", String(!section.classList.contains("collapsed")));
     }));
 
@@ -848,6 +857,16 @@ const SNS = (() => {
       dialog.close();
       updateCount();
       markChanged();
+    });
+  }
+
+  function initializeKitchenAccordion() {
+    if (!document.body.classList.contains("kitchen-page")) return;
+    const sections = [...document.querySelectorAll("[data-section]")];
+    sections.forEach((section, index) => {
+      const collapsed = index !== 0;
+      section.classList.toggle("collapsed", collapsed);
+      section.querySelector(".section-heading")?.setAttribute("aria-expanded", String(!collapsed));
     });
   }
 
@@ -1325,6 +1344,7 @@ const SNS = (() => {
     bindAmounts();
     bindKitchenDashboard();
     updateCount();
+    initializeKitchenAccordion();
     renderRecipeChoices();
     renderRecipe();
     renderMealBuilder();

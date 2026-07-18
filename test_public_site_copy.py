@@ -40,6 +40,18 @@ def test_my_kitchen_uses_real_quantities_and_units_for_countable_food():
     assert "unit:" in flow
 
 
+def test_my_kitchen_uses_compact_rows_and_a_phone_first_accordion():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    css = (PUBLIC_FLOW.parent / "sns-flow.css").read_text(encoding="utf-8")
+
+    assert "function initializeKitchenAccordion()" in flow
+    assert 'other.classList.add("collapsed")' in flow
+    assert "<summary>More details</summary>" in flow
+    assert "grid-template-columns:minmax(150px,1fr) minmax(270px,360px) auto" in css
+    assert "@media(max-width:760px)" in css
+    assert "grid-column:1/-1;grid-row:2" in css
+
+
 def test_recipe_page_exposes_inventory_resolutions_and_preserves_substep_breaks():
     flow = PUBLIC_FLOW.read_text(encoding="utf-8")
     recipe_page = (PUBLIC_FLOW.parent / "recipe.html").read_text(encoding="utf-8")
