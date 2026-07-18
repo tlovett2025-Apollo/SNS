@@ -28,6 +28,9 @@ class APIHTTPTests(unittest.TestCase):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["docs"], "/docs")
+        self.assertNotIn("files", response.json()["build"])
+        self.assertNotIn(".venv", response.text)
+        self.assertLess(len(response.content), 2048)
 
     def test_recipe_list_endpoint_exposes_current_contract(self):
         response = self.client.post("/api/GetRecipeList", json=kitchen_payload())
@@ -58,6 +61,8 @@ class APIHTTPTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["candidate_id"], candidate_id)
+        self.assertNotIn("files", response.json()["build_provenance"])
+        self.assertNotIn(".venv", response.text)
 
     def test_contract_errors_are_http_400(self):
         response = self.client.post(

@@ -15,8 +15,9 @@ REPO_ROOT = Path(__file__).resolve().parent
 _SOURCE_SUFFIXES = {".py", ".html", ".css", ".js", ".json", ".toml", ".yaml", ".yml", ".csv"}
 _SOURCE_NAMES = {"requirements.txt"}
 _EXCLUDED_PARTS = {
-    ".git", "__pycache__", ".pytest_cache", "releases", "incoming_release",
-    "next_import", "test_plans",
+    ".git", ".venv", "venv", "site-packages", "node_modules", "__pycache__",
+    ".pytest_cache", ".mypy_cache", ".ruff_cache", "backups", "outputs",
+    "releases", "incoming_release", "next_import", "test_plans",
 }
 
 
@@ -99,3 +100,31 @@ def collect_build_provenance(
         "configuration": configuration,
         "files": files,
     }
+
+
+def public_build_provenance(
+    provenance: dict[str, Any],
+    runtime_configuration: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the compact build identity safe for a public API response.
+
+    The file manifest is useful for creating a deterministic build ID, but it
+    is internal diagnostic data. Returning it to every browser needlessly
+    exposes the server layout and can add hundreds of kilobytes to a response.
+    """
+    configuration = {
+        str(key): _json_safe(value)
+        for key, value in sorted((runtime_configuration or {}).items())
+    }
+    return {
+        "schema_version": provenance.get("schema_version", "1.0"),
+        "build_id": provenance.get("build_id", "SNS-unavailable"),
+        "git": dict(provenance.get("git") or {}),
+        "generated_at": provenance.get("generated_at"),
+        "configuration": configuration,
+    }
+
+
+# Fingerprint source code once per process. API handlers reuse this immutable
+# identity instead of walking the filesystem for every opened recipe.
+DEPLOYED_BUILD_PROVENANCE = collect_build_provenance()

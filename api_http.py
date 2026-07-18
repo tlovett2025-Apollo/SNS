@@ -20,7 +20,7 @@ from api_service import (
     get_recipe_list,
     save_my_kitchen,
 )
-from build_provenance import collect_build_provenance
+from build_provenance import DEPLOYED_BUILD_PROVENANCE, public_build_provenance
 from config import DB_PATH
 from household_inventory import (
     InventoryAccessError,
@@ -64,7 +64,7 @@ app.add_middleware(
 
 # Build identity is constant for the lifetime of a deployed process. Compute
 # it once so readiness probes never repeat filesystem and Git inspection.
-_BUILD_PROVENANCE = collect_build_provenance()
+_BUILD_PROVENANCE = DEPLOYED_BUILD_PROVENANCE
 
 
 def _domain_error(exc: Exception) -> HTTPException:
@@ -82,7 +82,7 @@ def api_information() -> dict:
         "api_version": "1.0",
         "status": "available",
         "docs": "/docs",
-        "build": _BUILD_PROVENANCE,
+        "build": public_build_provenance(_BUILD_PROVENANCE),
     }
 
 

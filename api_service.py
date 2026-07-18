@@ -15,7 +15,7 @@ import sqlite3
 from datetime import date
 
 from config import DB_PATH
-from build_provenance import collect_build_provenance
+from build_provenance import DEPLOYED_BUILD_PROVENANCE, public_build_provenance
 from household_inventory import replace_household_inventory, submit_pending_items
 from ko_behavior import default_form_for, resolve_behavior
 from recipe_engine import build_recipe_from_candidate, generate_candidates
@@ -1393,7 +1393,7 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
     recipe = build_recipe_from_candidate(candidate)
     classification = _candidate_view(candidate)
     ingredients = _candidate_ingredient_lines(candidate, resolved)
-    provenance = collect_build_provenance({
+    provenance = public_build_provenance(DEPLOYED_BUILD_PROVENANCE, {
         "api_contract": CONTRACT_VERSION,
         "candidate_id": candidate_id,
         "cooking_method": candidate.get("cooking_method", candidate.get("strategy")),
