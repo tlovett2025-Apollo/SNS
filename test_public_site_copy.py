@@ -54,6 +54,30 @@ def test_my_kitchen_uses_compact_rows_and_a_phone_first_accordion():
     assert '"corn starch": "Cornstarch"' in flow
 
 
+def test_my_kitchen_can_preview_merge_replace_and_undo_sample_or_csv_imports():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
+    sample_data = (PUBLIC_FLOW.parent / "sample-pantries.js").read_text(encoding="utf-8")
+    css = (PUBLIC_FLOW.parent / "sns-flow.css").read_text(encoding="utf-8")
+
+    assert 'script src="sample-pantries.js"' in kitchen_page
+    assert "data-open-pantry-import" in kitchen_page
+    assert "data-pantry-csv" in kitchen_page
+    assert "Merge with My Kitchen" in kitchen_page
+    assert "Replace My Kitchen" in kitchen_page
+    assert "data-confirm-custom-items" in kitchen_page
+    assert "data-undo-pantry-import" in kitchen_page
+    assert "function parseCsv(text)" in flow
+    assert "function normalizeImportRows" in flow
+    assert "function applyImportedPantry" in flow
+    assert "kitchenImportUndoKey" in flow
+    assert "window.SNS_SAMPLE_PANTRIES" in sample_data
+    assert '"Pacific Northwest"' in sample_data
+    assert '"Florida & Caribbean-influenced"' in sample_data
+    assert ".pantry-import-dialog" in css
+    assert "max-height:96dvh" in css
+
+
 def test_recipe_page_exposes_inventory_resolutions_and_preserves_substep_breaks():
     flow = PUBLIC_FLOW.read_text(encoding="utf-8")
     recipe_page = (PUBLIC_FLOW.parent / "recipe.html").read_text(encoding="utf-8")

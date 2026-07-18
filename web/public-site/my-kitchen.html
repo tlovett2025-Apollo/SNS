@@ -45,6 +45,18 @@
     </select></label>
   </section>
 
+  <section class="pantry-import-callout" aria-label="Pantry setup tools">
+    <div>
+      <strong>Need a faster start?</strong>
+      <span>Try a regional sample pantry or import your own CSV, then adjust anything that does not match your kitchen.</span>
+    </div>
+    <button class="btn btn-secondary" type="button" data-open-pantry-import>Load sample or CSV</button>
+  </section>
+  <section class="pantry-import-undo" data-pantry-import-undo hidden aria-live="polite">
+    <span data-pantry-import-undo-message>Your previous pantry can be restored.</span>
+    <button type="button" data-undo-pantry-import>Undo pantry import</button>
+  </section>
+
   <div class="inventory-sections">
     <section class="inventory-section" data-section="Pantry">
       <button class="section-heading" type="button" aria-expanded="true">
@@ -200,6 +212,55 @@
   <p class="empty-search" data-empty-search hidden>No kitchen items match that search.</p>
   <details class="dev-panel"><summary>Developer view · My Kitchen payload</summary><pre data-payload></pre></details>
 </main>
+<dialog class="pantry-import-dialog" data-pantry-import-dialog>
+  <form class="pantry-import-form" data-pantry-import-form method="dialog">
+    <header>
+      <div>
+        <div class="eyebrow">Pantry quick start</div>
+        <h2>Load a sample or CSV</h2>
+        <p>Preview everything first. These are testing starting points, not claims about everyone in a region.</p>
+      </div>
+      <button class="catalog-close" type="button" data-close-pantry-import aria-label="Close">×</button>
+    </header>
+    <div class="pantry-import-sources">
+      <label>
+        <span>Regional sample pantry</span>
+        <select data-sample-pantry-select>
+          <option value="">Choose a region…</option>
+        </select>
+      </label>
+      <span class="pantry-import-or">or</span>
+      <label class="pantry-csv-picker">
+        <span>Upload pantry CSV</span>
+        <input type="file" accept=".csv,text/csv" data-pantry-csv>
+      </label>
+    </div>
+    <p class="field-note" data-sample-pantry-description>Select a sample to see its ingredients, or upload a CSV with name, quantity, and unit columns.</p>
+    <div class="pantry-import-error" data-pantry-import-error hidden role="alert"></div>
+    <section class="pantry-import-preview" data-pantry-import-preview hidden>
+      <div class="pantry-import-summary">
+        <strong data-import-preview-title>Import preview</strong>
+        <span data-import-preview-count></span>
+      </div>
+      <div class="pantry-import-items" data-import-preview-items></div>
+      <section class="pantry-import-unresolved" data-import-unresolved hidden>
+        <strong>Names SNS does not recognize yet</strong>
+        <p>Review these before importing. You can keep them as custom pantry items, but the recipe engine may not know how to cook with them yet.</p>
+        <div data-import-unresolved-items></div>
+        <label class="confirm-custom-items"><input type="checkbox" data-confirm-custom-items> Keep these unresolved names as custom items</label>
+      </section>
+      <fieldset class="pantry-import-mode">
+        <legend>How should this pantry be applied?</legend>
+        <label><input type="radio" name="pantry-import-mode" value="merge" checked> <span><strong>Merge with My Kitchen</strong><small>Keep current foods and update matching imported items.</small></span></label>
+        <label><input type="radio" name="pantry-import-mode" value="replace"> <span><strong>Replace My Kitchen</strong><small>Clear current foods first. Equipment and household preferences stay unchanged.</small></span></label>
+      </fieldset>
+    </section>
+    <footer>
+      <button class="btn btn-secondary" type="button" data-close-pantry-import>Cancel</button>
+      <button class="btn btn-primary" type="button" data-apply-pantry-import disabled>Apply to My Kitchen</button>
+    </footer>
+  </form>
+</dialog>
 <dialog class="kitchen-dialog" data-kitchen-dialog>
   <form class="kitchen-dialog-form" data-kitchen-dialog-form novalidate>
     <div>
@@ -232,6 +293,7 @@
     </div>
   </form>
 </dialog>
+<script src="sample-pantries.js"></script>
 <script src="sns-flow.js"></script>
 </body>
 </html>

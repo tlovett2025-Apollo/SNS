@@ -66,6 +66,7 @@ const SNS = (() => {
     "cooked leftovers": ["portion", "cup", "package"]
   };
   const kitchenStorageKey = "snsKitchenStateV1";
+  const kitchenImportUndoKey = "snsKitchenImportUndoV1";
   const mealHistoryKey = "snsMealHistoryV1";
   const defaultForms = {
     Pantry: "Shelf-stable",
@@ -189,7 +190,10 @@ const SNS = (() => {
   }
 
   function unitOptions(selected, name) {
-    const allowed = allowedUnits(name);
+    const allowed = [...new Set([
+      ...allowedUnits(name),
+      ...(inventoryUnits.some(([value]) => value === selected) ? [selected] : [])
+    ])];
     const safeSelected = allowed.includes(selected) ? selected : allowed[0];
     return inventoryUnits.filter(([value]) => allowed.includes(value)).map(([value, label]) =>
       `<option value="${value}"${value === safeSelected ? " selected" : ""}>${label}</option>`
@@ -314,6 +318,7 @@ const SNS = (() => {
     if (query.length < 2) return [];
     const catalog = [...new Set([
       ...commonKitchenCatalog,
+      ...(window.SNS_SAMPLE_PANTRIES || []).flatMap(sample => sample.items.map(item => item.name)),
       ...[...document.querySelectorAll("[data-food]")].map(row => row.dataset.food)
     ])];
     const alias = kitchenAliases[query];
@@ -328,6 +333,90 @@ const SNS = (() => {
     if (kitchenAliases[query]) return kitchenAliases[query];
     const best = canonicalSuggestions(value)[0];
     return best && best.score <= Math.max(1, Math.floor(query.length * .25)) ? best.name : String(value || "").trim();
+  }
+
+  function knownKitchenNames() {
+    return new Set([
+      ...commonKitchenCatalog,
+      ...(window.SNS_SAMPLE_PANTRIES || []).flatMap(sample => sample.items.map(item => item.name)),
+      ...[...document.querySelectorAll("[data-food]")].map(row => row.dataset.food)
+    ].map(normalizedFoodName));
+  }
+
+  function parseCsv(text) {
+    const rows = [];
+    let row = [], cell = "", quoted = false;
+    const input = String(text || "").replace(/^\uFEFF/, "");
+    for (let index = 0; index < input.length; index += 1) {
+      const character = input[index];
+      if (character === '"' && quoted && input[index + 1] === '"') { cell += '"'; index += 1; }
+      else if (character === '"') quoted = !quoted;
+      else if (character === "," && !quoted) { row.push(cell); cell = ""; }
+      else if ((character === "\n" || character === "\r") && !quoted) {
+        if (character === "\r" && input[index + 1] === "\n") index += 1;
+        row.push(cell); cell = "";
+        if (row.some(value => value.trim())) rows.push(row);
+        row = [];
+      } else cell += character;
+    }
+    if (quoted) throw new Error("The CSV has an unclosed quoted value.");
+    row.push(cell);
+    if (row.some(value => value.trim())) rows.push(row);
+    if (rows.length < 2) throw new Error("The CSV needs a header row and at least one pantry item.");
+    const headers = rows.shift().map(value => normalizedFoodName(value).replaceAll(" ", "_"));
+    return rows.map((values, index) => ({
+      rowNumber: index + 2,
+      ...Object.fromEntries(headers.map((header, column) => [header, String(values[column] || "").trim()]))
+    }));
+  }
+
+  function normalizeInventoryUnit(value) {
+    const aliases = {
+      items: "item", cans: "can", jars: "jar", boxes: "box", bags: "bag", packages: "package",
+      eggs: "egg", pieces: "piece", pound: "lb", pounds: "lb", lbs: "lb", ounces: "oz",
+      cups: "cup", cartons: "carton", bottles: "bottle", bunches: "bunch", head: "piece", heads: "piece",
+      pints: "package", tubs: "package", loaves: "loaf", portions: "portion", meals: "meal"
+    };
+    const unit = String(value || "").trim().toLowerCase();
+    return aliases[unit] || unit;
+  }
+
+  function normalizeStorageLocation(value, form = "") {
+    const storage = normalizedFoodName(value);
+    if (storage === "pantry" || storage === "shelf stable") return "Pantry";
+    if (storage === "fridge" || storage === "refrigerator" || storage === "refrigerated") return "Fridge";
+    if (storage === "freezer" || storage === "frozen") return "Freezer";
+    if (storage === "fresh" || storage === "counter") return "Fresh";
+    const kind = normalizedFoodName(form);
+    if (kind.includes("frozen")) return "Freezer";
+    if (kind.includes("refrigerated") || kind === "cooked") return "Fridge";
+    if (kind === "fresh" || kind === "fresh raw") return "Fresh";
+    return "Pantry";
+  }
+
+  function normalizeImportRows(rows, source = "CSV") {
+    if (rows.length > 500) throw new Error("Import up to 500 pantry rows at a time.");
+    const known = knownKitchenNames();
+    const errors = [];
+    const items = rows.map((row, index) => {
+      const originalName = String(row.name || row.ingredient_name || "").trim();
+      const canonicalName = canonicalFoodName(originalName);
+      const quantity = Number(row.quantity);
+      const unit = normalizeInventoryUnit(row.unit);
+      const form = String(row.form || "").trim() || defaultForms[normalizeStorageLocation(row.storage_location || row.storage)] || "On hand";
+      const storage_location = normalizeStorageLocation(row.storage_location || row.storage, form);
+      const rowNumber = row.rowNumber || index + 2;
+      if (!originalName) errors.push(`Row ${rowNumber}: ingredient name is required.`);
+      if (!Number.isFinite(quantity) || quantity <= 0) errors.push(`Row ${rowNumber}: quantity must be greater than zero.`);
+      if (!inventoryUnits.some(([value]) => value === unit)) errors.push(`Row ${rowNumber}: “${row.unit || ""}” is not a supported unit.`);
+      return {
+        name: canonicalName, originalName, form, storage_location, quantity, unit,
+        origin: row.origin || source, notes: row.notes || "",
+        unresolved: Boolean(originalName && !known.has(normalizedFoodName(canonicalName)))
+      };
+    });
+    if (errors.length) throw new Error(errors.slice(0, 8).join("\n"));
+    return items;
   }
 
   function browserKitchenState() {
@@ -529,6 +618,151 @@ const SNS = (() => {
     if (row.querySelector("[data-package-weight]")) row.querySelector("[data-package-weight]").value = details.package_weight_oz || "";
     if (row.querySelector("[data-expiration-date]")) row.querySelector("[data-expiration-date]").value = details.expiration_date || "";
     syncInventoryDetails(row.querySelector(".amount"));
+  }
+
+  function applyImportedPantry(items, mode) {
+    localStorage.setItem(kitchenImportUndoKey, JSON.stringify({ saved_at: new Date().toISOString(), state: browserKitchenState() }));
+    if (mode === "replace") {
+      document.querySelectorAll("[data-food]").forEach(row => {
+        if (row.dataset.custom === "true") row.remove();
+        else setRowQuantity(row, 0);
+      });
+    }
+    items.forEach(item => {
+      const storage = normalizeStorageLocation(item.storage_location, item.form);
+      let row = findFoodRow(item.name, storage);
+      if (!row) {
+        row = createFoodRow({
+          name: item.name, storage, form: item.form, quantity: item.quantity,
+          unit: item.unit, custom: true
+        });
+        document.querySelector(`[data-section="${storage}"] .item-list`)?.append(row);
+        bindQuantityEditor(row.querySelector(".amount"));
+        ensureRemoveControl(row);
+      } else {
+        row.dataset.form = item.form || row.dataset.form;
+        const note = row.querySelector(".food-note");
+        if (note && item.form) note.textContent = item.form;
+        setRowQuantity(row, item.quantity, item.unit);
+      }
+    });
+    organizeInventory();
+    bindAmounts();
+    updateCount();
+    storeBrowserKitchen();
+  }
+
+  function bindPantryImporter() {
+    const dialog = document.querySelector("[data-pantry-import-dialog]");
+    if (!dialog) return;
+    const samples = window.SNS_SAMPLE_PANTRIES || [];
+    const sampleSelect = dialog.querySelector("[data-sample-pantry-select]");
+    const csvInput = dialog.querySelector("[data-pantry-csv]");
+    const preview = dialog.querySelector("[data-pantry-import-preview]");
+    const previewItems = dialog.querySelector("[data-import-preview-items]");
+    const unresolvedPanel = dialog.querySelector("[data-import-unresolved]");
+    const unresolvedItems = dialog.querySelector("[data-import-unresolved-items]");
+    const confirmCustom = dialog.querySelector("[data-confirm-custom-items]");
+    const applyButton = dialog.querySelector("[data-apply-pantry-import]");
+    const error = dialog.querySelector("[data-pantry-import-error]");
+    const description = dialog.querySelector("[data-sample-pantry-description]");
+    let pendingItems = [];
+
+    samples.forEach(sample => {
+      const option = document.createElement("option");
+      option.value = sample.id;
+      option.textContent = sample.label;
+      sampleSelect.append(option);
+    });
+
+    function setError(message = "") {
+      error.hidden = !message;
+      error.textContent = message;
+    }
+
+    function refreshApplyState() {
+      const hasUnresolved = pendingItems.some(item => item.unresolved);
+      applyButton.disabled = !pendingItems.length || (hasUnresolved && !confirmCustom.checked);
+    }
+
+    function showPreview(items, title, detail = "") {
+      pendingItems = items;
+      setError();
+      preview.hidden = false;
+      dialog.querySelector("[data-import-preview-title]").textContent = title;
+      dialog.querySelector("[data-import-preview-count]").textContent = `${items.length} items · ${items.filter(item => item.unresolved).length} need review`;
+      description.textContent = detail || "Review the imported quantities and storage locations before applying them.";
+      previewItems.innerHTML = items.map(item => `
+        <article class="pantry-import-item${item.unresolved ? " unresolved" : ""}">
+          <span><strong>${escapeHtml(item.name || item.originalName)}</strong><small>${escapeHtml(item.form)} · ${escapeHtml(item.storage_location)}</small></span>
+          <b>${escapeHtml(item.quantity)} ${escapeHtml(item.quantity === 1 ? item.unit : (inventoryUnits.find(([value]) => value === item.unit)?.[1] || item.unit))}</b>
+        </article>`).join("");
+      const unresolved = items.filter(item => item.unresolved);
+      unresolvedPanel.hidden = !unresolved.length;
+      unresolvedItems.innerHTML = unresolved.map(item => `<span>${escapeHtml(item.originalName)}</span>`).join("");
+      confirmCustom.checked = false;
+      refreshApplyState();
+    }
+
+    sampleSelect.addEventListener("change", () => {
+      const sample = samples.find(item => item.id === sampleSelect.value);
+      if (!sample) {
+        pendingItems = [];
+        preview.hidden = true;
+        description.textContent = "Select a sample to see its ingredients, or upload a CSV with name, quantity, and unit columns.";
+        refreshApplyState();
+        return;
+      }
+      csvInput.value = "";
+      try { showPreview(normalizeImportRows(sample.items, `sample:${sample.id}`), sample.label, sample.description); }
+      catch (caught) { setError(caught.message); }
+    });
+
+    csvInput.addEventListener("change", async () => {
+      const file = csvInput.files?.[0];
+      if (!file) return;
+      sampleSelect.value = "";
+      try {
+        if (file.size > 1024 * 1024) throw new Error("Choose a CSV smaller than 1 MB.");
+        const rows = parseCsv(await file.text());
+        showPreview(normalizeImportRows(rows, `csv:${file.name}`), file.name, "CSV preview. Unknown names are held for your confirmation.");
+      } catch (caught) {
+        pendingItems = [];
+        preview.hidden = true;
+        setError(caught.message || "The CSV could not be read.");
+        refreshApplyState();
+      }
+    });
+
+    confirmCustom.addEventListener("change", refreshApplyState);
+    document.querySelector("[data-open-pantry-import]")?.addEventListener("click", () => dialog.showModal());
+    dialog.querySelectorAll("[data-close-pantry-import]").forEach(button => button.addEventListener("click", () => dialog.close()));
+    applyButton.addEventListener("click", async () => {
+      if (!pendingItems.length || applyButton.disabled) return;
+      const mode = dialog.querySelector('input[name="pantry-import-mode"]:checked')?.value || "merge";
+      applyButton.disabled = true;
+      applyImportedPantry(pendingItems, mode);
+      dialog.close();
+      const undo = document.querySelector("[data-pantry-import-undo]");
+      if (undo) {
+        undo.hidden = false;
+        undo.querySelector("[data-pantry-import-undo-message]").textContent = `${pendingItems.length} pantry items ${mode === "replace" ? "replaced" : "merged into"} My Kitchen.`;
+      }
+      await saveKitchen();
+      refreshApplyState();
+    });
+
+    const undo = document.querySelector("[data-pantry-import-undo]");
+    if (localStorage.getItem(kitchenImportUndoKey) && undo) undo.hidden = false;
+    document.querySelector("[data-undo-pantry-import]")?.addEventListener("click", async () => {
+      let snapshot;
+      try { snapshot = JSON.parse(localStorage.getItem(kitchenImportUndoKey) || "null"); } catch { snapshot = null; }
+      if (!snapshot?.state) return;
+      localStorage.setItem(kitchenStorageKey, JSON.stringify(snapshot.state));
+      localStorage.removeItem(kitchenImportUndoKey);
+      sessionStorage.setItem("snsKitchenUndoNeedsSave", "1");
+      location.reload();
+    });
   }
 
   function syncInventoryDetails(group) {
@@ -1487,6 +1721,7 @@ const SNS = (() => {
     organizeInventory();
     bindAmounts();
     bindKitchenDashboard();
+    bindPantryImporter();
     updateCount();
     initializeKitchenAccordion();
     renderRecipeChoices();
@@ -1498,6 +1733,10 @@ const SNS = (() => {
     document.querySelector("[data-get-recipes]")?.addEventListener("click", generateRecipeList);
     document.querySelector("[data-build-meal]")?.addEventListener("click", openMealBuilder);
     document.querySelector("[data-signature-recipes]")?.addEventListener("click", openSignatureRecipes);
+    if (sessionStorage.getItem("snsKitchenUndoNeedsSave") === "1") {
+      sessionStorage.removeItem("snsKitchenUndoNeedsSave");
+      saveKitchen();
+    }
     document.querySelectorAll("[data-checkout]").forEach(b => b.addEventListener("click", () => checkout(b.dataset.checkout)));
     document.querySelector("[data-billing-portal]")?.addEventListener("click", billingPortal);
     runRequestedKitchenAction();
