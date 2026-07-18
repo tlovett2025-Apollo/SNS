@@ -1,0 +1,1943 @@
+From 55fd4cdc0753335134ae43cbcf0ac3819b15f8f2 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Sat, 18 Jul 2026 14:20:01 -0600
+Subject: [PATCH 1/2] Share kitchens across devices with Supabase
+
+---
+ api_http.py                                   | 113 ++++-
+ ...260718133000_shared_kitchen_foundation.sql | 308 +++++++++++++
+ ...41000_shared_kitchen_security_and_sync.sql | 414 ++++++++++++++++++
+ supabase_gateway.py                           | 134 ++++++
+ test_api_http.py                              |  53 +++
+ test_public_site_copy.py                      |  21 +
+ test_supabase_gateway.py                      | 110 +++++
+ web/public-site/build-your-meal.html          |   2 +-
+ web/public-site/choose-recipe.html            |   2 +-
+ web/public-site/favorite-recipes.html         |   2 +-
+ web/public-site/home.html                     |   2 +-
+ web/public-site/household-preferences.html    |  17 +-
+ web/public-site/kitchen-training.html         |   2 +-
+ web/public-site/login.html                    | 104 +++--
+ web/public-site/my-kitchen.html               |   2 +-
+ web/public-site/pantry-101.html               |   2 +-
+ web/public-site/recipe.html                   |   2 +-
+ web/public-site/signature-recipes.html        |   2 +-
+ web/public-site/sns-auth.js                   |  64 +++
+ web/public-site/sns-config.js                 |   7 +
+ web/public-site/sns-flow.css                  |   1 +
+ web/public-site/sns-flow.js                   | 142 ++++--
+ 22 files changed, 1427 insertions(+), 79 deletions(-)
+ create mode 100644 supabase/migrations/20260718133000_shared_kitchen_foundation.sql
+ create mode 100644 supabase/migrations/20260718141000_shared_kitchen_security_and_sync.sql
+ create mode 100644 supabase_gateway.py
+ create mode 100644 test_supabase_gateway.py
+ create mode 100644 web/public-site/sns-auth.js
+ create mode 100644 web/public-site/sns-config.js
+
+diff --git a/api_http.py b/api_http.py
+index ccd19c1..3589812 100644
+--- a/api_http.py
++++ b/api_http.py
+@@ -10,7 +10,7 @@ from __future__ import annotations
+ 
+ import os
+ 
+-from fastapi import FastAPI, HTTPException, Response
++from fastapi import FastAPI, Header, HTTPException, Response
+ from fastapi.middleware.cors import CORSMiddleware
+ 
+ from api_service import (
+@@ -18,6 +18,8 @@ from api_service import (
+     get_meal_builder_options,
+     get_recipe,
+     get_recipe_list,
++    normalize_kitchen_snapshot,
++    resolve_inventory,
+     save_my_kitchen,
+ )
+ from build_provenance import DEPLOYED_BUILD_PROVENANCE, public_build_provenance
+@@ -27,6 +29,11 @@ from household_inventory import (
+     InventoryError,
+     bootstrap_local_household,
+ )
++from supabase_gateway import (
++    SupabaseGateway,
++    SupabaseGatewayError,
++    apply_durable_kitchen,
++)
+ 
+ 
+ _PUBLIC_FRONTEND_ORIGINS = (
+@@ -58,18 +65,21 @@ app.add_middleware(
+     allow_origins=_cors_origins(),
+     allow_credentials=False,
+     allow_methods=["GET", "POST", "OPTIONS"],
+-    allow_headers=["Content-Type"],
++    allow_headers=["Content-Type", "Authorization"],
+ )
+ 
+ 
+ # Build identity is constant for the lifetime of a deployed process. Compute
+ # it once so readiness probes never repeat filesystem and Git inspection.
+ _BUILD_PROVENANCE = DEPLOYED_BUILD_PROVENANCE
++_SUPABASE = SupabaseGateway()
+ 
+ 
+ def _domain_error(exc: Exception) -> HTTPException:
+     if isinstance(exc, InventoryAccessError):
+         return HTTPException(status_code=403, detail=str(exc))
++    if isinstance(exc, SupabaseGatewayError):
++        return HTTPException(status_code=401, detail=str(exc))
+     if isinstance(exc, (APIContractError, InventoryError)):
+         return HTTPException(status_code=400, detail=str(exc))
+     return HTTPException(status_code=500, detail="The Stock & Stir API could not complete the request.")
+@@ -107,15 +117,79 @@ def health_head() -> Response:
+     return Response(status_code=200)
+ 
+ 
+-@app.post("/api/SaveMyKitchen")
+-def save_kitchen_endpoint(payload: dict) -> dict:
+-    """Save to the shared pre-authentication tester household.
++def _access_token(authorization: str | None) -> str:
++    return _SUPABASE.token_from_authorization(authorization)
++
++
++def _durable_payload(payload: dict, authorization: str | None) -> dict:
++    token = _access_token(authorization)
++    if not token:
++        return payload
++    snapshot = _SUPABASE.kitchen_snapshot(token)
++    if isinstance(payload.get("kitchen"), dict):
++        hydrated = dict(payload)
++        hydrated["kitchen"] = apply_durable_kitchen(payload["kitchen"], snapshot)
++        return hydrated
++    return apply_durable_kitchen(payload, snapshot)
+ 
+-    Recipe requests carry their own kitchen snapshot, so testers do not rely
+-    on this shared saved state to generate or open a meal.  Managed identity
+-    will replace this bootstrap before production billing is enabled.
+-    """
++
++def _canonical_sync_payload(payload: dict) -> dict:
++    """Resolve known aliases before they become the household source of truth."""
++    normalized = normalize_kitchen_snapshot(payload)
++    resolved, _pending = resolve_inventory(normalized, DB_PATH)
++    canonical = {
++        str(item.source.get("name") or "").strip().lower(): (item.name, item.form_name)
++        for item in resolved
++    }
++    inventory = []
++    for item in normalized["inventory_lots"]:
++        name, form = canonical.get(
++            str(item.get("name") or "").strip().lower(),
++            (item.get("name"), item.get("form")),
++        )
++        inventory.append({
++            "name": name,
++            "form": form,
++            "storage": item.get("storage_location"),
++            "quantity": item.get("quantity"),
++            "unit": item.get("unit"),
++            "origin": item.get("origin"),
++            "opened_at": item.get("opened_at"),
++            "refrigerated_after_opening": item.get("refrigerated_after_opening"),
++            "package_weight_oz": item.get("package_weight_oz"),
++            "expiration_date": item.get("expiration_date"),
++        })
++    canonical_payload = dict(payload)
++    canonical_payload["inventory"] = inventory
++    return canonical_payload
++
++
++@app.get("/api/MyKitchen")
++def get_kitchen_endpoint(authorization: str | None = Header(default=None)) -> dict:
++    """Return the signed-in user's RLS-protected household kitchen."""
++    try:
++        return _SUPABASE.kitchen_snapshot(_access_token(authorization))
++    except Exception as exc:
++        raise _domain_error(exc) from exc
++
++
++@app.post("/api/SaveMyKitchen")
++def save_kitchen_endpoint(
++    payload: dict,
++    authorization: str | None = Header(default=None),
++) -> dict:
++    """Save the authenticated household, retaining a local test fallback."""
+     try:
++        token = _access_token(authorization)
++        if token:
++            response = _SUPABASE.sync_kitchen(
++                token,
++                _canonical_sync_payload(payload),
++                source_type=payload.get("sync_source_type"),
++                source_fingerprint=payload.get("sync_source_fingerprint"),
++            )
++            response["storage_mode"] = "supabase_household"
++            return response
+         user_id, household_id = bootstrap_local_household(DB_PATH)
+         response = save_my_kitchen(
+             payload,
+@@ -130,24 +204,33 @@ def save_kitchen_endpoint(payload: dict) -> dict:
+ 
+ 
+ @app.post("/api/GetRecipeList")
+-def recipe_list_endpoint(payload: dict) -> dict:
++def recipe_list_endpoint(
++    payload: dict,
++    authorization: str | None = Header(default=None),
++) -> dict:
+     try:
+-        return get_recipe_list(payload, db_path=DB_PATH)
++        return get_recipe_list(_durable_payload(payload, authorization), db_path=DB_PATH)
+     except Exception as exc:
+         raise _domain_error(exc) from exc
+ 
+ 
+ @app.post("/api/GetMealBuilderOptions")
+-def meal_builder_options_endpoint(payload: dict) -> dict:
++def meal_builder_options_endpoint(
++    payload: dict,
++    authorization: str | None = Header(default=None),
++) -> dict:
+     try:
+-        return get_meal_builder_options(payload, db_path=DB_PATH)
++        return get_meal_builder_options(_durable_payload(payload, authorization), db_path=DB_PATH)
+     except Exception as exc:
+         raise _domain_error(exc) from exc
+ 
+ 
+ @app.post("/api/GetRecipe")
+-def recipe_endpoint(payload: dict) -> dict:
++def recipe_endpoint(
++    payload: dict,
++    authorization: str | None = Header(default=None),
++) -> dict:
+     try:
+-        return get_recipe(payload, db_path=DB_PATH)
++        return get_recipe(_durable_payload(payload, authorization), db_path=DB_PATH)
+     except Exception as exc:
+         raise _domain_error(exc) from exc
+diff --git a/supabase/migrations/20260718133000_shared_kitchen_foundation.sql b/supabase/migrations/20260718133000_shared_kitchen_foundation.sql
+new file mode 100644
+index 0000000..80f2f65
+--- /dev/null
++++ b/supabase/migrations/20260718133000_shared_kitchen_foundation.sql
+@@ -0,0 +1,308 @@
++-- Stock & Stir Deployment 1: durable household source of truth.
++-- Culinary knowledge remains in the versioned CKB SQLite database. These
++-- tables contain user-owned identity, kitchen, preference, and feedback data.
++
++create or replace function public.set_updated_at()
++returns trigger
++language plpgsql
++set search_path = public
++as $$
++begin
++  new.updated_at = timezone('utc', now());
++  return new;
++end;
++$$;
++
++create table public.profiles (
++  user_id uuid primary key references auth.users(id) on delete cascade,
++  display_name text not null default '',
++  default_servings integer not null default 4 check (default_servings between 1 and 30),
++  created_at timestamptz not null default timezone('utc', now()),
++  updated_at timestamptz not null default timezone('utc', now())
++);
++
++create table public.households (
++  household_id uuid primary key default gen_random_uuid(),
++  household_name text not null default 'My Kitchen',
++  created_by_user_id uuid not null references auth.users(id) on delete cascade,
++  created_at timestamptz not null default timezone('utc', now()),
++  updated_at timestamptz not null default timezone('utc', now())
++);
++
++create table public.household_members (
++  household_id uuid not null references public.households(household_id) on delete cascade,
++  user_id uuid not null references auth.users(id) on delete cascade,
++  role text not null default 'member' check (role in ('owner', 'member')),
++  joined_at timestamptz not null default timezone('utc', now()),
++  primary key (household_id, user_id)
++);
++
++create or replace function public.is_household_member(target_household_id uuid)
++returns boolean
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select exists (
++    select 1 from public.household_members
++    where household_id = target_household_id and user_id = auth.uid()
++  );
++$$;
++
++create or replace function public.is_household_owner(target_household_id uuid)
++returns boolean
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select exists (
++    select 1 from public.household_members
++    where household_id = target_household_id
++      and user_id = auth.uid()
++      and role = 'owner'
++  );
++$$;
++
++create table public.household_people (
++  person_id uuid primary key default gen_random_uuid(),
++  household_id uuid not null references public.households(household_id) on delete cascade,
++  linked_user_id uuid references auth.users(id) on delete set null,
++  display_name text not null,
++  appetite text not null default 'standard' check (appetite in ('light', 'standard', 'big')),
++  active boolean not null default true,
++  created_at timestamptz not null default timezone('utc', now()),
++  updated_at timestamptz not null default timezone('utc', now())
++);
++
++create table public.inventory_lots (
++  inventory_lot_id uuid primary key default gen_random_uuid(),
++  household_id uuid not null references public.households(household_id) on delete cascade,
++  canonical_name text not null,
++  form_name text not null default '',
++  storage_location text not null check (storage_location in ('Pantry', 'Fridge', 'Freezer', 'Fresh')),
++  quantity numeric not null default 0 check (quantity >= 0),
++  unit text not null default 'item',
++  quantity_band text check (quantity_band is null or quantity_band in ('a_little', 'some', 'plenty')),
++  expiration_date date,
++  confidence_level text not null default 'user_selected',
++  origin text not null default 'manual',
++  opened_at date,
++  refrigerated_after_opening boolean,
++  package_weight_oz numeric check (package_weight_oz is null or package_weight_oz > 0),
++  client_item_id text,
++  version bigint not null default 1 check (version > 0),
++  is_deleted boolean not null default false,
++  updated_by_user_id uuid not null references auth.users(id),
++  created_at timestamptz not null default timezone('utc', now()),
++  updated_at timestamptz not null default timezone('utc', now()),
++  unique (household_id, client_item_id)
++);
++
++create index inventory_lots_household_updated_idx
++  on public.inventory_lots (household_id, updated_at);
++create index inventory_lots_household_name_idx
++  on public.inventory_lots (household_id, lower(canonical_name));
++
++create table public.household_equipment (
++  equipment_id uuid primary key default gen_random_uuid(),
++  household_id uuid not null references public.households(household_id) on delete cascade,
++  equipment_name text not null,
++  available boolean not null default true,
++  details jsonb not null default '{}'::jsonb,
++  updated_by_user_id uuid not null references auth.users(id),
++  created_at timestamptz not null default timezone('utc', now()),
++  updated_at timestamptz not null default timezone('utc', now())
++);
++create unique index household_equipment_name_idx
++  on public.household_equipment (household_id, lower(equipment_name));
++
++create table public.household_preferences (
++  preference_id uuid primary key default gen_random_uuid(),
++  household_id uuid not null references public.households(household_id) on delete cascade,
++  person_id uuid references public.household_people(person_id) on delete cascade,
++  preference_type text not null check (preference_type in (
++    'allergy', 'medical_exclusion', 'religious_exclusion', 'exclusion',
++    'dislike', 'preference', 'default'
++  )),
++  target_type text not null check (target_type in (
++    'ingredient', 'ingredient_family', 'cuisine', 'method', 'form', 'setting'
++  )),
++  target_value text not null,
++  severity text not null default 'avoid' check (severity in ('never', 'avoid', 'dislike', 'prefer')),
++  notes text not null default '',
++  active boolean not null default true,
++  updated_by_user_id uuid not null references auth.users(id),
++  created_at timestamptz not null default timezone('utc', now()),
++  updated_at timestamptz not null default timezone('utc', now())
++);
++create index household_preferences_household_idx
++  on public.household_preferences (household_id, active, preference_type);
++
++create table public.kitchen_imports (
++  import_id uuid primary key default gen_random_uuid(),
++  household_id uuid not null references public.households(household_id) on delete cascade,
++  submitted_by_user_id uuid not null references auth.users(id),
++  source_type text not null check (source_type in ('browser_migration', 'csv', 'sample_pantry', 'barcode', 'photo')),
++  import_mode text not null check (import_mode in ('merge', 'replace', 'draft')),
++  source_fingerprint text,
++  imported_count integer not null default 0 check (imported_count >= 0),
++  rejected_count integer not null default 0 check (rejected_count >= 0),
++  created_at timestamptz not null default timezone('utc', now()),
++  unique (household_id, source_type, source_fingerprint)
++);
++
++create table public.recipe_reports (
++  report_id uuid primary key default gen_random_uuid(),
++  household_id uuid not null references public.households(household_id) on delete cascade,
++  submitted_by_user_id uuid not null references auth.users(id),
++  candidate_id text,
++  build_id text,
++  commit_id text,
++  page_source text not null default '',
++  recipe_snapshot jsonb not null,
++  rendered_recipe_text text not null,
++  user_note text not null default '',
++  status text not null default 'new' check (status in (
++    'new', 'confirmed_problem', 'needs_information', 'training_required',
++    'engine_defect', 'fixed', 'valid_needs_clarity', 'cannot_reproduce'
++  )),
++  created_at timestamptz not null default timezone('utc', now()),
++  updated_at timestamptz not null default timezone('utc', now())
++);
++create index recipe_reports_status_idx on public.recipe_reports (status, created_at);
++
++create or replace function public.add_household_owner()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  insert into public.household_members (household_id, user_id, role)
++  values (new.household_id, new.created_by_user_id, 'owner')
++  on conflict do nothing;
++  return new;
++end;
++$$;
++
++create trigger households_add_owner
++after insert on public.households
++for each row execute function public.add_household_owner();
++
++create or replace function public.create_new_user_kitchen()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  chosen_name text;
++begin
++  chosen_name := coalesce(
++    nullif(trim(new.raw_user_meta_data ->> 'display_name'), ''),
++    nullif(split_part(coalesce(new.email, ''), '@', 1), ''),
++    'Cook'
++  );
++  insert into public.profiles (user_id, display_name)
++  values (new.id, chosen_name)
++  on conflict (user_id) do nothing;
++  insert into public.households (household_name, created_by_user_id)
++  values ('My Kitchen', new.id);
++  return new;
++end;
++$$;
++
++create trigger auth_user_creates_kitchen
++after insert on auth.users
++for each row execute function public.create_new_user_kitchen();
++
++create trigger profiles_set_updated_at before update on public.profiles
++for each row execute function public.set_updated_at();
++create trigger households_set_updated_at before update on public.households
++for each row execute function public.set_updated_at();
++create trigger household_people_set_updated_at before update on public.household_people
++for each row execute function public.set_updated_at();
++create trigger inventory_lots_set_updated_at before update on public.inventory_lots
++for each row execute function public.set_updated_at();
++create trigger household_equipment_set_updated_at before update on public.household_equipment
++for each row execute function public.set_updated_at();
++create trigger household_preferences_set_updated_at before update on public.household_preferences
++for each row execute function public.set_updated_at();
++create trigger recipe_reports_set_updated_at before update on public.recipe_reports
++for each row execute function public.set_updated_at();
++
++alter table public.profiles enable row level security;
++alter table public.households enable row level security;
++alter table public.household_members enable row level security;
++alter table public.household_people enable row level security;
++alter table public.inventory_lots enable row level security;
++alter table public.household_equipment enable row level security;
++alter table public.household_preferences enable row level security;
++alter table public.kitchen_imports enable row level security;
++alter table public.recipe_reports enable row level security;
++
++create policy profiles_select_own on public.profiles
++for select using (user_id = auth.uid());
++create policy profiles_insert_own on public.profiles
++for insert with check (user_id = auth.uid());
++create policy profiles_update_own on public.profiles
++for update using (user_id = auth.uid()) with check (user_id = auth.uid());
++
++create policy households_select_member on public.households
++for select using (public.is_household_member(household_id));
++create policy households_insert_self on public.households
++for insert with check (created_by_user_id = auth.uid());
++create policy households_update_owner on public.households
++for update using (public.is_household_owner(household_id));
++create policy households_delete_owner on public.households
++for delete using (public.is_household_owner(household_id));
++
++create policy household_members_select_member on public.household_members
++for select using (public.is_household_member(household_id));
++create policy household_members_insert_owner on public.household_members
++for insert with check (public.is_household_owner(household_id));
++create policy household_members_update_owner on public.household_members
++for update using (public.is_household_owner(household_id));
++create policy household_members_delete_owner on public.household_members
++for delete using (public.is_household_owner(household_id));
++
++create policy household_people_member_all on public.household_people
++for all using (public.is_household_member(household_id))
++with check (public.is_household_member(household_id));
++create policy inventory_lots_member_all on public.inventory_lots
++for all using (public.is_household_member(household_id))
++with check (public.is_household_member(household_id) and updated_by_user_id = auth.uid());
++create policy household_equipment_member_all on public.household_equipment
++for all using (public.is_household_member(household_id))
++with check (public.is_household_member(household_id) and updated_by_user_id = auth.uid());
++create policy household_preferences_member_all on public.household_preferences
++for all using (public.is_household_member(household_id))
++with check (public.is_household_member(household_id) and updated_by_user_id = auth.uid());
++create policy kitchen_imports_member_insert on public.kitchen_imports
++for insert with check (
++  public.is_household_member(household_id) and submitted_by_user_id = auth.uid()
++);
++create policy kitchen_imports_member_select on public.kitchen_imports
++for select using (public.is_household_member(household_id));
++create policy recipe_reports_submit on public.recipe_reports
++for insert with check (
++  public.is_household_member(household_id) and submitted_by_user_id = auth.uid()
++);
++create policy recipe_reports_read_own on public.recipe_reports
++for select using (submitted_by_user_id = auth.uid());
++
++-- Backfill safely if the project acquired an Auth user before this migration.
++insert into public.profiles (user_id, display_name)
++select id, coalesce(nullif(split_part(coalesce(email, ''), '@', 1), ''), 'Cook')
++from auth.users
++on conflict (user_id) do nothing;
++
++insert into public.households (household_name, created_by_user_id)
++select 'My Kitchen', user_id
++from public.profiles profile
++where not exists (
++  select 1 from public.households household
++  where household.created_by_user_id = profile.user_id
++);
+diff --git a/supabase/migrations/20260718141000_shared_kitchen_security_and_sync.sql b/supabase/migrations/20260718141000_shared_kitchen_security_and_sync.sql
+new file mode 100644
+index 0000000..59a5209
+--- /dev/null
++++ b/supabase/migrations/20260718141000_shared_kitchen_security_and_sync.sql
+@@ -0,0 +1,414 @@
++-- Harden Deployment 1 and expose two user-scoped RPCs for the static site.
++
++create schema if not exists private;
++revoke all on schema private from public, anon;
++grant usage on schema private to authenticated;
++
++create or replace function private.is_household_member(target_household_id uuid)
++returns boolean
++language sql
++stable
++security definer
++set search_path = ''
++as $$
++  select exists (
++    select 1
++    from public.household_members
++    where household_id = target_household_id
++      and user_id = (select auth.uid())
++  );
++$$;
++
++create or replace function private.is_household_owner(target_household_id uuid)
++returns boolean
++language sql
++stable
++security definer
++set search_path = ''
++as $$
++  select exists (
++    select 1
++    from public.household_members
++    where household_id = target_household_id
++      and user_id = (select auth.uid())
++      and role = 'owner'
++  );
++$$;
++
++revoke all on function private.is_household_member(uuid) from public, anon;
++revoke all on function private.is_household_owner(uuid) from public, anon;
++grant execute on function private.is_household_member(uuid) to authenticated;
++grant execute on function private.is_household_owner(uuid) to authenticated;
++
++-- Trigger functions are never client RPCs.
++revoke all on function public.add_household_owner() from public, anon, authenticated;
++revoke all on function public.create_new_user_kitchen() from public, anon, authenticated;
++revoke all on function public.set_updated_at() from public, anon, authenticated;
++
++drop policy if exists profiles_select_own on public.profiles;
++drop policy if exists profiles_insert_own on public.profiles;
++drop policy if exists profiles_update_own on public.profiles;
++drop policy if exists households_select_member on public.households;
++drop policy if exists households_insert_self on public.households;
++drop policy if exists households_update_owner on public.households;
++drop policy if exists households_delete_owner on public.households;
++drop policy if exists household_members_select_member on public.household_members;
++drop policy if exists household_members_insert_owner on public.household_members;
++drop policy if exists household_members_update_owner on public.household_members;
++drop policy if exists household_members_delete_owner on public.household_members;
++drop policy if exists household_people_member_all on public.household_people;
++drop policy if exists inventory_lots_member_all on public.inventory_lots;
++drop policy if exists household_equipment_member_all on public.household_equipment;
++drop policy if exists household_preferences_member_all on public.household_preferences;
++drop policy if exists kitchen_imports_member_insert on public.kitchen_imports;
++drop policy if exists kitchen_imports_member_select on public.kitchen_imports;
++drop policy if exists recipe_reports_submit on public.recipe_reports;
++drop policy if exists recipe_reports_read_own on public.recipe_reports;
++
++create policy profiles_select_own on public.profiles
++for select to authenticated using (user_id = (select auth.uid()));
++create policy profiles_insert_own on public.profiles
++for insert to authenticated with check (user_id = (select auth.uid()));
++create policy profiles_update_own on public.profiles
++for update to authenticated using (user_id = (select auth.uid()))
++with check (user_id = (select auth.uid()));
++
++create policy households_select_member on public.households
++for select to authenticated using (private.is_household_member(household_id));
++create policy households_insert_self on public.households
++for insert to authenticated with check (created_by_user_id = (select auth.uid()));
++create policy households_update_owner on public.households
++for update to authenticated using (private.is_household_owner(household_id))
++with check (private.is_household_owner(household_id));
++create policy households_delete_owner on public.households
++for delete to authenticated using (private.is_household_owner(household_id));
++
++create policy household_members_select_member on public.household_members
++for select to authenticated using (private.is_household_member(household_id));
++create policy household_members_insert_owner on public.household_members
++for insert to authenticated with check (private.is_household_owner(household_id));
++create policy household_members_update_owner on public.household_members
++for update to authenticated using (private.is_household_owner(household_id))
++with check (private.is_household_owner(household_id));
++create policy household_members_delete_owner on public.household_members
++for delete to authenticated using (private.is_household_owner(household_id));
++
++create policy household_people_member_all on public.household_people
++for all to authenticated using (private.is_household_member(household_id))
++with check (private.is_household_member(household_id));
++create policy inventory_lots_member_all on public.inventory_lots
++for all to authenticated using (private.is_household_member(household_id))
++with check (
++  private.is_household_member(household_id)
++  and updated_by_user_id = (select auth.uid())
++);
++create policy household_equipment_member_all on public.household_equipment
++for all to authenticated using (private.is_household_member(household_id))
++with check (
++  private.is_household_member(household_id)
++  and updated_by_user_id = (select auth.uid())
++);
++create policy household_preferences_member_all on public.household_preferences
++for all to authenticated using (private.is_household_member(household_id))
++with check (
++  private.is_household_member(household_id)
++  and updated_by_user_id = (select auth.uid())
++);
++create policy kitchen_imports_member_insert on public.kitchen_imports
++for insert to authenticated with check (
++  private.is_household_member(household_id)
++  and submitted_by_user_id = (select auth.uid())
++);
++create policy kitchen_imports_member_select on public.kitchen_imports
++for select to authenticated using (private.is_household_member(household_id));
++create policy recipe_reports_submit on public.recipe_reports
++for insert to authenticated with check (
++  private.is_household_member(household_id)
++  and submitted_by_user_id = (select auth.uid())
++);
++create policy recipe_reports_read_own on public.recipe_reports
++for select to authenticated using (submitted_by_user_id = (select auth.uid()));
++
++alter table public.profiles
++  add column if not exists default_energy text not null default 'Low'
++    check (default_energy in ('Very Low', 'Low', 'Medium', 'High'));
++alter table public.household_preferences
++  add column if not exists preference_value jsonb not null default '{}'::jsonb;
++
++create index if not exists households_created_by_idx
++  on public.households (created_by_user_id);
++create index if not exists household_members_user_idx
++  on public.household_members (user_id, household_id);
++create index if not exists household_people_household_idx
++  on public.household_people (household_id);
++create index if not exists household_people_linked_user_idx
++  on public.household_people (linked_user_id) where linked_user_id is not null;
++create index if not exists inventory_lots_updated_by_idx
++  on public.inventory_lots (updated_by_user_id);
++create index if not exists household_equipment_updated_by_idx
++  on public.household_equipment (updated_by_user_id);
++create index if not exists household_preferences_person_idx
++  on public.household_preferences (person_id) where person_id is not null;
++create index if not exists household_preferences_updated_by_idx
++  on public.household_preferences (updated_by_user_id);
++create index if not exists kitchen_imports_submitted_by_idx
++  on public.kitchen_imports (submitted_by_user_id);
++create index if not exists recipe_reports_household_idx
++  on public.recipe_reports (household_id);
++create index if not exists recipe_reports_submitted_by_idx
++  on public.recipe_reports (submitted_by_user_id);
++
++grant select, insert, update, delete on table public.profiles to authenticated;
++grant select, insert, update, delete on table public.households to authenticated;
++grant select, insert, update, delete on table public.household_members to authenticated;
++grant select, insert, update, delete on table public.household_people to authenticated;
++grant select, insert, update, delete on table public.inventory_lots to authenticated;
++grant select, insert, update, delete on table public.household_equipment to authenticated;
++grant select, insert, update, delete on table public.household_preferences to authenticated;
++grant select, insert on table public.kitchen_imports to authenticated;
++grant select, insert on table public.recipe_reports to authenticated;
++
++drop function if exists public.is_household_member(uuid);
++drop function if exists public.is_household_owner(uuid);
++
++create or replace function public.my_kitchen_snapshot()
++returns jsonb
++language plpgsql
++stable
++security invoker
++set search_path = ''
++as $$
++declare
++  v_user_id uuid := (select auth.uid());
++  v_household_id uuid;
++  v_profile public.profiles%rowtype;
++begin
++  if v_user_id is null then
++    raise exception 'Authentication is required.' using errcode = '42501';
++  end if;
++
++  select household_id into v_household_id
++  from public.household_members
++  where user_id = v_user_id
++  order by (role = 'owner') desc, joined_at
++  limit 1;
++
++  if v_household_id is null then
++    raise exception 'No kitchen is attached to this account.' using errcode = '42501';
++  end if;
++
++  select * into v_profile from public.profiles where user_id = v_user_id;
++
++  return jsonb_build_object(
++    'household_id', v_household_id,
++    'servings', coalesce(v_profile.default_servings, 4),
++    'energy', coalesce(v_profile.default_energy, 'Low'),
++    'effort', coalesce(v_profile.default_energy, 'Low'),
++    'tonight_effort', coalesce(v_profile.default_energy, 'Low'),
++    'foods', coalesce((
++      select jsonb_agg(jsonb_build_object(
++        'id', inventory_lot_id,
++        'name', canonical_name,
++        'form', form_name,
++        'storage', storage_location,
++        'quantity', quantity,
++        'unit', unit,
++        'opened_at', opened_at,
++        'refrigerated_after_opening', refrigerated_after_opening,
++        'package_weight_oz', package_weight_oz,
++        'expiration_date', expiration_date,
++        'custom', true
++      ) order by storage_location, canonical_name)
++      from public.inventory_lots
++      where household_id = v_household_id and not is_deleted and quantity > 0
++    ), '[]'::jsonb),
++    'inventory', coalesce((
++      select jsonb_agg(jsonb_build_object(
++        'name', canonical_name,
++        'form', form_name,
++        'storage', storage_location,
++        'quantity', quantity,
++        'unit', unit,
++        'opened_at', opened_at,
++        'refrigerated_after_opening', refrigerated_after_opening,
++        'package_weight_oz', package_weight_oz,
++        'expiration_date', expiration_date
++      ) order by storage_location, canonical_name)
++      from public.inventory_lots
++      where household_id = v_household_id and not is_deleted and quantity > 0
++    ), '[]'::jsonb),
++    'equipment', coalesce((
++      select jsonb_agg(jsonb_build_object(
++        'name', equipment_name,
++        'active', available,
++        'available', available,
++        'custom', true
++      ) order by equipment_name)
++      from public.household_equipment
++      where household_id = v_household_id
++    ), '[]'::jsonb),
++    'household_members', coalesce((
++      select jsonb_agg(jsonb_build_object(
++        'name', display_name,
++        'appetite', appetite
++      ) order by created_at)
++      from public.household_people
++      where household_id = v_household_id and active
++    ), '[]'::jsonb),
++    'preferences', coalesce((
++      select jsonb_agg(jsonb_build_object(
++        'preference_type', preference_type,
++        'target_type', target_type,
++        'target_value', target_value,
++        'severity', severity,
++        'notes', notes,
++        'value', preference_value
++      ) order by created_at)
++      from public.household_preferences
++      where household_id = v_household_id and active
++    ), '[]'::jsonb)
++  );
++end;
++$$;
++
++create or replace function public.sync_my_kitchen(
++  p_snapshot jsonb,
++  p_source_type text default null,
++  p_source_fingerprint text default null
++)
++returns jsonb
++language plpgsql
++volatile
++security invoker
++set search_path = ''
++as $$
++declare
++  v_user_id uuid := (select auth.uid());
++  v_household_id uuid;
++  v_inventory jsonb := coalesce(p_snapshot -> 'inventory', p_snapshot -> 'foods', '[]'::jsonb);
++  v_equipment jsonb := coalesce(p_snapshot -> 'equipment', '[]'::jsonb);
++  v_people jsonb := coalesce(
++    p_snapshot -> 'household_members',
++    p_snapshot #> '{meal_preferences,household_members}',
++    '[]'::jsonb
++  );
++  v_preferences jsonb := coalesce(p_snapshot -> 'preferences', '[]'::jsonb);
++begin
++  if v_user_id is null then
++    raise exception 'Authentication is required.' using errcode = '42501';
++  end if;
++
++  select household_id into v_household_id
++  from public.household_members
++  where user_id = v_user_id
++  order by (role = 'owner') desc, joined_at
++  limit 1;
++
++  if v_household_id is null then
++    raise exception 'No kitchen is attached to this account.' using errcode = '42501';
++  end if;
++
++  update public.profiles
++  set default_servings = greatest(1, least(30, coalesce((p_snapshot ->> 'servings')::integer, default_servings))),
++      default_energy = case
++        when coalesce(p_snapshot ->> 'effort', p_snapshot ->> 'energy', p_snapshot ->> 'tonight_effort')
++          in ('Very Low', 'Low', 'Medium', 'High')
++        then coalesce(p_snapshot ->> 'effort', p_snapshot ->> 'energy', p_snapshot ->> 'tonight_effort')
++        else default_energy
++      end
++  where user_id = v_user_id;
++
++  delete from public.inventory_lots where household_id = v_household_id;
++  insert into public.inventory_lots (
++    household_id, canonical_name, form_name, storage_location, quantity, unit,
++    expiration_date, opened_at, refrigerated_after_opening, package_weight_oz,
++    client_item_id, origin, updated_by_user_id
++  )
++  select
++    v_household_id,
++    trim(item ->> 'name'),
++    coalesce(nullif(trim(coalesce(item ->> 'form', item ->> 'form_name', '')), ''), 'On hand'),
++    case lower(coalesce(item ->> 'storage', item ->> 'storage_location', 'pantry'))
++      when 'fridge' then 'Fridge'
++      when 'freezer' then 'Freezer'
++      when 'fresh' then 'Fresh'
++      else 'Pantry'
++    end,
++    greatest(0, coalesce((item ->> 'quantity')::numeric, 0)),
++    coalesce(nullif(trim(item ->> 'unit'), ''), 'item'),
++    nullif(item ->> 'expiration_date', '')::date,
++    nullif(item ->> 'opened_at', '')::date,
++    nullif(item ->> 'refrigerated_after_opening', '')::boolean,
++    nullif(item ->> 'package_weight_oz', '')::numeric,
++    md5(lower(trim(item ->> 'name')) || '|' || lower(coalesce(item ->> 'storage', item ->> 'storage_location', 'pantry')) || '|' || lower(coalesce(item ->> 'form', item ->> 'form_name', ''))),
++    coalesce(nullif(item ->> 'origin', ''), 'account_sync'),
++    v_user_id
++  from jsonb_array_elements(v_inventory) item
++  where trim(coalesce(item ->> 'name', '')) <> ''
++    and coalesce((item ->> 'quantity')::numeric, 0) > 0;
++
++  delete from public.household_equipment where household_id = v_household_id;
++  insert into public.household_equipment (
++    household_id, equipment_name, available, updated_by_user_id
++  )
++  select
++    v_household_id,
++    trim(item ->> 'name'),
++    coalesce((item ->> 'available')::boolean, (item ->> 'active')::boolean, true),
++    v_user_id
++  from jsonb_array_elements(v_equipment) item
++  where trim(coalesce(item ->> 'name', '')) <> ''
++    and coalesce((item ->> 'available')::boolean, (item ->> 'active')::boolean, true);
++
++  delete from public.household_people where household_id = v_household_id;
++  insert into public.household_people (household_id, display_name, appetite)
++  select
++    v_household_id,
++    coalesce(nullif(trim(item ->> 'name'), ''), 'Household member'),
++    case when item ->> 'appetite' in ('light', 'standard', 'big')
++      then item ->> 'appetite' else 'standard' end
++  from jsonb_array_elements(v_people) item;
++
++  if p_snapshot ? 'preferences' then
++    delete from public.household_preferences where household_id = v_household_id;
++    insert into public.household_preferences (
++      household_id, preference_type, target_type, target_value, severity,
++      notes, preference_value, updated_by_user_id
++    )
++    select
++      v_household_id,
++      case when item ->> 'preference_type' in (
++        'allergy', 'medical_exclusion', 'religious_exclusion', 'exclusion',
++        'dislike', 'preference', 'default'
++      ) then item ->> 'preference_type' else 'preference' end,
++      case when item ->> 'target_type' in (
++        'ingredient', 'ingredient_family', 'cuisine', 'method', 'form', 'setting'
++      ) then item ->> 'target_type' else 'ingredient' end,
++      trim(item ->> 'target_value'),
++      case when item ->> 'severity' in ('never', 'avoid', 'dislike', 'prefer')
++        then item ->> 'severity' else 'avoid' end,
++      coalesce(item ->> 'notes', ''),
++      coalesce(item -> 'value', '{}'::jsonb),
++      v_user_id
++    from jsonb_array_elements(v_preferences) item
++    where trim(coalesce(item ->> 'target_value', '')) <> '';
++  end if;
++
++  if p_source_type in ('browser_migration', 'csv', 'sample_pantry', 'barcode', 'photo') then
++    insert into public.kitchen_imports (
++      household_id, submitted_by_user_id, source_type, import_mode,
++      source_fingerprint, imported_count
++    ) values (
++      v_household_id, v_user_id, p_source_type, 'replace',
++      p_source_fingerprint, jsonb_array_length(v_inventory)
++    ) on conflict (household_id, source_type, source_fingerprint) do nothing;
++  end if;
++
++  return public.my_kitchen_snapshot();
++end;
++$$;
++
++revoke all on function public.my_kitchen_snapshot() from public, anon;
++revoke all on function public.sync_my_kitchen(jsonb, text, text) from public, anon;
++grant execute on function public.my_kitchen_snapshot() to authenticated;
++grant execute on function public.sync_my_kitchen(jsonb, text, text) to authenticated;
+diff --git a/supabase_gateway.py b/supabase_gateway.py
+new file mode 100644
+index 0000000..cbdc4aa
+--- /dev/null
++++ b/supabase_gateway.py
+@@ -0,0 +1,134 @@
++"""User-scoped Supabase access for Stock & Stir's durable kitchen data.
++
++The gateway deliberately uses the browser-safe publishable key together with
++the signed-in user's JWT. Supabase therefore applies the same RLS policies to
++server requests that it applies to browser requests; no service-role bypass is
++needed for normal kitchen operations.
++"""
++
++from __future__ import annotations
++
++import os
++import json
++from dataclasses import dataclass
++from typing import Any
++from urllib.error import HTTPError, URLError
++from urllib.request import Request, urlopen
++
++
++DEFAULT_SUPABASE_URL = "https://pbsrcqscssumywjhgino.supabase.co"
++DEFAULT_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_nlQsaKbHb5TyJGqjB0vbrg_MoePw2ye"
++
++
++class SupabaseGatewayError(RuntimeError):
++    """Raised when identity or durable kitchen access fails."""
++
++
++@dataclass(frozen=True)
++class SupabaseGateway:
++    base_url: str = os.getenv("SNS_SUPABASE_URL", DEFAULT_SUPABASE_URL)
++    publishable_key: str = os.getenv(
++        "SNS_SUPABASE_PUBLISHABLE_KEY", DEFAULT_SUPABASE_PUBLISHABLE_KEY
++    )
++    timeout_seconds: float = 12.0
++
++    def _headers(self, access_token: str) -> dict[str, str]:
++        if not access_token:
++            raise SupabaseGatewayError("Log in to use your shared kitchen.")
++        return {
++            "apikey": self.publishable_key,
++            "Authorization": f"Bearer {access_token}",
++            "Content-Type": "application/json",
++        }
++
++    @staticmethod
++    def token_from_authorization(authorization: str | None) -> str:
++        scheme, _, token = str(authorization or "").partition(" ")
++        if scheme.lower() != "bearer" or not token.strip():
++            return ""
++        return token.strip()
++
++    def _post_rpc(self, name: str, access_token: str, payload: dict[str, Any]) -> Any:
++        request = Request(
++            f"{self.base_url}/rest/v1/rpc/{name}",
++            data=json.dumps(payload).encode("utf-8"),
++            headers=self._headers(access_token),
++            method="POST",
++        )
++        try:
++            with urlopen(request, timeout=self.timeout_seconds) as response:
++                return json.loads(response.read().decode("utf-8"))
++        except HTTPError as exc:
++            if exc.code in (401, 403):
++                raise SupabaseGatewayError("Your login expired. Please log in again.") from exc
++            try:
++                body = json.loads(exc.read().decode("utf-8"))
++                detail = body.get("message") or body.get("hint")
++            except (ValueError, AttributeError, UnicodeDecodeError):
++                detail = ""
++            raise SupabaseGatewayError(detail or "The shared kitchen could not be updated.") from exc
++        except (URLError, TimeoutError, OSError) as exc:
++            raise SupabaseGatewayError("The shared kitchen could not be reached.") from exc
++
++    def kitchen_snapshot(self, access_token: str) -> dict[str, Any]:
++        value = self._post_rpc("my_kitchen_snapshot", access_token, {})
++        if not isinstance(value, dict):
++            raise SupabaseGatewayError("The shared kitchen returned an invalid snapshot.")
++        return value
++
++    def sync_kitchen(
++        self,
++        access_token: str,
++        snapshot: dict[str, Any],
++        *,
++        source_type: str | None = None,
++        source_fingerprint: str | None = None,
++    ) -> dict[str, Any]:
++        value = self._post_rpc(
++            "sync_my_kitchen",
++            access_token,
++            {
++                "p_snapshot": snapshot,
++                "p_source_type": source_type,
++                "p_source_fingerprint": source_fingerprint,
++            },
++        )
++        if not isinstance(value, dict):
++            raise SupabaseGatewayError("The shared kitchen returned an invalid snapshot.")
++        return value
++
++
++def apply_durable_kitchen(payload: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
++    """Replace user-owned kitchen fields while preserving tonight's request."""
++    merged = dict(payload)
++    merged["household_id"] = snapshot.get("household_id")
++    merged["inventory"] = list(snapshot.get("inventory") or snapshot.get("foods") or [])
++    merged["equipment"] = [
++        {"name": item.get("name"), "available": item.get("available", item.get("active", True))}
++        for item in list(snapshot.get("equipment") or [])
++        if item.get("name") and item.get("available", item.get("active", True))
++    ]
++    if not merged.get("servings"):
++        merged["servings"] = snapshot.get("servings", 4)
++    if not merged.get("energy"):
++        merged["energy"] = snapshot.get("energy", "Low")
++    if not merged.get("effort"):
++        merged["effort"] = merged.get("energy", snapshot.get("effort", "Low"))
++
++    meal_preferences = dict(merged.get("meal_preferences") or {})
++    meal_preferences["household_members"] = list(snapshot.get("household_members") or [])
++    stored_preferences = list(snapshot.get("preferences") or [])
++    exclusions = [
++        item.get("target_value")
++        for item in stored_preferences
++        if item.get("target_value")
++        and item.get("preference_type") in {
++            "allergy", "medical_exclusion", "religious_exclusion", "exclusion"
++        }
++        and item.get("severity") in {"never", "avoid"}
++    ]
++    if exclusions:
++        meal_preferences["excluded_items"] = exclusions
++    meal_preferences["stored_preferences"] = stored_preferences
++    merged["meal_preferences"] = meal_preferences
++    return merged
+diff --git a/test_api_http.py b/test_api_http.py
+index 9fda3c4..a35074b 100644
+--- a/test_api_http.py
++++ b/test_api_http.py
+@@ -39,6 +39,47 @@ class APIHTTPTests(unittest.TestCase):
+         self.assertEqual(body["api_version"], "1.0")
+         self.assertTrue(body["candidates"])
+ 
++    def test_signed_in_kitchen_is_loaded_from_supabase(self):
++        snapshot = {
++            "household_id": "house-1",
++            "inventory": kitchen_payload()["inventory"],
++            "equipment": kitchen_payload()["equipment"],
++            "household_members": [],
++            "preferences": [],
++        }
++        with patch("api_http._SUPABASE") as gateway:
++            gateway.token_from_authorization.return_value = "user-token"
++            gateway.kitchen_snapshot.return_value = snapshot
++            response = self.client.get(
++                "/api/MyKitchen",
++                headers={"Authorization": "Bearer user-token"},
++            )
++
++        self.assertEqual(response.status_code, 200)
++        self.assertEqual(response.json()["household_id"], "house-1")
++
++    def test_signed_in_recipe_request_uses_the_durable_inventory(self):
++        kitchen = kitchen_payload()
++        snapshot = {
++            "household_id": "house-1",
++            "inventory": kitchen["inventory"],
++            "equipment": kitchen["equipment"],
++            "household_members": [],
++            "preferences": [],
++        }
++        with patch("api_http._SUPABASE") as gateway:
++            gateway.token_from_authorization.return_value = "user-token"
++            gateway.kitchen_snapshot.return_value = snapshot
++            response = self.client.post(
++                "/api/GetRecipeList",
++                json={**kitchen, "inventory": [{"name": "Stale browser food", "quantity": 1}]},
++                headers={"Authorization": "Bearer user-token"},
++            )
++
++        self.assertEqual(response.status_code, 200)
++        self.assertTrue(response.json()["candidates"])
++        gateway.kitchen_snapshot.assert_called_once_with("user-token")
++
+     def test_meal_builder_options_endpoint_marks_owned_choices(self):
+         response = self.client.post("/api/GetMealBuilderOptions", json=kitchen_payload())
+         self.assertEqual(response.status_code, 200)
+@@ -83,6 +124,18 @@ class APIHTTPTests(unittest.TestCase):
+         self.assertEqual(response.status_code, 200)
+         self.assertEqual(response.headers["access-control-allow-origin"], "*")
+ 
++    def test_cors_preflight_allows_the_user_authorization_header(self):
++        response = self.client.options(
++            "/api/MyKitchen",
++            headers={
++                "Origin": "https://stockandstir.co",
++                "Access-Control-Request-Method": "GET",
++                "Access-Control-Request-Headers": "authorization",
++            },
++        )
++        self.assertEqual(response.status_code, 200)
++        self.assertIn("Authorization", response.headers["access-control-allow-headers"])
++
+     def test_configured_cors_origins_are_parsed_for_fastapi(self):
+         configured = "https://sns-web-um3d.onrender.com"
+ 
+diff --git a/test_public_site_copy.py b/test_public_site_copy.py
+index 2b6ff56..590d23c 100644
+--- a/test_public_site_copy.py
++++ b/test_public_site_copy.py
+@@ -25,6 +25,27 @@ def test_my_kitchen_supports_add_remove_equipment_and_browser_persistence():
+     assert "data-kitchen-dialog" in kitchen_page
+ 
+ 
++def test_accounts_use_supabase_and_migrate_the_browser_kitchen_once():
++    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
++    auth = (PUBLIC_FLOW.parent / "sns-auth.js").read_text(encoding="utf-8")
++    config = (PUBLIC_FLOW.parent / "sns-config.js").read_text(encoding="utf-8")
++    login = (PUBLIC_FLOW.parent / "login.html").read_text(encoding="utf-8")
++    preferences = (PUBLIC_FLOW.parent / "household-preferences.html").read_text(encoding="utf-8")
++
++    assert "signInWithPassword" in auth
++    assert "resetPasswordForEmail" in auth
++    assert "persistSession: true" in auth
++    assert "sb_publishable_" in config
++    assert "service_role" not in config
++    assert "snsAuthPrototype" not in login
++    assert "snsKitchenMigrated:" in flow
++    assert "Move them into your shared Stock & Stir kitchen" in flow
++    assert 'myKitchen: endpoint("/api/MyKitchen")' in flow
++    assert "Authorization: `Bearer ${token}`" in flow
++    assert 'data-preference-type="allergy"' in preferences
++    assert 'data-preference-type="exclusion"' in preferences
++
++
+ def test_my_kitchen_uses_real_quantities_and_units_for_countable_food():
+     flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+     kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
+diff --git a/test_supabase_gateway.py b/test_supabase_gateway.py
+new file mode 100644
+index 0000000..36f7c55
+--- /dev/null
++++ b/test_supabase_gateway.py
+@@ -0,0 +1,110 @@
++import unittest
++from pathlib import Path
++from io import BytesIO
++from urllib.error import HTTPError, URLError
++from unittest.mock import Mock, patch
++
++from supabase_gateway import (
++    SupabaseGateway,
++    SupabaseGatewayError,
++    apply_durable_kitchen,
++)
++
++
++class SupabaseGatewayTests(unittest.TestCase):
++    def setUp(self):
++        self.gateway = SupabaseGateway(
++            base_url="https://example.supabase.co",
++            publishable_key="sb_publishable_test",
++        )
++
++    def test_extracts_only_bearer_tokens(self):
++        self.assertEqual(
++            self.gateway.token_from_authorization("Bearer user.jwt.here"),
++            "user.jwt.here",
++        )
++        self.assertEqual(self.gateway.token_from_authorization("Basic nope"), "")
++        self.assertEqual(self.gateway.token_from_authorization(None), "")
++
++    @patch("supabase_gateway.urlopen")
++    def test_snapshot_uses_publishable_key_and_user_jwt(self, open_url):
++        response = Mock()
++        response.read.return_value = b'{"household_id":"house-1","inventory":[]}'
++        response.__enter__ = Mock(return_value=response)
++        response.__exit__ = Mock(return_value=False)
++        open_url.return_value = response
++
++        result = self.gateway.kitchen_snapshot("signed-user-token")
++
++        self.assertEqual(result["household_id"], "house-1")
++        request = open_url.call_args.args[0]
++        self.assertEqual(request.headers["Apikey"], "sb_publishable_test")
++        self.assertEqual(
++            request.headers["Authorization"],
++            "Bearer signed-user-token",
++        )
++        self.assertNotIn("service_role", str(request))
++
++    @patch("supabase_gateway.urlopen")
++    def test_expired_login_has_a_human_message(self, open_url):
++        open_url.side_effect = HTTPError(
++            "https://example.supabase.co", 401, "Unauthorized", {}, BytesIO(b"{}")
++        )
++        with self.assertRaisesRegex(SupabaseGatewayError, "login expired"):
++            self.gateway.kitchen_snapshot("expired")
++
++    @patch("supabase_gateway.urlopen")
++    def test_network_failure_does_not_leak_transport_details(self, open_url):
++        open_url.side_effect = URLError("private network detail")
++        with self.assertRaisesRegex(SupabaseGatewayError, "could not be reached"):
++            self.gateway.kitchen_snapshot("token")
++
++    def test_durable_inventory_replaces_browser_inventory_but_keeps_tonight(self):
++        request = {
++            "inventory": [{"name": "Wrong device food"}],
++            "equipment": [],
++            "servings": 7,
++            "energy": "High",
++            "selections": {"protein": "Chicken breast"},
++            "meal_preferences": {"recent_meals": [{"title": "Soup"}]},
++        }
++        snapshot = {
++            "household_id": "house-1",
++            "inventory": [{"name": "White beans", "quantity": 2, "unit": "can"}],
++            "equipment": [{"name": "Stovetop", "available": True}],
++            "household_members": [{"name": "Taylor", "appetite": "standard"}],
++            "preferences": [{
++                "preference_type": "allergy",
++                "target_value": "Peanuts",
++                "severity": "never",
++            }],
++        }
++
++        merged = apply_durable_kitchen(request, snapshot)
++
++        self.assertEqual(merged["inventory"][0]["name"], "White beans")
++        self.assertEqual(merged["servings"], 7)
++        self.assertEqual(merged["energy"], "High")
++        self.assertEqual(merged["selections"], request["selections"])
++        self.assertEqual(merged["meal_preferences"]["excluded_items"], ["Peanuts"])
++        self.assertEqual(merged["meal_preferences"]["recent_meals"], [{"title": "Soup"}])
++
++    def test_migrations_enable_rls_and_keep_privileged_helpers_private(self):
++        migration_dir = Path(__file__).parent / "supabase" / "migrations"
++        sql = "\n".join(
++            path.read_text(encoding="utf-8")
++            for path in sorted(migration_dir.glob("*.sql"))
++        ).lower()
++
++        for table in (
++            "profiles", "households", "household_members", "inventory_lots",
++            "household_equipment", "household_preferences", "recipe_reports",
++        ):
++            self.assertIn(f"alter table public.{table} enable row level security", sql)
++        self.assertIn("create or replace function private.is_household_member", sql)
++        self.assertIn("revoke all on function public.create_new_user_kitchen()", sql)
++        self.assertIn("grant execute on function public.my_kitchen_snapshot() to authenticated", sql)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/web/public-site/build-your-meal.html b/web/public-site/build-your-meal.html
+index ba6ab61..4c51eef 100644
+--- a/web/public-site/build-your-meal.html
++++ b/web/public-site/build-your-meal.html
+@@ -118,6 +118,6 @@
+     <footer><button class="btn btn-primary" type="submit" value="done">Done adding ingredients</button></footer>
+   </form>
+ </dialog>
+-<script src="sns-flow.js"></script>
++<script src="sns-config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script><script src="sns-auth.js"></script><script src="sns-flow.js"></script>
+ </body>
+ </html>
+diff --git a/web/public-site/choose-recipe.html b/web/public-site/choose-recipe.html
+index 8d6023a..2dfbab5 100644
+--- a/web/public-site/choose-recipe.html
++++ b/web/public-site/choose-recipe.html
+@@ -22,6 +22,6 @@
+     <div class="notice">These choices use the current trained hot-meal engine. Cold meals, cost estimates, and batch plans will appear here as each capability is trained.</div>
+     <section class="recipe-grid" data-recipe-grid></section>
+   </main>
+-  <script src="sns-flow.js"></script>
++<script src="sns-config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script><script src="sns-auth.js"></script><script src="sns-flow.js"></script>
+ </body>
+ </html>
+diff --git a/web/public-site/favorite-recipes.html b/web/public-site/favorite-recipes.html
+index 5f66d11..6d02f43 100644
+--- a/web/public-site/favorite-recipes.html
++++ b/web/public-site/favorite-recipes.html
+@@ -9,6 +9,6 @@
+   <p class="lede">Soon, “I want to make this again” will save the exact ingredients, quantities, substitutions, and instructions you used—not merely the recipe’s name.</p>
+   <section class="empty-library"><strong>No favorites saved yet.</strong><p>When saving is connected, each favorite can be made exactly as saved or carefully adapted to today’s My Kitchen.</p><a class="btn btn-primary" href="choose-recipe.html?refresh=1">Find a meal worth saving</a></section>
+ </main>
+-<script src="sns-flow.js"></script>
++<script src="sns-config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script><script src="sns-auth.js"></script><script src="sns-flow.js"></script>
+ </body>
+ </html>
+diff --git a/web/public-site/home.html b/web/public-site/home.html
+index 939474a..e88f259 100644
+--- a/web/public-site/home.html
++++ b/web/public-site/home.html
+@@ -48,6 +48,6 @@
+     <blockquote>A useful pantry does not demand perfection. It gives tomorrow’s tired cook a head start.</blockquote>
+   </article>
+ </main>
+-<script src="sns-flow.js"></script>
++<script src="sns-config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script><script src="sns-auth.js"></script><script src="sns-flow.js"></script>
+ </body>
+ </html>
+diff --git a/web/public-site/household-preferences.html b/web/public-site/household-preferences.html
+index 9f4e053..1ef6b21 100644
+--- a/web/public-site/household-preferences.html
++++ b/web/public-site/household-preferences.html
+@@ -16,12 +16,27 @@
+       <button class="add-kitchen-item" type="button" data-add-household-member>+ Add household member</button>
+     </div>
+   </section>
++  <section class="inventory-section household-safety-section">
++    <div class="section-heading static-heading">
++      <span class="section-icon" aria-hidden="true">!</span>
++      <span class="section-title"><span>Food safety and standing limits</span><small>These apply to the whole household unless a future person-specific setting replaces them.</small></span>
++    </div>
++    <div class="section-body preference-field-grid">
++      <label><strong>Allergies</strong><span>Separate several foods with commas.</span><textarea data-preference-type="allergy" data-target-type="ingredient" data-severity="never" placeholder="Peanuts, shellfish"></textarea></label>
++      <label><strong>Never include</strong><span>Medical, religious, or household exclusions.</span><textarea data-preference-type="exclusion" data-target-type="ingredient" data-severity="never" placeholder="Pork, grapefruit"></textarea></label>
++      <label><strong>Usually avoid</strong><span>Foods that are allowed, but generally unwelcome.</span><textarea data-preference-type="dislike" data-target-type="ingredient" data-severity="dislike" placeholder="Olives, cooked spinach"></textarea></label>
++      <label><strong>Favorite directions</strong><span>Cuisines or ingredients the household enjoys.</span><textarea data-preference-type="preference" data-target-type="cuisine" data-severity="prefer" placeholder="Tex-Mex, Italian"></textarea></label>
++    </div>
++  </section>
+   <div class="preference-save-row">
+     <span data-save-status>Changes are stored in this browser.</span>
+     <button class="btn btn-primary" type="button" data-save-household>Save Household Preferences</button>
+   </div>
+-  <section class="coming-soon-panel"><strong>More household preferences are coming here.</strong><p>Allergies, standing exclusions, and preferences will live beside appetites. Meal-specific attendance and exclusions will remain part of tonight’s meal flow.</p></section>
++  <section class="coming-soon-panel"><strong>Tonight can still be different.</strong><p>These are household defaults. Meal-specific attendance and one-night limits remain part of tonight’s meal flow.</p></section>
+ </main>
++<script src="sns-config.js"></script>
++<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script>
++<script src="sns-auth.js"></script>
+ <script src="sns-flow.js"></script>
+ </body>
+ </html>
+diff --git a/web/public-site/kitchen-training.html b/web/public-site/kitchen-training.html
+index 8bd8253..95b730a 100644
+--- a/web/public-site/kitchen-training.html
++++ b/web/public-site/kitchen-training.html
+@@ -8,6 +8,6 @@
+   <p class="lede">This future space will remember household-specific equipment habits, preferred doneness, trusted shortcuts, and the practical ways you like food prepared.</p>
+   <section class="coming-soon-panel"><strong>Training space coming later</strong><p>My Kitchen and Household Preferences will remain the source of truth until each training control has a clear effect on the cooking plan.</p></section>
+ </main>
+-<script src="sns-flow.js"></script>
++<script src="sns-config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script><script src="sns-auth.js"></script><script src="sns-flow.js"></script>
+ </body>
+ </html>
+diff --git a/web/public-site/login.html b/web/public-site/login.html
+index fe6b76e..7b619b7 100644
+--- a/web/public-site/login.html
++++ b/web/public-site/login.html
+@@ -102,6 +102,8 @@
+       line-height: 1.5;
+       text-align: center;
+     }
++    .auth-message { margin: 14px 0 0; padding: 12px 14px; border-radius: 9px; background: #eef4ef; color: #274c3c; line-height: 1.45; }
++    .auth-message.error { background: #fff0ec; color: #8e321e; }
+     @media (max-width: 860px) {
+       .auth-grid { grid-template-columns: 1fr; }
+       .auth-copy { display: none; }
+@@ -151,7 +153,7 @@
+         <div id="selected-plan" class="selected-plan"></div>
+ 
+         <form id="auth-form">
+-          <label for="email">Email address</label>
++          <label id="email-label" for="email">Email address</label>
+           <input id="email" type="email" autocomplete="email" required />
+ 
+           <label for="password">Password</label>
+@@ -164,34 +166,52 @@
+             Continue
+           </button>
+           <a id="forgot" class="forgot" href="#">Forgot password?</a>
++          <p id="auth-message" class="auth-message" hidden aria-live="polite"></p>
+         </form>
+ 
+         <p class="auth-fine">
+-          First-step account shell. Real authentication, password recovery,
+-          household ownership, and trial status will connect to a managed
+-          authentication service before launch.
++          Your pantry and household settings are protected by your account and
++          shared across the devices where you sign in.
+         </p>
+       </section>
+     </div>
+   </main>
+ 
++  <script src="sns-config.js"></script>
++  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script>
++  <script src="sns-auth.js"></script>
+   <script>
+     const params = new URLSearchParams(location.search);
+     const selectedPlan = params.get("plan");
+-    let mode = params.get("mode") === "signup" ? "signup" : "login";
++    let mode = ["signup", "recovery"].includes(params.get("mode")) ? params.get("mode") : "login";
+ 
+     const byId = (id) => document.getElementById(id);
+ 
++    function showMessage(message, error = false) {
++      const target = byId("auth-message");
++      target.hidden = !message;
++      target.textContent = message || "";
++      target.classList.toggle("error", error);
++    }
++
+     function renderMode() {
+       const signingUp = mode === "signup";
+-      byId("login-tab").classList.toggle("active", !signingUp);
++      const recovering = mode === "recovery";
++      byId("login-tab").classList.toggle("active", !signingUp && !recovering);
+       byId("signup-tab").classList.toggle("active", signingUp);
++      byId("login-tab").hidden = recovering;
++      byId("signup-tab").hidden = recovering;
+       byId("trial-box").hidden = !signingUp;
+-      byId("confirm-label").hidden = !signingUp;
+-      byId("confirm").hidden = !signingUp;
+-      byId("confirm").required = signingUp;
+-      byId("forgot").hidden = signingUp;
+-      byId("auth-submit").textContent = signingUp
++      byId("confirm-label").hidden = !(signingUp || recovering);
++      byId("confirm").hidden = !(signingUp || recovering);
++      byId("confirm").required = signingUp || recovering;
++      byId("email-label").hidden = recovering;
++      byId("email").hidden = recovering;
++      byId("email").required = !recovering;
++      byId("forgot").hidden = signingUp || recovering;
++      byId("auth-submit").textContent = recovering
++        ? "Save New Password"
++        : signingUp
+         ? "Create Account & Open My Kitchen"
+         : "Log In to My Kitchen";
+ 
+@@ -211,33 +231,61 @@
+       renderMode();
+     });
+ 
+-    byId("auth-form").addEventListener("submit", (event) => {
++    byId("auth-form").addEventListener("submit", async (event) => {
+       event.preventDefault();
++      showMessage("");
+ 
+       if (
+-        mode === "signup" &&
++        ["signup", "recovery"].includes(mode) &&
+         byId("confirm").value !== byId("password").value
+       ) {
+-        alert("The passwords do not match.");
++        showMessage("The passwords do not match.", true);
+         return;
+       }
+-
+-      sessionStorage.setItem(
+-        "snsAuthPrototype",
+-        JSON.stringify({
+-          mode,
+-          email: byId("email").value,
+-          selectedPlan,
+-          trialDays: 7
+-        })
+-      );
+-
+-      location.href = "home.html";
++      if (!window.SNS_AUTH?.configured) {
++        showMessage("Account service configuration is unavailable.", true);
++        return;
++      }
++      const button = byId("auth-submit");
++      button.disabled = true;
++      try {
++        const email = byId("email").value.trim();
++        const password = byId("password").value;
++        if (mode === "recovery") {
++          const { error } = await window.SNS_AUTH.client.auth.updateUser({ password });
++          if (error) throw error;
++          showMessage("Your password is updated. Taking you to My Kitchen…");
++          setTimeout(() => { location.href = "home.html"; }, 700);
++          return;
++        }
++        const result = mode === "signup"
++          ? await window.SNS_AUTH.signUp(email, password)
++          : await window.SNS_AUTH.signIn(email, password);
++        if (result.session) {
++          location.href = "home.html";
++          return;
++        }
++        showMessage("Account created. Check your email to confirm it, then return here to log in.");
++      } catch (error) {
++        showMessage(error.message || "The account request could not be completed.", true);
++      } finally {
++        button.disabled = false;
++      }
+     });
+ 
+-    byId("forgot").addEventListener("click", (event) => {
++    byId("forgot").addEventListener("click", async (event) => {
+       event.preventDefault();
+-      alert("Password reset will be connected with the managed authentication service.");
++      const email = byId("email").value.trim();
++      if (!email) {
++        showMessage("Enter your email address first, then choose Forgot password.", true);
++        return;
++      }
++      try {
++        await window.SNS_AUTH.resetPassword(email);
++        showMessage("Password reset instructions are on their way. Check your email.");
++      } catch (error) {
++        showMessage(error.message || "Password reset could not be started.", true);
++      }
+     });
+ 
+     renderMode();
+diff --git a/web/public-site/my-kitchen.html b/web/public-site/my-kitchen.html
+index 327990c..ece2397 100644
+--- a/web/public-site/my-kitchen.html
++++ b/web/public-site/my-kitchen.html
+@@ -294,6 +294,6 @@
+   </form>
+ </dialog>
+ <script src="sample-pantries.js"></script>
+-<script src="sns-flow.js"></script>
++<script src="sns-config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script><script src="sns-auth.js"></script><script src="sns-flow.js"></script>
+ </body>
+ </html>
+diff --git a/web/public-site/pantry-101.html b/web/public-site/pantry-101.html
+index aaaeaca..2b5c42e 100644
+--- a/web/public-site/pantry-101.html
++++ b/web/public-site/pantry-101.html
+@@ -11,6 +11,6 @@
+   <section><h2>Let the pantry reduce effort</h2><p>On low-energy nights, cooked proteins, canned foods, sauces, broths, and familiar foundations can shorten active work. On higher-energy nights, the same pantry supports browning, layering, and composed meals.</p></section>
+   <a class="btn btn-primary" href="my-kitchen.html">Open My Kitchen</a>
+ </main>
+-<script src="sns-flow.js"></script>
++<script src="sns-config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script><script src="sns-auth.js"></script><script src="sns-flow.js"></script>
+ </body>
+ </html>
+diff --git a/web/public-site/recipe.html b/web/public-site/recipe.html
+index 6a3ce73..00e0e41 100644
+--- a/web/public-site/recipe.html
++++ b/web/public-site/recipe.html
+@@ -59,6 +59,6 @@
+       </div>
+     </details>
+   </main>
+-  <script src="sns-flow.js"></script>
++<script src="sns-config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script><script src="sns-auth.js"></script><script src="sns-flow.js"></script>
+ </body>
+ </html>
+diff --git a/web/public-site/signature-recipes.html b/web/public-site/signature-recipes.html
+index 1538ea8..6573c80 100644
+--- a/web/public-site/signature-recipes.html
++++ b/web/public-site/signature-recipes.html
+@@ -32,6 +32,6 @@
+     </div>
+   </section>
+ </main>
+-<script src="sns-flow.js"></script>
++<script src="sns-config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script><script src="sns-auth.js"></script><script src="sns-flow.js"></script>
+ </body>
+ </html>
+diff --git a/web/public-site/sns-auth.js b/web/public-site/sns-auth.js
+new file mode 100644
+index 0000000..210a91b
+--- /dev/null
++++ b/web/public-site/sns-auth.js
+@@ -0,0 +1,64 @@
++(() => {
++  const config = window.SNS_CONFIG || {};
++  const library = window.supabase;
++  if (!library?.createClient || !config.supabaseUrl || !config.supabasePublishableKey) {
++    window.SNS_AUTH = { configured: false };
++    return;
++  }
++
++  const client = library.createClient(config.supabaseUrl, config.supabasePublishableKey, {
++    auth: {
++      persistSession: true,
++      autoRefreshToken: true,
++      detectSessionInUrl: true
++    }
++  });
++
++  async function session() {
++    const { data, error } = await client.auth.getSession();
++    if (error) throw error;
++    return data.session || null;
++  }
++
++  async function accessToken() {
++    return (await session())?.access_token || "";
++  }
++
++  window.SNS_AUTH = {
++    configured: true,
++    client,
++    session,
++    accessToken,
++    async signIn(email, password) {
++      const { data, error } = await client.auth.signInWithPassword({ email, password });
++      if (error) throw error;
++      return data;
++    },
++    async signUp(email, password, displayName = "") {
++      const { data, error } = await client.auth.signUp({
++        email,
++        password,
++        options: {
++          emailRedirectTo: new URL("home.html", location.href).href,
++          data: { display_name: displayName || email.split("@")[0] }
++        }
++      });
++      if (error) throw error;
++      return data;
++    },
++    async resetPassword(email) {
++      const { data, error } = await client.auth.resetPasswordForEmail(email, {
++        redirectTo: new URL("login.html?mode=recovery", location.href).href
++      });
++      if (error) throw error;
++      return data;
++    },
++    async signOut() {
++      const { error } = await client.auth.signOut();
++      if (error) throw error;
++    },
++    onChange(callback) {
++      return client.auth.onAuthStateChange((_event, currentSession) => callback(currentSession));
++    }
++  };
++})();
+diff --git a/web/public-site/sns-config.js b/web/public-site/sns-config.js
+new file mode 100644
+index 0000000..36ee4af
+--- /dev/null
++++ b/web/public-site/sns-config.js
+@@ -0,0 +1,7 @@
++// Public runtime identifiers. The Supabase publishable key is intentionally
++// safe for browser use; Row Level Security protects every household row.
++window.SNS_CONFIG = Object.assign({}, window.SNS_CONFIG || {}, {
++  apiBaseUrl: "https://sns-api-xsq4.onrender.com",
++  supabaseUrl: "https://pbsrcqscssumywjhgino.supabase.co",
++  supabasePublishableKey: "sb_publishable_nlQsaKbHb5TyJGqjB0vbrg_MoePw2ye"
++});
+diff --git a/web/public-site/sns-flow.css b/web/public-site/sns-flow.css
+index 726ee42..1b26181 100644
+--- a/web/public-site/sns-flow.css
++++ b/web/public-site/sns-flow.css
+@@ -241,3 +241,4 @@ h2 { margin: 0 0 8px; font-size: 1.35rem; }
+ .preference-save-row [data-save-status]{margin-right:auto;color:var(--muted);font-size:.85rem}
+ .recipe-loading{grid-column:1/-1;padding:36px;border:1px solid var(--line);border-radius:var(--radius);background:#fff;color:var(--muted);font-size:1.05rem;text-align:center}
+ @media(max-width:600px){.preference-save-row{align-items:stretch;display:grid}.preference-save-row .btn{width:100%}}
++.preference-field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.preference-field-grid label{display:grid;gap:.35rem}.preference-field-grid label span{color:var(--muted,#68756d);font-size:.9rem}.preference-field-grid textarea{min-height:6rem;width:100%;resize:vertical;border:1px solid #cbd5cf;border-radius:.75rem;padding:.8rem;font:inherit;background:#fff}@media(max-width:700px){.preference-field-grid{grid-template-columns:1fr}}
+diff --git a/web/public-site/sns-flow.js b/web/public-site/sns-flow.js
+index 6494884..84b0827 100644
+--- a/web/public-site/sns-flow.js
++++ b/web/public-site/sns-flow.js
+@@ -3,6 +3,7 @@ const SNS = (() => {
+   const apiBase = String(runtime.apiBaseUrl || "https://sns-api-xsq4.onrender.com").replace(/\/$/, "");
+   const endpoint = path => `${apiBase}${path}`;
+   const API = {
++    myKitchen: endpoint("/api/MyKitchen"),
+     saveKitchen: endpoint("/api/SaveMyKitchen"),
+     getMealBuilderOptions: endpoint("/api/GetMealBuilderOptions"),
+     getRecipeList: endpoint("/api/GetRecipeList"),
+@@ -140,13 +141,14 @@ const SNS = (() => {
+     }
+   }
+ 
+-  function renderHome() {
++  async function renderHome() {
+     const target = document.querySelector("[data-welcome-name]");
+     if (!target) return;
+-    let auth = {};
+-    try { auth = JSON.parse(sessionStorage.getItem("snsAuthPrototype") || "{}"); } catch {}
+-    const emailName = String(auth.email || "").split("@")[0].replace(/[._-]+/g, " ").trim();
+-    target.textContent = String(auth.displayName || "").trim() || emailName || "there";
++    let session = null;
++    try { session = await window.SNS_AUTH?.session?.(); } catch {}
++    const metadataName = String(session?.user?.user_metadata?.display_name || "").trim();
++    const emailName = String(session?.user?.email || "").split("@")[0].replace(/[._-]+/g, " ").trim();
++    target.textContent = metadataName || emailName || "there";
+     let kitchen = {};
+     try { kitchen = JSON.parse(localStorage.getItem(kitchenStorageKey) || "{}"); } catch {}
+     const count = (kitchen.foods || []).filter(item => Number(item.quantity || 0) > 0).length;
+@@ -200,25 +202,38 @@ const SNS = (() => {
+     ).join("");
+   }
+ 
+-  function postJson(url, payload) {
+-    return fetch(url, {
++  async function authorizationHeaders() {
++    const token = await window.SNS_AUTH?.accessToken?.();
++    return token ? { Authorization: `Bearer ${token}` } : {};
++  }
++
++  async function responseJson(response) {
++    if (!response.ok) {
++      const raw = await response.text();
++      let message = raw;
++      try {
++        const body = JSON.parse(raw);
++        message = body.detail || body.message || raw;
++      } catch {
++        // Keep a plain-text service response as-is.
++      }
++      throw new Error(message || `Request failed: ${response.status}`);
++    }
++    return response.json();
++  }
++
++  async function getJson(url) {
++    const response = await fetch(url, { headers: await authorizationHeaders() });
++    return responseJson(response);
++  }
++
++  async function postJson(url, payload) {
++    const response = await fetch(url, {
+       method: "POST",
+-      headers: { "Content-Type": "application/json" },
++      headers: { "Content-Type": "application/json", ...(await authorizationHeaders()) },
+       body: JSON.stringify(payload)
+-    }).then(async response => {
+-      if (!response.ok) {
+-        const raw = await response.text();
+-        let message = raw;
+-        try {
+-          const body = JSON.parse(raw);
+-          message = body.detail || body.message || raw;
+-        } catch {
+-          // Keep a plain-text service response as-is.
+-        }
+-        throw new Error(message || `Request failed: ${response.status}`);
+-      }
+-      return response.json();
+     });
++    return responseJson(response);
+   }
+ 
+   function kitchenPayload() {
+@@ -257,7 +272,7 @@ const SNS = (() => {
+     return {
+       api_version: "1.0",
+       contract_version: "my-kitchen-v1",
+-      household_id: "local-demo-household",
++      household_id: saved.household_id || "local-demo-household",
+       generated_at: new Date().toISOString(),
+       servings: members.length || 4,
+       energy: effort,
+@@ -266,6 +281,11 @@ const SNS = (() => {
+       equipment,
+       meal_preferences: {
+         household_members: members,
++        excluded_items: (saved.preferences || [])
++          .filter(item => ["allergy", "medical_exclusion", "religious_exclusion", "exclusion"].includes(item.preference_type))
++          .filter(item => ["never", "avoid"].includes(item.severity))
++          .map(item => item.target_value),
++        stored_preferences: saved.preferences || [],
+         recent_meals: recentMealHistory()
+       },
+       cost_filter: null
+@@ -424,7 +444,18 @@ const SNS = (() => {
+     const foodRows = [...document.querySelectorAll("[data-food]")];
+     const equipmentButtons = [...document.querySelectorAll("[data-equipment]")];
+     const memberRows = [...document.querySelectorAll("[data-household-member]")];
++    const preferenceInputs = [...document.querySelectorAll("[data-preference-type]")];
++    const preferences = preferenceInputs.length
++      ? preferenceInputs.flatMap(input => String(input.value || "").split(/[,\n]/).map(value => value.trim()).filter(Boolean).map(value => ({
++          preference_type: input.dataset.preferenceType,
++          target_type: input.dataset.targetType || "ingredient",
++          target_value: value,
++          severity: input.dataset.severity || "avoid",
++          notes: ""
++        })))
++      : (saved.preferences || []);
+     return {
++      household_id: saved.household_id || null,
+       foods: foodRows.length ? foodRows.map(row => ({
+         name: row.dataset.food,
+         storage: row.dataset.storage,
+@@ -446,6 +477,7 @@ const SNS = (() => {
+         name: row.querySelector("[data-member-name]")?.value || "",
+         appetite: row.querySelector("[data-member-appetite]")?.value || "standard"
+       })) : (saved.household_members || []),
++      preferences,
+       tonight_effort: document.querySelector("[data-make-effort]")?.value || saved.tonight_effort || "Low"
+     };
+   }
+@@ -823,6 +855,13 @@ const SNS = (() => {
+     if (memberHolder && (state.household_members || []).length) {
+       memberHolder.replaceChildren(...state.household_members.map(createHouseholdMember));
+     }
++    document.querySelectorAll("[data-preference-type]").forEach(input => {
++      const values = (state.preferences || [])
++        .filter(item => item.preference_type === input.dataset.preferenceType)
++        .map(item => item.target_value)
++        .filter(Boolean);
++      input.value = values.join(", ");
++    });
+   }
+ 
+   function ensureRemoveControl(row) {
+@@ -1111,16 +1150,66 @@ const SNS = (() => {
+     return escapeHtml(error?.message || "The cooking service did not return a recipe.");
+   }
+ 
++  async function hydrateSharedKitchen() {
++    if (!window.SNS_AUTH?.configured) return;
++    let session;
++    try { session = await window.SNS_AUTH.session(); }
++    catch { return; }
++    if (!session) return;
++
++    try {
++      let remote = await getJson(API.myKitchen);
++      const local = savedKitchenState();
++      const localFoods = (local.foods || []).filter(item => Number(item.quantity || 0) > 0);
++      const remoteFoods = (remote.foods || remote.inventory || []).filter(item => Number(item.quantity || 0) > 0);
++      const marker = `snsKitchenMigrated:${session.user.id}`;
++
++      if (!remoteFoods.length && localFoods.length && !localStorage.getItem(marker)) {
++        const move = window.confirm(
++          `We found ${localFoods.length} foods saved on this device. Move them into your shared Stock & Stir kitchen so they appear on your phone and other devices?`
++        );
++        if (move) {
++          remote = await postJson(API.saveKitchen, {
++            ...local,
++            inventory: localFoods,
++            servings: (local.household_members || []).length || 4,
++            energy: local.tonight_effort || "Low",
++            effort: local.tonight_effort || "Low",
++            sync_source_type: "browser_migration",
++            sync_source_fingerprint: `browser-v1:${session.user.id}`
++          });
++        }
++        localStorage.setItem(marker, move ? "moved" : "kept-local");
++      }
++
++      const sharedFoods = (remote.foods || remote.inventory || []).filter(item => Number(item.quantity || 0) > 0);
++      if (sharedFoods.length || !localFoods.length) {
++        localStorage.setItem(kitchenStorageKey, JSON.stringify(remote));
++      }
++      const status = document.querySelector("[data-save-status]");
++      if (status) status.textContent = "This kitchen is shared across your signed-in devices.";
++    } catch (error) {
++      const status = document.querySelector("[data-save-status]");
++      if (status) status.textContent = `Using this device's saved kitchen for now. ${error.message || "Shared sync is unavailable."}`;
++    }
++  }
++
+   async function saveKitchen() {
+     const payload = kitchenPayload();
+     sessionStorage.setItem("snsKitchenPayload", JSON.stringify(payload));
+     storeBrowserKitchen();
+     try {
+-      await postJson(API.saveKitchen, payload);
++      const response = await postJson(API.saveKitchen, {
++        ...payload,
++        preferences: browserKitchenState().preferences
++      });
++      if (response?.storage_mode === "supabase_household") {
++        localStorage.setItem(kitchenStorageKey, JSON.stringify(response));
++      }
+       const status = document.querySelector("[data-save-status]");
+       if (status) status.textContent = document.querySelector("[data-save-household]")
+-        ? "Household preferences are saved."
+-        : "My Kitchen is saved.";
++        ? "Household preferences are saved to every signed-in device."
++        : "My Kitchen is saved to every signed-in device.";
+     } catch {
+       const status = document.querySelector("[data-save-status]");
+       if (status) status.textContent = "Saved in this browser; API connection is pending.";
+@@ -1714,8 +1803,9 @@ const SNS = (() => {
+     }
+   }
+ 
+-  function init() {
++  async function init() {
+     installAppShell();
++    await hydrateSharedKitchen();
+     upgradeQuantityEditors();
+     restoreBrowserKitchen();
+     organizeInventory();
+-- 
+2.51.1
+
