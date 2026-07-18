@@ -58,9 +58,12 @@ def test_recipe_page_exposes_inventory_resolutions_and_preserves_substep_breaks(
     css = (PUBLIC_FLOW.parent / "sns-flow.css").read_text(encoding="utf-8")
 
     assert "data-kitchen-check" in recipe_page
-    assert '["Need", "Short", "Substitute", "Omit"].includes(item?.status)' in flow
+    assert '["Need", "Short"].includes(item?.status)' in flow
+    assert '["Substitute", "Omit"].includes(item?.status)' in flow
     assert "item.omission_consequence" in flow
     assert "item.resolved_name" in flow
+    assert "data-grocery-list" in recipe_page
+    assert "ingredientQuantity" in flow
     assert "white-space: pre-wrap" in css
     assert "data-recipe-work-time" in recipe_page
     assert "total minutes" in flow
@@ -92,6 +95,22 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     assert 'label="Planning ahead"' in builder_page
     assert '<option value="240">4 hours</option>' in builder_page
     assert "body.detail || body.message" in flow
+
+
+def test_builder_starts_with_owned_food_and_uses_one_purchase_catalog():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    builder_page = (PUBLIC_FLOW.parent / "build-your-meal.html").read_text(encoding="utf-8")
+    recipe_page = (PUBLIC_FLOW.parent / "recipe.html").read_text(encoding="utf-8")
+
+    assert "Only food you have is shown below." in builder_page
+    assert "data-open-ingredient-catalog" in builder_page
+    assert "data-ingredient-catalog" in builder_page
+    assert "data-catalog-options" in builder_page
+    assert 'data-owned="${isOwned}"' in flow
+    assert 'choice.hidden = !choice.querySelector("input")?.checked' in flow
+    assert "selectedPurchaseNames" in flow
+    assert "Added to this meal’s grocery list" in builder_page
+    assert "Everything this recipe needs that is not currently in My Kitchen." in recipe_page
 
 
 def test_quantity_and_form_controls_cover_packages_cans_appetites_and_garlic():

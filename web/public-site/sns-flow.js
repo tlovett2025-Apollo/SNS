@@ -982,10 +982,10 @@ const SNS = (() => {
     proteinHolder.innerHTML = (options.proteins || []).map(item => {
       const isOwned = item.owned ?? owned.has(String(item.name).toLowerCase());
       const state = inferProteinState(item);
-      return `<label class="produce-choice protein-choice" data-protein-choice data-protein-role-kind="${escapeHtml(item.suggested_role || "supporting")}" data-search-name="${escapeHtml(item.name.toLowerCase())}">
+      return `<label class="produce-choice protein-choice${isOwned ? "" : " is-purchase"}" data-protein-choice data-owned="${isOwned}" data-protein-role-kind="${escapeHtml(item.suggested_role || "supporting")}" data-search-name="${escapeHtml(item.name.toLowerCase())}"${isOwned ? "" : " hidden"}>
         <input type="checkbox" name="protein" value="${escapeHtml(item.name)}">
         <span>${escapeHtml(item.name)}</span>
-        <small data-protein-role>${isOwned ? `In My Kitchen${item.form ? ` · ${escapeHtml(item.form)}` : ""}` : "Need to buy"}</small>
+        <small data-protein-role>${isOwned ? `In My Kitchen${item.form ? ` · ${escapeHtml(item.form)}` : ""}` : "Added to grocery list"}</small>
         <select data-protein-state aria-label="${escapeHtml(item.name)} form"${isOwned ? " disabled" : ""}>
           <option${state === "Fresh Raw" ? " selected" : ""}>Fresh Raw</option>
           <option${state === "Frozen Raw" ? " selected" : ""}>Frozen Raw</option>
@@ -1006,16 +1006,10 @@ const SNS = (() => {
       });
     };
     proteinHolder.addEventListener("change", syncProteinRoles);
-    form.querySelector("[data-protein-search]")?.addEventListener("input", event => {
-      const query = event.target.value.trim().toLowerCase();
-      form.querySelectorAll("[data-protein-choice]").forEach(choice => {
-        choice.hidden = Boolean(query) && !choice.dataset.searchName.includes(query);
-      });
-    });
 
     const foundation = form.querySelector("[data-builder-foundation]");
     foundation.innerHTML = `<option value="">No foundation</option>` + (options.foundations || []).map(item =>
-      `<option value="${escapeHtml(item.name)}">${escapeHtml(choiceLabel(item, owned))}</option>`
+      `<option value="${escapeHtml(item.name)}" data-owned="${Boolean(item.owned ?? owned.has(String(item.name).toLowerCase()))}"${item.owned ?? owned.has(String(item.name).toLowerCase()) ? "" : " hidden"}>${escapeHtml(item.name)}${item.owned ?? owned.has(String(item.name).toLowerCase()) ? " · In My Kitchen" : " · Grocery item"}</option>`
     ).join("");
 
     form.querySelector("[data-builder-cuisine]").innerHTML = (options.cuisines || []).map(name =>
@@ -1064,10 +1058,10 @@ const SNS = (() => {
     const produceHolder = form.querySelector("[data-produce-options]");
     produceHolder.innerHTML = produce.map(item => {
       const isOwned = item.owned ?? owned.has(String(item.name).toLowerCase());
-      return `<label class="produce-choice" data-produce-choice data-search-name="${escapeHtml(item.name.toLowerCase())}">
+      return `<label class="produce-choice${isOwned ? "" : " is-purchase"}" data-produce-choice data-owned="${isOwned}" data-search-name="${escapeHtml(item.name.toLowerCase())}"${isOwned ? "" : " hidden"}>
         <input type="checkbox" name="produce" value="${escapeHtml(item.name)}">
         <span>${escapeHtml(item.name)}</span>
-        <small>${isOwned ? `In My Kitchen${item.form ? ` · ${escapeHtml(item.form)}` : ""}` : "Need to buy"}${item.kind === "fruit" ? " · Fruit" : ""}</small>
+        <small>${isOwned ? `In My Kitchen${item.form ? ` · ${escapeHtml(item.form)}` : ""}` : "Added to grocery list"}${item.kind === "fruit" ? " · Fruit" : ""}</small>
         <select data-produce-form aria-label="${escapeHtml(item.name)} form"${isOwned ? " disabled" : ""}>
           ${isOwned ? `<option value="${escapeHtml(item.form || "")}">Use My Kitchen form</option>` : '<option>Fresh</option><option>Frozen</option><option>Canned</option>'}
         </select>
@@ -1080,25 +1074,127 @@ const SNS = (() => {
     const extrasHolder = form.querySelector("[data-extra-options]");
     extrasHolder.innerHTML = extras.map(item => {
       const isOwned = item.owned ?? owned.has(String(item.name).toLowerCase());
-      return `<label class="produce-choice" data-extra-choice data-search-name="${escapeHtml(item.name.toLowerCase())}">
+      return `<label class="produce-choice${isOwned ? "" : " is-purchase"}" data-extra-choice data-owned="${isOwned}" data-search-name="${escapeHtml(item.name.toLowerCase())}"${isOwned ? "" : " hidden"}>
         <input type="checkbox" name="extras" value="${escapeHtml(item.name)}">
         <span>${escapeHtml(item.name)}</span>
-        <small>${isOwned ? "In My Kitchen" : "Need to buy"}</small>
+        <small>${isOwned ? "In My Kitchen" : "Added to grocery list"}</small>
       </label>`;
     }).join("");
 
-    form.querySelector("[data-produce-search]")?.addEventListener("input", event => {
-      const query = event.target.value.trim().toLowerCase();
-      form.querySelectorAll("[data-produce-choice]").forEach(choice => {
-        choice.hidden = Boolean(query) && !choice.dataset.searchName.includes(query);
+    const selectedPurchaseNames = () => {
+      const names = [...form.querySelectorAll('.produce-choice[data-owned="false"] input:checked')].map(input => input.value);
+      const selectedFoundation = foundation.selectedOptions[0];
+      if (selectedFoundation?.dataset.owned === "false") names.push(selectedFoundation.value);
+      return [...new Set(names)];
+    };
+
+    const catalogDialog = document.querySelector("[data-ingredient-catalog]");
+    const catalogHolder = catalogDialog?.querySelector("[data-catalog-options]");
+    const catalogItems = [
+      ...(options.proteins || []).map(item => ({ ...item, catalogKind: "protein", catalogLabel: "Protein" })),
+      ...(options.produce || []).map(item => ({ ...item, catalogKind: "produce", catalogLabel: item.kind === "fruit" ? "Fruit" : "Produce" })),
+      ...(options.foundations || []).map(item => ({ ...item, catalogKind: "foundation", catalogLabel: "Foundation" })),
+      ...(options.extras || []).map(item => ({ ...item, catalogKind: "extra", catalogLabel: "Pantry & fridge" })),
+    ].filter(item => !(item.owned ?? owned.has(String(item.name).toLowerCase())));
+
+    if (catalogHolder) {
+      catalogHolder.innerHTML = catalogItems.map(item => `
+        <button type="button" data-catalog-item data-catalog-kind="${item.catalogKind}" data-catalog-name="${escapeHtml(item.name)}" data-search-name="${escapeHtml(item.name.toLowerCase())}" aria-pressed="false">
+          <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.catalogLabel)}</small></span>
+          <b data-catalog-action>Add</b>
+        </button>`).join("");
+    }
+
+    const selectedInput = (kind, name) => {
+      const selector = kind === "protein" ? 'input[name="protein"]' : kind === "produce" ? 'input[name="produce"]' : 'input[name="extras"]';
+      return [...form.querySelectorAll(selector)].find(input => input.value === name);
+    };
+
+    const syncPurchaseUI = () => {
+      const purchases = selectedPurchaseNames();
+      const summary = form.querySelector("[data-builder-purchase-summary]");
+      const summaryItems = form.querySelector("[data-builder-purchase-items]");
+      if (summary) summary.hidden = purchases.length === 0;
+      if (summaryItems) summaryItems.innerHTML = purchases.map(name => `<span>${escapeHtml(name)}</span>`).join("");
+
+      form.querySelectorAll('.produce-choice[data-owned="false"]').forEach(choice => {
+        choice.hidden = !choice.querySelector("input")?.checked;
       });
-    });
-    form.querySelector("[data-extra-search]")?.addEventListener("input", event => {
-      const query = event.target.value.trim().toLowerCase();
-      form.querySelectorAll("[data-extra-choice]").forEach(choice => {
-        choice.hidden = Boolean(query) && !choice.dataset.searchName.includes(query);
+      [...foundation.options].forEach(option => {
+        if (option.dataset.owned === "false") option.hidden = option.value !== foundation.value;
       });
+      catalogHolder?.querySelectorAll("[data-catalog-item]").forEach(button => {
+        const name = button.dataset.catalogName;
+        const kind = button.dataset.catalogKind;
+        const selected = kind === "foundation"
+          ? foundation.value === name
+          : Boolean(selectedInput(kind, name)?.checked);
+        button.classList.toggle("selected", selected);
+        button.setAttribute("aria-pressed", String(selected));
+        button.querySelector("[data-catalog-action]").textContent = selected ? "Added" : "Add";
+      });
+    };
+
+    const bindOwnedSearch = (inputSelector, choiceSelector) => {
+      form.querySelector(inputSelector)?.addEventListener("input", event => {
+        const query = event.target.value.trim().toLowerCase();
+        form.querySelectorAll(choiceSelector).forEach(choice => {
+          const availableHere = choice.dataset.owned === "true" || choice.querySelector("input")?.checked;
+          choice.hidden = !availableHere || (Boolean(query) && !choice.dataset.searchName.includes(query));
+        });
+      });
+    };
+    bindOwnedSearch("[data-protein-search]", "[data-protein-choice]");
+    bindOwnedSearch("[data-produce-search]", "[data-produce-choice]");
+    bindOwnedSearch("[data-extra-search]", "[data-extra-choice]");
+
+    form.querySelector("[data-open-ingredient-catalog]")?.addEventListener("click", () => {
+      syncPurchaseUI();
+      catalogDialog?.showModal();
+      setTimeout(() => catalogDialog?.querySelector("[data-catalog-search]")?.focus(), 0);
     });
+    catalogHolder?.addEventListener("click", event => {
+      const button = event.target.closest("[data-catalog-item]");
+      if (!button) return;
+      const { catalogKind: kind, catalogName: name } = button.dataset;
+      if (kind === "foundation") {
+        const option = [...foundation.options].find(item => item.value === name);
+        if (option) option.hidden = false;
+        foundation.value = foundation.value === name ? "" : name;
+        foundation.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        const input = selectedInput(kind, name);
+        if (input) {
+          input.checked = !input.checked;
+          input.closest(".produce-choice").hidden = false;
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }
+      syncProteinRoles();
+      syncPurchaseUI();
+    });
+    form.querySelectorAll('input[name="protein"], input[name="produce"], input[name="extras"], [data-builder-foundation]').forEach(input =>
+      input.addEventListener("change", syncPurchaseUI)
+    );
+    const applyCatalogFilter = () => {
+      const query = catalogDialog?.querySelector("[data-catalog-search]")?.value.trim().toLowerCase() || "";
+      const filter = catalogDialog?.querySelector("[data-catalog-filter].active")?.dataset.catalogFilter || "all";
+      let matches = 0;
+      catalogHolder?.querySelectorAll("[data-catalog-item]").forEach(button => {
+        const visible = (filter === "all" || button.dataset.catalogKind === filter)
+          && (!query || button.dataset.searchName.includes(query));
+        button.hidden = !visible;
+        if (visible) matches += 1;
+      });
+      const empty = catalogDialog?.querySelector("[data-catalog-empty]");
+      if (empty) empty.hidden = matches > 0;
+    };
+    catalogDialog?.querySelector("[data-catalog-search]")?.addEventListener("input", applyCatalogFilter);
+    catalogDialog?.querySelectorAll("[data-catalog-filter]").forEach(button => button.addEventListener("click", () => {
+      catalogDialog.querySelectorAll("[data-catalog-filter]").forEach(item => item.classList.toggle("active", item === button));
+      applyCatalogFilter();
+    }));
+    syncPurchaseUI();
     const syncPortions = () => {
       const light = Number(form.querySelector("[data-eaters-light]")?.value || 0);
       const standard = Number(form.querySelector("[data-eaters-standard]")?.value || 0);
@@ -1256,9 +1352,40 @@ const SNS = (() => {
         ? `${active} active · ${passive} mostly waiting`
         : "";
     }
-    document.querySelector("[data-ingredients]").innerHTML = (recipe.ingredients || []).map(x => `<li>${escapeHtml(x)}</li>`).join("");
+    const ingredientLines = recipe.ingredients || [];
+    document.querySelector("[data-ingredients]").innerHTML = ingredientLines.map(x => `<li>${escapeHtml(x)}</li>`).join("");
+    const ingredientQuantity = name => {
+      const line = ingredientLines.find(item => String(item).toLowerCase().startsWith(`${String(name).toLowerCase()} —`));
+      if (!line) return "";
+      const details = String(line).split(" — ").slice(1).join(" — ");
+      const parts = details.split(" · ").filter(Boolean);
+      return parts.length > 1 ? parts.at(-1) : details;
+    };
+    const groceryItems = [];
+    const groceryNames = new Set();
+    (recipe.inventory_requirements || [])
+      .filter(item => ["Need", "Short"].includes(item?.status))
+      .forEach(item => {
+        const key = String(item.name || "").toLowerCase();
+        if (!key || groceryNames.has(key)) return;
+        groceryNames.add(key);
+        const shortfall = Number(item.quantity_shortfall || 0);
+        const amount = item.status === "Short"
+          ? `add ${shortfall || "some"} more`
+          : item.quantity || ingredientQuantity(item.name);
+        groceryItems.push({
+          name: item.name,
+          amount,
+        });
+      });
+    const groceryList = document.querySelector("[data-grocery-list]");
+    const groceryEmpty = document.querySelector("[data-grocery-empty]");
+    if (groceryList) groceryList.innerHTML = groceryItems.map(item =>
+      `<li><span>${escapeHtml(item.name)}</span>${item.amount ? `<strong>${escapeHtml(item.amount)}</strong>` : ""}</li>`
+    ).join("");
+    if (groceryEmpty) groceryEmpty.hidden = groceryItems.length > 0;
     const kitchenItems = (recipe.inventory_requirements || [])
-      .filter(item => ["Need", "Short", "Substitute", "Omit"].includes(item?.status))
+      .filter(item => ["Substitute", "Omit"].includes(item?.status))
       .filter(item => item.status !== "Omit" || item.omission_consequence)
       .map(item => {
         if (item.status === "Substitute") {

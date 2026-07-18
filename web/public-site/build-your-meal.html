@@ -18,10 +18,10 @@
   <section class="builder-hero">
     <div>
       <div class="eyebrow">Help Me Build My Meal</div>
-      <h1>You choose the direction.</h1>
-      <p class="lede">Choose what you want to cook—even if you need to buy it. Every ingredient is still checked against My Kitchen and your exclusions.</p>
+      <h1>Build tonight’s meal.</h1>
+      <p class="lede">Start with what you have. Add something to buy only when you want it in this meal.</p>
     </div>
-    <aside class="builder-promise"><strong>One clear plan</strong><span>Your method, ingredients, and limits go through the same Stock &amp; Stir cooking engine.</span></aside>
+    <aside class="builder-promise"><strong>Two useful results</strong><span>A complete recipe and the grocery list it requires.</span></aside>
   </section>
 
   <form class="meal-builder" data-meal-builder>
@@ -29,23 +29,31 @@
     <div data-builder-fields hidden>
       <section class="builder-section">
         <div class="builder-section-heading"><span>1</span><div><h2>Choose the food</h2><p>Choose a main protein and any supporting proteins, vegetables, or fruits.</p></div></div>
+        <div class="builder-food-toolbar">
+          <div><strong>My Kitchen first</strong><span>Only food you have is shown below.</span></div>
+          <button class="btn btn-secondary" type="button" data-open-ingredient-catalog>+ Add an ingredient to buy</button>
+        </div>
+        <div class="builder-purchase-summary" data-builder-purchase-summary hidden>
+          <strong>Added to this meal’s grocery list</strong>
+          <div data-builder-purchase-items></div>
+        </div>
         <div class="produce-picker protein-picker">
-          <label class="builder-field"><span>Proteins <em>Choose one or more</em></span><input type="search" data-protein-search placeholder="Search chicken, beans, eggs…"></label>
+          <label class="builder-field"><span>Proteins in My Kitchen <em>Choose one or more</em></span><input type="search" data-protein-search placeholder="Search your proteins…"></label>
           <p class="builder-help">The first selection is the main protein. Additional proteins are treated as supporting, stretching, or flavor accents—not as several full entrées.</p>
-          <div class="produce-options" data-protein-options></div>
+          <div class="produce-options builder-owned-options" data-protein-options></div>
         </div>
         <div class="builder-two-column">
           <label class="builder-field"><span>Foundation <em>Optional</em></span><select data-builder-foundation></select></label>
           <label class="builder-field"><span>Cuisine direction</span><select data-builder-cuisine></select></label>
         </div>
         <div class="produce-picker">
-          <label class="builder-field"><span>Vegetables &amp; fruit <em>Choose any number</em></span><input type="search" data-produce-search placeholder="Search onions, carrots, apples…"></label>
-          <div class="produce-options" data-produce-options></div>
+          <label class="builder-field"><span>Vegetables &amp; fruit in My Kitchen <em>Choose any number</em></span><input type="search" data-produce-search placeholder="Search your produce…"></label>
+          <div class="produce-options builder-owned-options" data-produce-options></div>
         </div>
         <div class="produce-picker extras-picker">
-          <label class="builder-field"><span>Pantry &amp; fridge extras <em>Choose any number</em></span><input type="search" data-extra-search placeholder="Search mayo, salsa, broth, cheese…"></label>
+          <label class="builder-field"><span>Pantry &amp; fridge extras on hand <em>Choose any number</em></span><input type="search" data-extra-search placeholder="Search your extras…"></label>
           <p class="builder-help">Add condiments, sauces, dairy, broth, or canned helpers you want the meal to use.</p>
-          <div class="produce-options" data-extra-options></div>
+          <div class="produce-options builder-owned-options" data-extra-options></div>
         </div>
       </section>
 
@@ -81,12 +89,31 @@
       </section>
 
       <div class="builder-submit">
-        <p data-builder-status aria-live="polite">Items marked “Need to buy” will appear in the Kitchen check.</p>
+        <p data-builder-status aria-live="polite">SNS will build the recipe and its grocery list together.</p>
         <button class="btn btn-primary" type="submit">Help Me Build This Meal</button>
       </div>
     </div>
   </form>
 </main>
+<dialog class="ingredient-catalog-dialog" data-ingredient-catalog>
+  <form method="dialog" class="ingredient-catalog-form">
+    <header>
+      <div><div class="eyebrow">Add to this meal</div><h2>Choose an ingredient to buy</h2></div>
+      <button type="submit" value="close" class="catalog-close" aria-label="Close ingredient chooser">×</button>
+    </header>
+    <label class="builder-field"><span class="sr-only">Search all known ingredients</span><input type="search" data-catalog-search placeholder="Search all known ingredients…" autocomplete="off"></label>
+    <div class="catalog-filters" role="group" aria-label="Ingredient type">
+      <button type="button" class="active" data-catalog-filter="all">All</button>
+      <button type="button" data-catalog-filter="protein">Proteins</button>
+      <button type="button" data-catalog-filter="produce">Produce</button>
+      <button type="button" data-catalog-filter="foundation">Foundations</button>
+      <button type="button" data-catalog-filter="extra">Pantry &amp; fridge</button>
+    </div>
+    <div class="ingredient-catalog-options" data-catalog-options></div>
+    <p class="catalog-empty" data-catalog-empty hidden>No known ingredients match that search.</p>
+    <footer><button class="btn btn-primary" type="submit" value="done">Done adding ingredients</button></footer>
+  </form>
+</dialog>
 <script src="sns-flow.js"></script>
 </body>
 </html>

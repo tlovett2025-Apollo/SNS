@@ -28,9 +28,15 @@
       <aside class="recipe-aside">
         <h2>Ingredients</h2>
         <ul data-ingredients></ul>
+        <section class="grocery-list">
+          <h2>Grocery list</h2>
+          <p>Everything this recipe needs that is not currently in My Kitchen.</p>
+          <ul data-grocery-list></ul>
+          <p class="grocery-empty" data-grocery-empty hidden>Nothing to buy for this recipe.</p>
+        </section>
         <section class="kitchen-check" data-kitchen-check hidden>
-          <h3>Kitchen check</h3>
-          <p>Every ingredient was checked against My Kitchen. Here is anything to confirm, substitute, or omit before cooking:</p>
+          <h3>Recipe adjustments</h3>
+          <p>These substitutions or omissions keep the recipe aligned with My Kitchen:</p>
           <ul data-missing-items></ul>
         </section>
       </aside>
