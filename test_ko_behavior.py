@@ -109,6 +109,39 @@ class KOBehaviorFamilyTests(unittest.TestCase):
             con.close()
             folder.cleanup()
 
+    def test_behavior_cache_refreshes_after_ckb_training_change(self):
+        folder, path, con = self._custom_db()
+        try:
+            seed_behavior_library(con)
+            con.execute("INSERT INTO ingredients VALUES (1, 'Cache Test Romanesco')")
+            family_id = con.execute(
+                "SELECT family_id FROM ko_behavior_families WHERE family_code='cruciferous'"
+            ).fetchone()[0]
+            con.execute(
+                "INSERT INTO ingredient_behavior_memberships VALUES (NULL,1,?,'',100,1,'trained',1)",
+                (family_id,),
+            )
+            con.commit()
+
+            before = resolve_behavior(
+                "Cache Test Romanesco", "vegetable", "Fresh", "skillet", path,
+            )
+            con.execute(
+                """INSERT INTO ko_ingredient_exceptions
+                   VALUES (NULL,1,'Fresh','saute_steam','cook_minutes','11',
+                           'Newly verified training',1)"""
+            )
+            con.commit()
+            after = resolve_behavior(
+                "Cache Test Romanesco", "vegetable", "Fresh", "skillet", path,
+            )
+
+            self.assertNotEqual(before.method.cook_minutes, 11)
+            self.assertEqual(after.method.cook_minutes, 11)
+        finally:
+            con.close()
+            folder.cleanup()
+
     def test_form_changes_legume_operation(self):
         canned = resolve_behavior("Navy beans", "foundation", "Canned", "skillet", DB_PATH)
         dry = resolve_behavior("Navy beans", "foundation", "Dry", "skillet", DB_PATH)

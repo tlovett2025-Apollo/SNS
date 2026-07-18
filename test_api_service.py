@@ -757,7 +757,7 @@ class APIServiceTests(unittest.TestCase):
         provenance = recipe["build_provenance"]
         self.assertRegex(provenance["build_id"], r"^SNS-[0-9a-f]{12}$")
         self.assertEqual(provenance["configuration"]["candidate_id"], candidates[0]["candidate_id"])
-        self.assertTrue(any(item["path"] == "cooking_planner.py" for item in provenance["files"]))
+        self.assertNotIn("files", provenance)
 
     def test_recipe_list_builds_distinct_meal_concepts_not_one_bundle_in_forms(self):
         candidates = get_recipe_list(diverse_kitchen_payload())["candidates"]

@@ -7,6 +7,8 @@ name.
 """
 
 from dataclasses import dataclass, field, replace
+from functools import lru_cache
+from pathlib import Path
 import sqlite3
 from typing import Dict, Iterable, Tuple
 
@@ -1758,7 +1760,7 @@ def ingredient_attributes(name, form_name="", db_path=None) -> dict[str, str]:
         return {}
 
 
-def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> ResolvedBehavior:
+def _resolve_behavior_uncached(name, role, form_name="", strategy="", db_path=None) -> ResolvedBehavior:
     codes, source = family_codes_for(name, role, form_name, db_path)
     # Meal role is contextual: beans may be today's protein and avocado may be
     # today's produce. Physical behavior follows the ingredient, not the slot.
@@ -1861,6 +1863,50 @@ def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> Res
     return ResolvedBehavior(
         name, role, form_name, primary, families[1:], selected, source, reason,
         ingredient_attributes(name, form_name, db_path),
+    )
+
+
+def _database_revision(db_path) -> tuple:
+    """Return a cheap cache key that changes whenever the CKB changes.
+
+    Render serves a read-mostly seed database, while the training tools and
+    tests legitimately rewrite it.  Including the file revision gives the
+    public planner a warm KO cache without making training changes stale.
+    """
+    if not db_path or str(db_path) == ":memory:":
+        return ()
+    revisions = []
+    base = Path(db_path)
+    for path in (base, Path(f"{base}-wal")):
+        try:
+            stat = path.stat()
+            revisions.append((stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            revisions.append((0, 0))
+    return tuple(revisions)
+
+
+@lru_cache(maxsize=8192)
+def _resolve_behavior_cached(
+    name, role, form_name, strategy, db_path, database_revision,
+) -> ResolvedBehavior:
+    return _resolve_behavior_uncached(
+        name, role, form_name, strategy, db_path or None,
+    )
+
+
+def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> ResolvedBehavior:
+    """Resolve KO behavior once per ingredient/form/method and CKB revision.
+
+    Idea generation asks the same questions while comparing concepts,
+    methods, schedules, and validation.  Previously every question reopened
+    SQLite several times.  The resolved object contains immutable KO facts in
+    normal planner use, so sharing it safely removes that repeated I/O.
+    """
+    path = str(db_path) if db_path else ""
+    return _resolve_behavior_cached(
+        str(name or ""), str(role or ""), str(form_name or ""),
+        str(strategy or ""), path, _database_revision(path),
     )
 
 

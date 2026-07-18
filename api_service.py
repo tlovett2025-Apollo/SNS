@@ -578,6 +578,27 @@ def _choose_concept_candidate(options, protein, used_methods):
     return next(iter(supported.values()), None)
 
 
+def _idea_method_attempts(protein, concept_index: int, meal_structure: str) -> tuple[str, ...]:
+    """Order a concept's methods without constructing every possible recipe.
+
+    Phase 2 needs enough fully validated meals to choose an assortment; it
+    does not need a complete cooking schedule for every method of every
+    ingredient bundle.  Rotate the preferred method by concept so the pool
+    retains variety, and let the caller fall through only when that method is
+    not trained for the selected components or equipment.
+    """
+    preferences = _method_preferences(protein)
+    structure = _clean(meal_structure) or "integrated"
+    if structure != "integrated":
+        preferences = tuple(
+            method for method in preferences if method in {"skillet", "grill"}
+        )
+    if not preferences:
+        return ()
+    offset = concept_index % len(preferences)
+    return preferences[offset:] + preferences[:offset]
+
+
 def _dish_family(candidate: dict) -> str:
     structure = _clean(candidate.get("meal_structure")) or "integrated"
     if structure == "composed_plate":
@@ -1322,7 +1343,15 @@ def _raw_candidates(payload: dict, db_path: str | Path):
     for index, (concept_request, protein) in enumerate(
         _concept_requests(engine_request, resolved)
     ):
-        options = generate_candidates(**_generator_request(concept_request))
+        options = []
+        for requested_method in _idea_method_attempts(
+            protein, index, concept_request.get("meal_structure"),
+        ):
+            method_request = dict(concept_request)
+            method_request["requested_method"] = requested_method
+            options = generate_candidates(**_generator_request(method_request))
+            if options:
+                break
         for option_index, candidate in enumerate(options):
             method = candidate.get("cooking_method", candidate.get("strategy", "meal"))
             if method not in _LIVE_PLANNER_METHODS:
