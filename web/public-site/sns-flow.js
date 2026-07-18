@@ -2046,35 +2046,68 @@ const SNS = (() => {
     const dialog = document.querySelector("[data-recipe-report-dialog]");
     const form = document.querySelector("[data-recipe-report-form]");
     const open = document.querySelector("[data-open-recipe-report]");
+    const looksRight = document.querySelector("[data-recipe-looks-right]");
     const status = document.querySelector("[data-recipe-report-status]");
-    if (!dialog || !form || !open || open.dataset.bound === "true") return;
+    const dialogStatus = document.querySelector("[data-recipe-report-dialog-status]");
+    if (!dialog || !form || !open || !looksRight || open.dataset.bound === "true") return;
     open.dataset.bound = "true";
-    open.addEventListener("click", () => dialog.showModal());
+    const reportPayload = (outcome, categories, note = "") => ({
+      candidate_id: recipe.candidate_id,
+      recipe_snapshot: recipe,
+      rendered_recipe_text: document.querySelector("main")?.innerText || "",
+      report_outcome: outcome,
+      issue_categories: categories,
+      user_note: note
+    });
+    const disableActions = disabled => {
+      open.disabled = disabled;
+      looksRight.disabled = disabled;
+    };
+    open.addEventListener("click", () => {
+      dialogStatus.textContent = "";
+      dialog.showModal();
+    });
     document.querySelectorAll("[data-close-recipe-report]").forEach(button =>
       button.addEventListener("click", () => dialog.close())
     );
+    looksRight.addEventListener("click", async () => {
+      disableActions(true);
+      status.textContent = "Recording that this recipe looks right…";
+      try {
+        await postJson(API.reportRecipe, reportPayload("OK", ["recipe_ok"]));
+        looksRight.textContent = "Recorded as OK";
+        open.hidden = true;
+        status.textContent = "Thank you. Stock & Stir recorded this exact recipe as OK.";
+      } catch (error) {
+        disableActions(false);
+        status.textContent = error.message || "This result could not be saved. Please try again.";
+      }
+    });
     form.addEventListener("submit", async event => {
       event.preventDefault();
       const submit = form.querySelector("[data-submit-recipe-report]");
       const categories = [...form.querySelectorAll('input[name="issue"]:checked')]
         .map(input => input.value);
       submit.disabled = true;
+      disableActions(true);
       status.textContent = "Sending this recipe for review…";
+      dialogStatus.textContent = "Sending this recipe for review…";
       try {
-        await postJson(API.reportRecipe, {
-          candidate_id: recipe.candidate_id,
-          recipe_snapshot: recipe,
-          rendered_recipe_text: document.querySelector("main")?.innerText || "",
-          issue_categories: categories.length ? categories : ["general_review"],
-          user_note: form.elements.note.value
-        });
+        await postJson(API.reportRecipe, reportPayload(
+          "NG",
+          categories.length ? categories : ["general_review"],
+          form.elements.note.value
+        ));
         dialog.close();
         form.reset();
-        open.disabled = true;
         open.textContent = "Sent for review";
+        looksRight.hidden = true;
         status.textContent = "Thank you. Stock & Stir received this exact recipe for review.";
       } catch (error) {
-        status.textContent = error.message || "This report could not be sent. Please try again.";
+        disableActions(false);
+        const message = error.message || "This report could not be sent. Please try again.";
+        status.textContent = message;
+        dialogStatus.textContent = message;
       } finally {
         submit.disabled = false;
       }

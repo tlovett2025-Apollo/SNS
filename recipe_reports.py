@@ -7,6 +7,7 @@ from typing import Any
 
 
 ALLOWED_ISSUE_CATEGORIES = frozenset({
+    "recipe_ok",
     "general_review",
     "wrong_ingredients",
     "weird_instructions",
@@ -14,6 +15,7 @@ ALLOWED_ISSUE_CATEGORIES = frozenset({
     "timing_or_effort",
     "wrong_quantity",
 })
+ALLOWED_REPORT_OUTCOMES = frozenset({"OK", "NG"})
 
 
 class RecipeReportError(ValueError):
@@ -33,7 +35,12 @@ def normalize_recipe_report(payload: dict[str, Any]) -> dict[str, Any]:
     if not candidate_id:
         raise RecipeReportError("The recipe identifier is missing.")
 
-    requested = payload.get("issue_categories") or ["general_review"]
+    outcome = str(payload.get("report_outcome") or "NG").strip().upper()
+    if outcome not in ALLOWED_REPORT_OUTCOMES:
+        raise RecipeReportError("Choose a valid recipe outcome.")
+
+    default_categories = ["recipe_ok"] if outcome == "OK" else ["general_review"]
+    requested = payload.get("issue_categories") or default_categories
     if not isinstance(requested, list):
         raise RecipeReportError("Choose a valid reason for the recipe review.")
     categories = list(dict.fromkeys(str(value).strip() for value in requested if str(value).strip()))
@@ -41,6 +48,10 @@ def normalize_recipe_report(payload: dict[str, Any]) -> dict[str, Any]:
         categories = ["general_review"]
     if len(categories) > 6 or any(value not in ALLOWED_ISSUE_CATEGORIES for value in categories):
         raise RecipeReportError("Choose a valid reason for the recipe review.")
+    if outcome == "OK" and categories != ["recipe_ok"]:
+        raise RecipeReportError("An OK recipe cannot include problem categories.")
+    if outcome == "NG" and "recipe_ok" in categories:
+        raise RecipeReportError("A recipe needing review cannot be marked OK.")
 
     provenance = recipe.get("build_provenance") or {}
     git = provenance.get("git") or {}
@@ -59,4 +70,5 @@ def normalize_recipe_report(payload: dict[str, Any]) -> dict[str, Any]:
         "p_rendered_recipe_text": rendered,
         "p_user_note": note,
         "p_issue_categories": categories,
+        "p_report_outcome": outcome,
     }

@@ -142,6 +142,30 @@ class APIHTTPTests(unittest.TestCase):
         self.assertEqual(report["p_candidate_id"], "candidate-1")
         self.assertEqual(report["p_build_id"], "SNS-test")
         self.assertEqual(report["p_issue_categories"], ["weird_instructions"])
+        self.assertEqual(report["p_report_outcome"], "NG")
+
+    def test_signed_in_cook_can_record_a_recipe_as_ok(self):
+        recipe = {
+            "candidate_id": "candidate-ok",
+            "title": "Dinner",
+            "ingredients": ["Chicken breast"],
+            "steps": ["Cook safely."],
+        }
+        with patch("api_http._SUPABASE") as gateway:
+            gateway.token_from_authorization.return_value = "user-token"
+            gateway.submit_recipe_report.return_value = {
+                "report_id": "report-ok", "status": "received"
+            }
+            response = self.client.post(
+                "/api/ReportRecipe",
+                json={"recipe_snapshot": recipe, "report_outcome": "OK"},
+                headers={"Authorization": "Bearer user-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        report = gateway.submit_recipe_report.call_args.args[1]
+        self.assertEqual(report["p_report_outcome"], "OK")
+        self.assertEqual(report["p_issue_categories"], ["recipe_ok"])
 
     def test_anonymous_recipe_report_is_not_stored(self):
         response = self.client.post(

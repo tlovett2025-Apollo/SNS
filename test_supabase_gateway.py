@@ -124,6 +124,8 @@ class SupabaseGatewayTests(unittest.TestCase):
         self.assertIn("grant execute on function public.my_kitchen_snapshot() to authenticated", sql)
         self.assertIn("grant execute on function public.submit_recipe_report", sql)
         self.assertIn("recipe_reports_issue_categories_check", sql)
+        self.assertIn("recipe_reports_outcome_check", sql)
+        self.assertIn("p_report_outcome text", sql)
 
 
 if __name__ == "__main__":

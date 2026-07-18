@@ -15,6 +15,19 @@ def test_recipe_failures_are_visible_and_never_fabricate_a_recipe():
     assert "data-retry-recipes" in public_copy
 
 
+def test_recipe_feedback_records_ok_or_ng_and_shows_dialog_errors():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    recipe_page = (PUBLIC_FLOW.parent / "recipe.html").read_text(encoding="utf-8")
+
+    assert "data-recipe-looks-right" in recipe_page
+    assert "Recipe looks right" in recipe_page
+    assert "data-recipe-report-dialog-status" in recipe_page
+    assert 'reportPayload("OK", ["recipe_ok"])' in flow
+    assert 'reportPayload(' in flow
+    assert '"NG",' in flow
+    assert "dialogStatus.textContent = message" in flow
+
+
 def test_my_kitchen_supports_add_remove_equipment_and_browser_persistence():
     flow = PUBLIC_FLOW.read_text(encoding="utf-8")
     kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")

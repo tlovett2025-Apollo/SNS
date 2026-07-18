@@ -47,10 +47,13 @@
     </div>
     <section class="recipe-report-card" data-recipe-report>
       <div>
-        <h2>Something feel off?</h2>
-        <p>Send this exact recipe and its build information to Stock &amp; Stir for review.</p>
+        <h2>How does this recipe look?</h2>
+        <p>Record a good result in one tap, or send anything questionable for review.</p>
       </div>
-      <button class="btn btn-secondary" type="button" data-open-recipe-report>Report this recipe</button>
+      <div class="recipe-feedback-actions">
+        <button class="btn btn-primary" type="button" data-recipe-looks-right>Recipe looks right</button>
+        <button class="btn btn-secondary" type="button" data-open-recipe-report>Report this recipe</button>
+      </div>
       <p class="form-status" data-recipe-report-status aria-live="polite"></p>
     </section>
     <dialog class="recipe-report-dialog" data-recipe-report-dialog>
@@ -72,6 +75,7 @@
         </div>
         <label class="field-label" for="recipe-report-note">Anything else? <span>Optional</span></label>
         <textarea id="recipe-report-note" name="note" rows="4" maxlength="2000" placeholder="Tell us what made you pause."></textarea>
+        <p class="form-status dialog-status" data-recipe-report-dialog-status aria-live="polite"></p>
         <div class="dialog-actions">
           <button class="btn btn-secondary" type="button" data-close-recipe-report>Cancel</button>
           <button class="btn btn-primary" type="submit" data-submit-recipe-report>Send for review</button>

@@ -1,0 +1,51 @@
+STOCK & STIR — OK / NG RECIPE FEEDBACK
+
+This is a full-file overlay for production main at or after commit ccbd03c.
+It avoids git patch context failures.
+
+WHAT IT ADDS
+
+- One-tap "Recipe looks right" feedback recorded as OK.
+- Existing "Report this recipe" feedback recorded as NG.
+- The exact recipe, page text, provenance, user, household, and timestamp are
+  stored for both outcomes.
+- Review workflow status remains separate (new, fixed, cannot reproduce, etc.).
+- Report errors now appear inside the open dialog.
+
+DATABASE
+
+The production Supabase migration has already been applied and verified.
+The migration file is included so Git remains the durable source of truth.
+
+INSTALL
+
+1. Extract this ZIP into the root of your SNS repository.
+2. Allow it to replace the listed files.
+3. From C:\Users\tlove\OneDrive\Desktop\SNS run:
+
+   git status --short
+   git add --pathspec-from-file=FEEDBACK-FILES.txt
+   git commit -m "Add OK and NG recipe feedback"
+   git push origin main
+
+4. Wait for both sns-api and sns-web to deploy.
+5. Open a new signed-in browser window before testing.
+
+SUCCESS CHECK
+
+- "Recipe looks right" changes to "Recorded as OK" and shows a receipt.
+- "Report this recipe" closes after success and changes to "Sent for review."
+- A failed report stays open and displays the error inside the dialog.
+
+VALIDATION COMPLETED
+
+- Recipe feedback normalization tests passed.
+- Supabase gateway and migration contract tests passed.
+- Public-site copy tests passed.
+- Python compilation passed.
+- JavaScript syntax passed.
+- Git whitespace validation passed.
+
+The FastAPI HTTP test module could not run in this workspace because its
+FastAPI/pytest dependencies are not installed here. The modified endpoint
+contract is covered by dependency-free normalization and source-contract tests.
