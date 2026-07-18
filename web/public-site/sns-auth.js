@@ -58,7 +58,7 @@
       if (error) throw error;
     },
     onChange(callback) {
-      return client.auth.onAuthStateChange((_event, currentSession) => callback(currentSession));
+      return client.auth.onAuthStateChange((event, currentSession) => callback(currentSession, event));
     }
   };
 })();

@@ -58,6 +58,12 @@ class APIHTTPTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["household_id"], "house-1")
 
+    def test_anonymous_kitchen_save_is_rejected(self):
+        response = self.client.post("/api/SaveMyKitchen", json=kitchen_payload())
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("Log in", response.json()["detail"])
+
     def test_signed_in_recipe_request_uses_the_durable_inventory(self):
         kitchen = kitchen_payload()
         snapshot = {

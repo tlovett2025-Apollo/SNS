@@ -194,6 +194,23 @@
       target.classList.toggle("error", error);
     }
 
+    function friendlyAuthError(error, action) {
+      const message = String(error?.message || "");
+      const code = String(error?.code || "");
+      if (code === "over_email_send_rate_limit" || /email rate limit/i.test(message)) {
+        return action === "reset"
+          ? "Supabase has temporarily limited password-reset emails. Do not keep clicking it. Wait before requesting another email; the most recent reset email you received is still the one to use."
+          : "Supabase has temporarily limited account emails. If this account already exists, choose Log In instead of Start Free Trial. Otherwise, wait before requesting another email.";
+      }
+      if (code === "invalid_credentials" || /invalid login credentials/i.test(message)) {
+        return "That email and password do not match. Use Forgot password once if you need to set a new password.";
+      }
+      if (/already registered|already exists/i.test(message)) {
+        return "That account already exists. Choose Log In instead of creating another trial account.";
+      }
+      return message || "The account request could not be completed.";
+    }
+
     function renderMode() {
       const signingUp = mode === "signup";
       const recovering = mode === "recovery";
@@ -267,7 +284,7 @@
         }
         showMessage("Account created. Check your email to confirm it, then return here to log in.");
       } catch (error) {
-        showMessage(error.message || "The account request could not be completed.", true);
+        showMessage(friendlyAuthError(error, mode), true);
       } finally {
         button.disabled = false;
       }
@@ -284,7 +301,7 @@
         await window.SNS_AUTH.resetPassword(email);
         showMessage("Password reset instructions are on their way. Check your email.");
       } catch (error) {
-        showMessage(error.message || "Password reset could not be started.", true);
+        showMessage(friendlyAuthError(error, "reset"), true);
       }
     });
 

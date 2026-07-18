@@ -1,9 +1,8 @@
 """FastAPI transport for the Stock & Stir application service boundary.
 
-The functions in :mod:`api_service` remain framework-independent.  This
-module only translates HTTP/JSON requests, establishes the explicit shared
-tester household used before managed authentication exists, and maps domain
-errors to stable HTTP responses.
+The functions in :mod:`api_service` remain framework-independent. This
+module translates HTTP/JSON requests, requires managed identity for
+user-owned data, and maps domain errors to stable HTTP responses.
 """
 
 from __future__ import annotations
@@ -20,15 +19,10 @@ from api_service import (
     get_recipe_list,
     normalize_kitchen_snapshot,
     resolve_inventory,
-    save_my_kitchen,
 )
 from build_provenance import DEPLOYED_BUILD_PROVENANCE, public_build_provenance
 from config import DB_PATH
-from household_inventory import (
-    InventoryAccessError,
-    InventoryError,
-    bootstrap_local_household,
-)
+from household_inventory import InventoryAccessError, InventoryError
 from inventory_capture import (
     InventoryCaptureError,
     recognize_pantry_photo,
@@ -184,26 +178,18 @@ def save_kitchen_endpoint(
     payload: dict,
     authorization: str | None = Header(default=None),
 ) -> dict:
-    """Save the authenticated household, retaining a local test fallback."""
+    """Save only the authenticated user's RLS-protected household."""
     try:
         token = _access_token(authorization)
-        if token:
-            response = _SUPABASE.sync_kitchen(
-                token,
-                _canonical_sync_payload(payload),
-                source_type=payload.get("sync_source_type"),
-                source_fingerprint=payload.get("sync_source_fingerprint"),
-            )
-            response["storage_mode"] = "supabase_household"
-            return response
-        user_id, household_id = bootstrap_local_household(DB_PATH)
-        response = save_my_kitchen(
-            payload,
-            household_id=household_id,
-            acting_user_id=user_id,
-            db_path=DB_PATH,
+        if not token:
+            raise SupabaseGatewayError("Log in to save your shared kitchen.")
+        response = _SUPABASE.sync_kitchen(
+            token,
+            _canonical_sync_payload(payload),
+            source_type=payload.get("sync_source_type"),
+            source_fingerprint=payload.get("sync_source_fingerprint"),
         )
-        response["storage_mode"] = "shared_tester_household"
+        response["storage_mode"] = "supabase_household"
         return response
     except Exception as exc:
         raise _domain_error(exc) from exc

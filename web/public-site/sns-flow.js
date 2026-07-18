@@ -69,7 +69,13 @@ const SNS = (() => {
     "frozen vegetables": ["bag", "package", "cup"], "prepared meal": ["meal", "portion", "package"],
     "cooked leftovers": ["portion", "cup", "package"]
   };
-  const kitchenStorageKey = "snsKitchenStateV1";
+  const legacyKitchenStorageKey = "snsKitchenStateV1";
+  let kitchenStorageKey = legacyKitchenStorageKey;
+  const sharedKitchenSync = {
+    mode: "guest",
+    userId: "",
+    householdId: ""
+  };
   const kitchenImportUndoKey = "snsKitchenImportUndoV1";
   const mealHistoryKey = "snsMealHistoryV1";
   const defaultForms = {
@@ -81,6 +87,25 @@ const SNS = (() => {
 
   function currentPage() {
     return location.pathname.split("/").pop() || "home.html";
+  }
+
+  function signedInKitchenKey(userId) {
+    return `snsKitchenStateV2:${userId}`;
+  }
+
+  function kitchenDraftKey(userId) {
+    return `snsKitchenDraftV1:${userId}`;
+  }
+
+  function setKitchenStatus(message, mode = sharedKitchenSync.mode) {
+    sharedKitchenSync.mode = mode;
+    const status = document.querySelector("[data-save-status]");
+    if (status) {
+      status.textContent = message;
+      status.dataset.syncState = mode;
+    }
+    const save = document.querySelector("[data-save-kitchen], [data-save-household]");
+    if (save) save.disabled = mode === "loading" || mode === "error";
   }
 
   function installAppShell() {
@@ -114,7 +139,7 @@ const SNS = (() => {
         ${link("kitchen-training.html", "Kitchen Training")}
         ${link("pantry-101.html", "Pantry 101")}
       </nav>
-      ${onKitchenPage ? `<div class="app-sidebar-save"><span data-save-status>Changes are stored in this browser.</span><button class="btn btn-primary" type="button" data-save-kitchen>Save My Kitchen</button></div>` : ""}
+      ${onKitchenPage ? `<div class="app-sidebar-save"><span data-save-status>Checking your shared kitchen…</span><button class="btn btn-primary" type="button" data-save-kitchen>Save My Kitchen</button></div>` : ""}
       <a class="app-sidebar-account" href="login.html">Account</a>`;
     const overlay = document.createElement("button");
     overlay.type = "button";
@@ -486,7 +511,10 @@ const SNS = (() => {
   }
 
   function storeBrowserKitchen() {
-    localStorage.setItem(kitchenStorageKey, JSON.stringify(browserKitchenState()));
+    const key = sharedKitchenSync.userId
+      ? kitchenDraftKey(sharedKitchenSync.userId)
+      : kitchenStorageKey;
+    localStorage.setItem(key, JSON.stringify(browserKitchenState()));
   }
 
   function recentMealHistory() {
@@ -1411,16 +1439,35 @@ const SNS = (() => {
   }
 
   async function hydrateSharedKitchen() {
-    if (!window.SNS_AUTH?.configured) return;
+    if (!window.SNS_AUTH?.configured) {
+      kitchenStorageKey = legacyKitchenStorageKey;
+      setKitchenStatus("Account service is unavailable. Changes are not shared between devices.", "guest");
+      return false;
+    }
     let session;
     try { session = await window.SNS_AUTH.session(); }
-    catch { return; }
-    if (!session) return;
+    catch (error) {
+      setKitchenStatus(`Could not verify your login. ${error.message || "Please log in again."}`, "error");
+      return false;
+    }
+    if (!session) {
+      kitchenStorageKey = legacyKitchenStorageKey;
+      sharedKitchenSync.userId = "";
+      sharedKitchenSync.householdId = "";
+      setKitchenStatus("Log in to load and save one kitchen across your devices.", "guest");
+      return false;
+    }
+
+    sharedKitchenSync.userId = session.user.id;
+    kitchenStorageKey = signedInKitchenKey(session.user.id);
+    setKitchenStatus("Loading your shared kitchen…", "loading");
 
     try {
       let remote = await getJson(API.myKitchen);
-      const local = savedKitchenState();
-      const localFoods = (local.foods || []).filter(item => Number(item.quantity || 0) > 0);
+      let legacyLocal = {};
+      try { legacyLocal = JSON.parse(localStorage.getItem(legacyKitchenStorageKey) || "{}"); }
+      catch { legacyLocal = {}; }
+      const localFoods = (legacyLocal.foods || []).filter(item => Number(item.quantity || 0) > 0);
       const remoteFoods = (remote.foods || remote.inventory || []).filter(item => Number(item.quantity || 0) > 0);
       const marker = `snsKitchenMigrated:${session.user.id}`;
 
@@ -1430,49 +1477,65 @@ const SNS = (() => {
         );
         if (move) {
           remote = await postJson(API.saveKitchen, {
-            ...local,
+            ...legacyLocal,
             inventory: localFoods,
-            servings: (local.household_members || []).length || 4,
-            energy: local.tonight_effort || "Low",
-            effort: local.tonight_effort || "Low",
+            servings: (legacyLocal.household_members || []).length || 4,
+            energy: legacyLocal.tonight_effort || "Low",
+            effort: legacyLocal.tonight_effort || "Low",
             sync_source_type: "browser_migration",
             sync_source_fingerprint: `browser-v1:${session.user.id}`
           });
+        } else {
+          localStorage.setItem(kitchenDraftKey(session.user.id), JSON.stringify(legacyLocal));
         }
-        localStorage.setItem(marker, move ? "moved" : "kept-local");
+        localStorage.setItem(marker, move ? "moved" : "saved-as-draft");
       }
 
-      const sharedFoods = (remote.foods || remote.inventory || []).filter(item => Number(item.quantity || 0) > 0);
-      if (sharedFoods.length || !localFoods.length) {
-        localStorage.setItem(kitchenStorageKey, JSON.stringify(remote));
-      }
-      const status = document.querySelector("[data-save-status]");
-      if (status) status.textContent = "This kitchen is shared across your signed-in devices.";
+      localStorage.setItem(kitchenStorageKey, JSON.stringify(remote));
+      sharedKitchenSync.householdId = remote.household_id || "";
+      setKitchenStatus("Shared kitchen loaded. Changes will appear on every signed-in device.", "shared");
+      return true;
     } catch (error) {
-      const status = document.querySelector("[data-save-status]");
-      if (status) status.textContent = `Using this device's saved kitchen for now. ${error.message || "Shared sync is unavailable."}`;
+      setKitchenStatus(
+        `Shared kitchen could not load. A last-synced copy may be shown, but saving is disabled. Reload before making changes. ${error.message || "Please try again."}`,
+        "error"
+      );
+      return false;
     }
   }
 
   async function saveKitchen() {
     const payload = kitchenPayload();
     sessionStorage.setItem("snsKitchenPayload", JSON.stringify(payload));
-    storeBrowserKitchen();
     try {
+      if (window.SNS_AUTH?.configured) {
+        const session = await window.SNS_AUTH.session();
+        if (!session) {
+          setKitchenStatus("Log in before saving so this kitchen is shared across your devices.", "guest");
+          return;
+        }
+        if (sharedKitchenSync.mode !== "shared" || sharedKitchenSync.userId !== session.user.id) {
+          setKitchenStatus("Your shared kitchen is not current. Reload this page before saving.", "error");
+          return;
+        }
+      }
       const response = await postJson(API.saveKitchen, {
         ...payload,
         preferences: browserKitchenState().preferences
       });
       if (response?.storage_mode === "supabase_household") {
         localStorage.setItem(kitchenStorageKey, JSON.stringify(response));
+        localStorage.removeItem(kitchenDraftKey(sharedKitchenSync.userId));
+        sharedKitchenSync.householdId = response.household_id || sharedKitchenSync.householdId;
       }
-      const status = document.querySelector("[data-save-status]");
-      if (status) status.textContent = document.querySelector("[data-save-household]")
+      setKitchenStatus(document.querySelector("[data-save-household]")
         ? "Household preferences are saved to every signed-in device."
-        : "My Kitchen is saved to every signed-in device.";
-    } catch {
-      const status = document.querySelector("[data-save-status]");
-      if (status) status.textContent = "Saved in this browser; API connection is pending.";
+        : "My Kitchen is saved to every signed-in device.", "shared");
+    } catch (error) {
+      setKitchenStatus(
+        `My Kitchen was not saved. Your shared kitchen is unchanged. ${error.message || "Please try again."}`,
+        "error"
+      );
     }
   }
 
@@ -2165,6 +2228,16 @@ const SNS = (() => {
     document.querySelector("[data-billing-portal]")?.addEventListener("click", billingPortal);
     runRequestedKitchenAction();
     refreshRecipeChoices();
+    window.SNS_AUTH?.onChange?.((session, event) => {
+      if (event === "SIGNED_OUT") {
+        kitchenStorageKey = legacyKitchenStorageKey;
+        sharedKitchenSync.userId = "";
+        sharedKitchenSync.householdId = "";
+        setKitchenStatus("Signed out. Log in to load your shared kitchen.", "guest");
+      } else if (event === "SIGNED_IN" && session?.user?.id !== sharedKitchenSync.userId) {
+        location.reload();
+      }
+    });
   }
 
   return { init, kitchenPayload, API };

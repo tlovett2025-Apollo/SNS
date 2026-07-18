@@ -48,11 +48,20 @@ def test_accounts_use_supabase_and_migrate_the_browser_kitchen_once():
     assert "signInWithPassword" in auth
     assert "resetPasswordForEmail" in auth
     assert "persistSession: true" in auth
+    assert "callback(currentSession, event)" in auth
     assert "sb_publishable_" in config
     assert "service_role" not in config
     assert "snsAuthPrototype" not in login
     assert "snsKitchenMigrated:" in flow
     assert "Move them into your shared Stock & Stir kitchen" in flow
+    assert "snsKitchenStateV2:${userId}" in flow
+    assert "kitchenDraftKey(sharedKitchenSync.userId)" in flow
+    assert "saved-as-draft" in flow
+    assert "saving is disabled" in flow
+    assert "Saved in this browser; API connection is pending." not in flow
+    assert 'event === "SIGNED_IN"' in flow
+    assert "friendlyAuthError" in login
+    assert "Do not keep clicking it" in login
     assert 'myKitchen: endpoint("/api/MyKitchen")' in flow
     assert "Authorization: `Bearer ${token}`" in flow
     assert 'data-preference-type="allergy"' in preferences
