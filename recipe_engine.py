@@ -15,6 +15,7 @@ from culinary_opportunities import discover_opportunities, serialize_opportuniti
 from sauce_profiles import SauceIngredient, get_sauce_profile
 from recipe_validation import validate_recipe
 from math import ceil
+import sqlite3
 
 
 def _clean(value):
@@ -76,13 +77,28 @@ def _ingredient_check(item, available, excluded, protein=""):
     excluded_keys = {_key(name) for name in excluded}
     name_key = _key(item.name)
 
+    durable_substitutes = []
+    with sqlite3.connect(DB_PATH) as con:
+        durable_substitutes = [row[0] for row in con.execute(
+            """SELECT substitute.name
+               FROM ingredients original
+               JOIN substitution_rules rule
+                 ON rule.original_type='ingredient' AND rule.original_id=original.ingredient_id
+               JOIN ingredients substitute
+                 ON rule.substitute_type='ingredient' AND rule.substitute_id=substitute.ingredient_id
+               WHERE lower(original.name)=lower(?)
+               ORDER BY CASE rule.quality WHEN 'excellent' THEN 0 WHEN 'good' THEN 1 ELSE 2 END""",
+            (item.name,),
+        )]
+    substitutes = _unique([*item.substitutes, *durable_substitutes])
+
     if name_key in available_by_key and name_key not in excluded_keys:
         status = "Have"
         resolved_name = available_by_key[name_key]
     else:
         resolved_name = next((
             available_by_key[_key(substitute)]
-            for substitute in item.substitutes
+            for substitute in substitutes
             if _key(substitute) in available_by_key
             and _key(substitute) not in excluded_keys
         ), "")
@@ -109,7 +125,7 @@ def _ingredient_check(item, available, excluded, protein=""):
         "status": status,
         "required": not (item.pantry_optional or item.can_omit),
         "resolved_name": resolved_name or None,
-        "substitutions": list(item.substitutes),
+        "substitutions": substitutes,
         "omission_consequence": item.omission_consequence or None,
     }
 
@@ -171,8 +187,13 @@ def _quantity_plan(
         available = float(lot.get("quantity") or 0)
         behavior = resolve_behavior(name, "ingredient", form, db_path=DB_PATH)
         family = behavior.primary_family
-        basis = family.portion_basis if family else "flexible"
-        amount = family.portion_per_standard if family else 1.0
+        attributes = behavior.attributes or {}
+        basis = attributes.get("quantity_basis") or (family.portion_basis if family else "flexible")
+        try:
+            amount = float(attributes.get("quantity_per_standard") or (family.portion_per_standard if family else 1.0))
+        except (TypeError, ValueError):
+            amount = family.portion_per_standard if family else 1.0
+        quantity_label = attributes.get("quantity_label") or (family.portion_label if family else "")
         role = roles.get(key, "")
         # Supporting proteins flavor or stretch the main item. They must not
         # silently become another full entree merely because their KO normally
@@ -198,7 +219,7 @@ def _quantity_plan(
                 )
         elif basis == "pieces":
             pieces = max(1, ceil(effective * amount))
-            label = family.portion_label
+            label = quantity_label or "piece"
             plan[key] = {
                 "display": f"{pieces} {label}{'' if pieces == 1 else 's'}",
                 "planned": pieces, "available": available,
@@ -214,6 +235,14 @@ def _quantity_plan(
         elif basis == "prepared_cups":
             cups = ceil(effective * amount * 4) / 4.0
             plan[key] = {"display": f"about {cups:g} cup{'s' if cups != 1 else ''}"}
+        elif basis == "whole_count":
+            pieces = max(1, ceil(effective * amount))
+            label = quantity_label or "piece"
+            plan[key] = {
+                "display": f"{pieces} {label}{'' if pieces == 1 else 's'}",
+                "planned": pieces, "available": available,
+                "shortfall": max(0, pieces - available) if available else 0,
+            }
         elif basis == "weight_oz":
             pounds = _quarter_pound_up(effective * amount)
             plan[key] = {"display": f"{pounds:g} lb", "planned": pounds, "available": available}
@@ -283,29 +312,64 @@ def _ko_combination_fit(component_specs):
     moisture_count = sum("moisture-source" in profile.culinary_functions for profile in profiles)
     if moisture_count > 2:
         score -= (moisture_count - 2) * 3
-    return score, reasons
+    family_codes = {profile.code for profile in profiles}
+    if family_codes:
+        placeholders = ",".join("?" for _ in family_codes)
+        params = [*family_codes, *family_codes]
+        with sqlite3.connect(DB_PATH) as con:
+            durable = con.execute(
+                f"""SELECT relationship_type, rule_text
+                    FROM ko_relationship_rules relationship
+                    JOIN ko_behavior_families source ON source.family_id=relationship.family_id
+                    WHERE source.family_code IN ({placeholders})
+                      AND relationship.target_family_code IN ({placeholders})
+                      AND relationship.verified=1""",
+                params,
+            ).fetchall()
+            compatibility = con.execute(
+                f"""SELECT compatibility.rating, compatibility.reason
+                    FROM compatibility_rules compatibility
+                    JOIN ko_behavior_families source
+                      ON compatibility.component_a_type='behavior_family'
+                     AND source.family_id=compatibility.component_a_id
+                    JOIN ko_behavior_families target
+                      ON compatibility.component_b_type='behavior_family'
+                     AND target.family_id=compatibility.component_b_id
+                    WHERE source.family_code IN ({placeholders})
+                      AND target.family_code IN ({placeholders})
+                      AND compatibility.active=1""",
+                params,
+            ).fetchall()
+        if durable:
+            score += min(8, len(durable) * 2)
+            reasons.extend(rule_text.removeprefix("[SNS seed] ") for _, rule_text in durable)
+        if compatibility:
+            rating_points = {"excellent": 4, "good": 2, "poor": -4}
+            score += sum(rating_points.get(_key(rating), 0) for rating, _ in compatibility)
+            reasons.extend(reason.removeprefix("[SNS seed] ") for _, reason in compatibility if reason)
+    return score, _unique(reasons)
 
 
 def _sauce_for_cuisine(cuisine):
     k = _key(cuisine)
     if "italian" in k:
-        return "Tomato Sauce or Cream Sauce"
+        return "Italian tomato sauce"
     if "mexican" in k:
-        return "Taco Sauce"
+        return "Mexican taco sauce"
     if "comfort" in k or "american" in k:
         return "simple comfort pan sauce"
     if "mediterranean" in k:
-        return "Lemon Herb Sauce"
+        return "Mediterranean lemon herb sauce"
     if "bbq" in k:
         return "BBQ Sauce"
     if "cajun" in k:
         return "Cajun pan sauce"
     if "kid" in k:
-        return "Favorite dip"
+        return "mild favorite sauce"
     if "chinese" in k:
         return "simple stir-fry sauce"
     if "indian" in k:
-        return "curry sauce"
+        return "Indian curry sauce"
     return "simple sauce"
 
 
@@ -357,11 +421,10 @@ def _method_is_eligible(method, available, foundation, equipment):
     if method == "skillet":
         return True
     if method == "soup":
-        has_liquid_path = _inventory_has_ko(available, culinary_functions=("supplies-liquid",))
-        inherently_stewable = _inventory_has_ko(
-            available, physical_traits=("collagen-rich",), relationship_traits=("wet-cook",)
-        )
-        return has_liquid_path or inherently_stewable
+        # Water is a legitimate soup liquid, and broth can be an explicit
+        # shopping need. Ingredient KOs—not current broth ownership—decide
+        # whether the selected components have a trained soup route.
+        return True
     if method == "braise":
         return _inventory_has_ko(
             available, physical_traits=("collagen-rich",), relationship_traits=("wet-cook",)
@@ -529,7 +592,12 @@ def generate_candidates(
         is_soup = method["cooking_method"] == "soup"
         is_braise = method["cooking_method"] in {"braise", "oven_braise"}
         is_grill = method["cooking_method"] == "grill"
-        method_sauce = "rustic broth soup" if is_soup else "simple sauce" if is_grill else sauce
+        method_sauce = (
+            "rustic broth soup" if is_soup
+            else "simple sauce" if is_grill
+            else "handheld spread or sauce" if method["cooking_method"] == "handheld"
+            else sauce
+        )
         method_ingredients = (
             _soup_ingredients(method_resources)
             if is_soup
@@ -540,7 +608,8 @@ def generate_candidates(
             )
         )
         fallback_requirements = (
-            _cuisine_requirements(cuisine) if not method_ingredients else []
+            [] if method["cooking_method"] == "handheld"
+            else _cuisine_requirements(cuisine) if not method_ingredients else []
         )
         requested_names = [*fallback_requirements, *extras, *(requested_items or [])]
         known_requirement_keys = {_key(item.name) for item in method_ingredients}

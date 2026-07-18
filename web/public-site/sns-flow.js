@@ -851,30 +851,8 @@ const SNS = (() => {
     });
   }
 
-  function fallbackRecipes(payload) {
-    const names = payload.inventory.map(i => i.name.toLowerCase());
-    const has = (...parts) => parts.every(p => names.some(n => n.includes(p)));
-    const recipes = [];
-    if (has("chicken") && has("rice")) recipes.push({
-      id:"chicken-rice-supper", title:"Comforting One-Pot Chicken & Rice",
-      minutes:35, effort:"Low", match:"Strong match",
-      summary:"A calm one-pan meal built from familiar pantry food.",
-      meal_shape:"plate", serving_temperature:"hot", preparation_mode:"cooked",
-      capability_status:"prototype"
-    });
-    if (has("beef") && (has("potato") || has("carrot"))) recipes.push({
-      id:"beef-stew", title:"Beef, Potato & Carrot Stew",
-      minutes:90, effort:"Low attention", match:"Strong match",
-      summary:"A covered gentle simmer with a fork-tender finish.",
-      meal_shape:"stew", serving_temperature:"hot", preparation_mode:"cooked",
-      capability_status:"prototype"
-    });
-    recipes.push(
-      {id:"pantry-soup", title:"Use-What-You-Have Pantry Soup", minutes:40, effort:"Flexible", match:"Good match", summary:"A forgiving soup shaped around the foods already selected."},
-      {id:"kitchen-supper", title:"My Kitchen One-Pot Supper", minutes:30, effort:"Medium", match:"Good match", summary:"Compatible ingredients brought together in stages in one vessel."},
-      {id:"simple-plate", title:"Simple Protein, Vegetable & Foundation Plate", minutes:25, effort:"Low", match:"Practical match", summary:"Cook the components simply and finish them together."}
-    );
-    return recipes.slice(0, 6);
+  function recipeServiceError(error) {
+    return escapeHtml(error?.message || "The cooking service did not return a recipe.");
   }
 
   async function saveKitchen() {
@@ -896,15 +874,16 @@ const SNS = (() => {
   async function generateRecipeList() {
     const payload = kitchenPayload();
     sessionStorage.setItem("snsKitchenPayload", JSON.stringify(payload));
-    let recipes;
     try {
       const response = await postJson(API.getRecipeList, payload);
-      recipes = response.candidates || response.recipes || response;
-    } catch {
-      recipes = fallbackRecipes(payload);
+      const recipes = response.candidates || response.recipes || response;
+      if (!Array.isArray(recipes) || !recipes.length) throw new Error("No trained meal matched My Kitchen yet.");
+      sessionStorage.setItem("snsRecipeChoices", JSON.stringify(recipes));
+      location.href = "choose-recipe.html";
+    } catch (error) {
+      const status = document.querySelector("[data-save-status]");
+      if (status) status.textContent = error.message || "Meal ideas could not load. Please try again.";
     }
-    sessionStorage.setItem("snsRecipeChoices", JSON.stringify(recipes));
-    location.href = "choose-recipe.html";
   }
 
   async function refreshRecipeChoices() {
@@ -917,15 +896,22 @@ const SNS = (() => {
     if (holder) holder.innerHTML = '<p class="recipe-loading">Finding genuinely different ideas from My Kitchen…</p>';
     const payload = kitchenPayload();
     sessionStorage.setItem("snsKitchenPayload", JSON.stringify(payload));
-    let choices;
     try {
       const response = await postJson(API.getRecipeList, payload);
-      choices = response.candidates || response.recipes || response;
-    } catch {
-      choices = fallbackRecipes(payload);
+      const choices = response.candidates || response.recipes || response;
+      if (!Array.isArray(choices) || !choices.length) throw new Error("No trained meal matched My Kitchen yet.");
+      sessionStorage.setItem("snsRecipeChoices", JSON.stringify(choices));
+      renderRecipeChoices();
+    } catch (error) {
+      sessionStorage.removeItem("snsRecipeChoices");
+      if (holder) holder.innerHTML = `
+        <div class="recipe-service-error" role="alert">
+          <strong>Meal ideas could not load.</strong>
+          <p>${recipeServiceError(error)}</p>
+          <button class="btn btn-primary" type="button" data-retry-recipes>Try again</button>
+        </div>`;
+      holder?.querySelector("[data-retry-recipes]")?.addEventListener("click", refreshRecipeChoices);
     }
-    sessionStorage.setItem("snsRecipeChoices", JSON.stringify(choices));
-    renderRecipeChoices();
   }
 
   function openMealBuilder() {
@@ -938,26 +924,6 @@ const SNS = (() => {
   function openSignatureRecipes() {
     location.href = "signature-recipes.html";
   }
-
-  const fallbackBuilderOptions = {
-    proteins: ["Chicken breast", "Ground beef", "Eggs", "Canned chicken", "White beans"].map(name => ({name})),
-    produce: ["Onions", "Carrots", "Mushrooms", "Spinach", "Tomatoes", "Broccoli", "Apples"].map(name => ({name, kind: name === "Apples" ? "fruit" : "vegetable"})),
-    foundations: ["White rice", "Pasta", "Bread", "Flour tortillas", "Potatoes"].map(name => ({name})),
-    extras: ["Mayonnaise", "Salsa", "Mustard", "BBQ sauce", "Hot sauce", "Soy sauce", "Sour cream", "Cheddar cheese", "Chicken broth", "Tomato sauce"].map(name => ({name})),
-    cuisines: ["Comfort Food", "American", "Italian", "Mexican", "Mediterranean"],
-    methods: [
-      {id:"skillet", label:"Stovetop", description:"One or more stovetop vessels; meal structure decides whether components join or stay separate."},
-      {id:"soup", label:"Soup or Stew", description:"A liquid-led one-vessel meal; SNS chooses the suitable owned pot."},
-      {id:"casserole", label:"Oven Bake", description:"An oven-baked meal assembled in one baking dish."},
-      {id:"handheld", label:"Handheld", description:"Components cooked as needed, then assembled with bread or a wrap."},
-      {id:"grill", label:"Grill", description:"Direct and indirect grill zones with KO-specific doneness, flare-up, basket, and resting guidance."}
-    ],
-    meal_structures: [
-      {id:"integrated", label:"Cooked Together", description:"A cohesive one-vessel meal whose compatible ingredients join in stages."},
-      {id:"composed_plate", label:"Composed Plate", description:"Restaurant-style separate components."},
-      {id:"layered_bowl", label:"Layered Bowl", description:"Components arranged over a foundation."}
-    ]
-  };
 
   function ownedKitchenNames(kitchen) {
     return new Set((kitchen.inventory || []).map(item => String(item.name || "").toLowerCase()));
@@ -984,8 +950,10 @@ const SNS = (() => {
     let options;
     try {
       options = await postJson(API.getMealBuilderOptions, kitchen);
-    } catch {
-      options = fallbackBuilderOptions;
+    } catch (error) {
+      const loading = form.querySelector("[data-builder-loading]");
+      if (loading) loading.textContent = `The meal builder could not load: ${error.message || "please try again."}`;
+      return;
     }
 
     const proteinHolder = form.querySelector("[data-protein-options]");
@@ -1031,16 +999,16 @@ const SNS = (() => {
       `<option value="${escapeHtml(item.name)}">${escapeHtml(choiceLabel(item, owned))}</option>`
     ).join("");
 
-    form.querySelector("[data-builder-cuisine]").innerHTML = (options.cuisines || fallbackBuilderOptions.cuisines).map(name =>
+    form.querySelector("[data-builder-cuisine]").innerHTML = (options.cuisines || []).map(name =>
       `<option value="${escapeHtml(name)}"${name === "Comfort Food" ? " selected" : ""}>${escapeHtml(name)}</option>`
     ).join("");
 
-    form.querySelector("[data-method-options]").innerHTML = (options.methods || fallbackBuilderOptions.methods).map((item, index) => `
+    form.querySelector("[data-method-options]").innerHTML = (options.methods || []).map((item, index) => `
       <label class="builder-choice-card${item.available === false ? " unavailable" : ""}">
         <input type="radio" name="cooking-method" value="${escapeHtml(item.id)}"${index === 0 ? " checked" : ""}${item.available === false ? " disabled" : ""}>
         <span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.note || item.description)}</small></span>
       </label>`).join("");
-    form.querySelector("[data-structure-options]").innerHTML = (options.meal_structures || fallbackBuilderOptions.meal_structures).map((item, index) => `
+    form.querySelector("[data-structure-options]").innerHTML = (options.meal_structures || []).map((item, index) => `
       <label class="builder-choice-card">
         <input type="radio" name="meal-structure" value="${escapeHtml(item.id)}"${index === 0 ? " checked" : ""}>
         <span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.description)}</small></span>
@@ -1073,7 +1041,7 @@ const SNS = (() => {
       input.addEventListener("change", syncStructureGuidance)
     );
 
-    const produce = options.produce || fallbackBuilderOptions.produce;
+    const produce = options.produce || [];
     const produceHolder = form.querySelector("[data-produce-options]");
     produceHolder.innerHTML = produce.map(item => {
       const isOwned = item.owned ?? owned.has(String(item.name).toLowerCase());
@@ -1089,7 +1057,7 @@ const SNS = (() => {
     produceHolder.addEventListener("change", syncStructureGuidance);
     syncStructureGuidance();
 
-    const extras = options.extras || fallbackBuilderOptions.extras;
+    const extras = options.extras || [];
     const extrasHolder = form.querySelector("[data-extra-options]");
     extrasHolder.innerHTML = extras.map(item => {
       const isOwned = item.owned ?? owned.has(String(item.name).toLowerCase());
@@ -1226,7 +1194,20 @@ const SNS = (() => {
       </article>`).join("");
 
     holder.querySelectorAll("[data-recipe-id]").forEach(button => {
-      button.addEventListener("click", () => requestRecipe(button.dataset.recipeId));
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await requestRecipe(button.dataset.recipeId);
+        } catch (error) {
+          holder.querySelector("[data-recipe-request-error]")?.remove();
+          holder.insertAdjacentHTML("afterbegin", `
+            <div class="recipe-service-error" role="alert" data-recipe-request-error>
+              <strong>This recipe could not load.</strong>
+              <p>${recipeServiceError(error)} Please try again.</p>
+            </div>`);
+          button.disabled = false;
+        }
+      });
     });
   }
 
@@ -1234,27 +1215,9 @@ const SNS = (() => {
     const kitchen = JSON.parse(sessionStorage.getItem("snsKitchenPayload") || "{}");
     const request = { candidate_id: recipeId, recipe_id: recipeId, kitchen };
     sessionStorage.setItem("snsRecipeRequest", JSON.stringify(request));
-    let recipe;
     const choices = JSON.parse(sessionStorage.getItem("snsRecipeChoices") || "[]");
     const selectedChoice = choices.find(r => (r.candidate_id || r.id) === recipeId) || {};
-    try {
-      recipe = await postJson(API.getRecipe, request);
-    } catch {
-      const choice = selectedChoice;
-      recipe = {
-        id: recipeId,
-        title: choice.title || "Stock & Stir Recipe",
-        summary: choice.summary || "A practical meal built from My Kitchen.",
-        ingredients: (kitchen.inventory || []).slice(0, 8).map(item => `${item.name} — ${item.quantity} ${item.unit}`),
-        steps: [
-          "Gather the selected ingredients and the equipment you need.",
-          "Prep the protein and vegetables before the main cooking begins.",
-          "Start anything that needs extra cooking time first, then add quick-cooking ingredients closer to the end.",
-          "Taste, adjust the seasoning, and serve when everything is safely cooked and ready."
-        ],
-        total_minutes: choice.minutes || 35
-      };
-    }
+    const recipe = await postJson(API.getRecipe, request);
     recordMealHistory({...selectedChoice, ...recipe});
     sessionStorage.setItem("snsGeneratedRecipe", JSON.stringify(recipe));
     location.href = "recipe.html";

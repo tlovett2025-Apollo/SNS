@@ -750,6 +750,152 @@ def grill_method(
     )
 
 
+def casserole_method(
+    forms, prep, cook, active, handling, instruction, outcome, cue,
+    failure, recovery, verification_required=False,
+):
+    return method(
+        "casserole", forms, "covered or uncovered baking dish",
+        "cohesive oven-baked meal", prep, cook, active, .25, "oven", "middle",
+        handling, instruction, outcome, cue, failure, recovery, "good",
+        verification_required=verification_required,
+    )
+
+
+_add_family_method("poultry_piece", casserole_method(
+    ("fresh raw", "frozen raw"), 4, 30, 5,
+    "Thaw {name} when frozen; do not rinse it. Pat dry and cut thick pieces to an even casserole size.",
+    "Bake {name} in the assembled dish until the thickest piece is safely cooked.",
+    "Juicy chicken integrated with the sauce and vegetables.",
+    "The thickest edible portion reaches 165°F.",
+    "Large uneven pieces can remain raw while the surrounding casserole is hot.",
+    "Cover to retain moisture and continue baking until every thick piece reaches 165°F.", True,
+))
+_add_family_method("ground_meat", casserole_method(
+    ("fresh raw", "frozen raw"), 4, 30, 6,
+    "Thaw {name} when frozen and break it into small, evenly distributed pieces.",
+    "Bake {name} in the assembled dish, stirring once when practical to eliminate large raw clumps.",
+    "Evenly cooked crumbles distributed through the casserole.",
+    "No pink ground meat remains; poultry reaches 165°F and beef reaches 160°F.",
+    "Dense clumps may remain undercooked in the center.",
+    "Break up clumps and continue baking to the temperature required for the named meat.", True,
+))
+_add_family_method("sausage", casserole_method(
+    ("fresh raw", "frozen raw"), 3, 30, 4,
+    "Thaw {name} when frozen. Leave links whole or cut them into equal thick pieces for the casserole.",
+    "Bake {name} in the assembled dish until safely cooked through.",
+    "Juicy sausage that seasons the surrounding casserole.",
+    "Poultry sausage reaches 165°F; pork or beef sausage reaches 160°F.",
+    "Thick links can remain raw in the center.",
+    "Cover and continue baking until the center reaches the required temperature.", True,
+))
+_add_family_method("fish_fillet", casserole_method(
+    ("fresh raw", "frozen raw"), 3, 20, 3,
+    "Thaw {name} when frozen, pat dry, and arrange it in an even layer.",
+    "Bake {name} with the assembled casserole only until the fish is opaque and tender.",
+    "Moist flakes in a cohesive baked dish.",
+    "The thickest portion reaches 145°F and flakes easily.",
+    "A long casserole bake dries delicate fish.",
+    "Add fish later in the bake when other components need more time.", True,
+))
+_add_family_method("pork_cut", casserole_method(
+    ("fresh raw", "frozen raw"), 4, 25, 4,
+    "Thaw {name} when frozen, pat dry, and make the portions even.",
+    "Bake {name} in the assembled dish until safely cooked without prolonged dry heat.",
+    "Tender pork surrounded by the finished casserole.",
+    "The center reaches 145°F and rests for at least 3 minutes.",
+    "Thin pork dries before dense vegetables soften.",
+    "Cut vegetables smaller, cover the dish, and stop cooking the pork at temperature.", True,
+))
+_add_family_method("plant_protein", casserole_method(
+    ("fresh", "refrigerated", "frozen"), 3, 25, 3,
+    "Drain {name}, pat it dry, and cut it into even bite-size pieces.",
+    "Bake {name} in the assembled dish until hot and lightly firm at the edges.",
+    "Seasoned pieces integrated throughout the casserole.",
+    "The center is steaming hot and the exterior has taken on the sauce.",
+    "Excess moisture can make the casserole watery.",
+    "Drain excess liquid and finish uncovered briefly.",
+))
+
+for _family_code in (
+    "aromatic_slow", "aromatic_fast", "sturdy_root", "tender_watery",
+    "tomato", "mushroom", "quick_green", "cruciferous", "pepper",
+    "winter_squash", "cabbage", "okra", "sweet_kernel",
+):
+    _add_family_method(_family_code, casserole_method(
+        ("fresh", "fresh raw", "frozen", "canned"), 4, 25, 4,
+        "Prepare {name} in even bite-size pieces; drain or thaw it when its form requires it.",
+        "Bake {name} in the assembled dish until tender and hot while it still has an intentional texture.",
+        "Tender vegetables integrated with the sauce and other components.",
+        "The thickest pieces are tender and the dish is bubbling at the edges.",
+        "Uneven pieces cook at different rates and excess moisture can make the casserole watery.",
+        "Cut firm pieces smaller, uncover to evaporate moisture, and continue until tender.",
+    ))
+
+
+def soup_protein_method(
+    family_code, forms, prep, cook, handling, instruction, outcome, cue,
+    failure, recovery, verification_required=False,
+):
+    _add_family_method(family_code, method(
+        "simmer", forms, "gentle soup simmer", "seasoned one-pot soup",
+        prep, cook, min(5, prep + 2), .25, "burner", "middle", handling,
+        instruction, outcome, cue, failure, recovery, "good",
+        verification_required=verification_required,
+    ))
+
+
+soup_protein_method(
+    "poultry_piece", ("fresh raw", "frozen raw"), 4, 30,
+    "Thaw {name} when frozen; do not rinse it. Cut it into even soup-size pieces when appropriate.",
+    "Gently simmer {name} in the soup until safely cooked and tender.",
+    "Juicy fully cooked chicken in the broth.", "The thickest piece reaches 165°F.",
+    "A hard boil makes poultry tough while thick pieces may remain raw.",
+    "Lower to a simmer and continue until every thick piece reaches 165°F.", True,
+)
+soup_protein_method(
+    "ground_meat", ("fresh raw", "frozen raw"), 3, 20,
+    "Thaw {name} when frozen and break it into small crumbles.",
+    "Brown {name} in the soup pot, then simmer it in the broth until safely cooked.",
+    "Small savory crumbles throughout the soup.",
+    "No pink remains; poultry reaches 165°F and beef reaches 160°F.",
+    "Large clumps can remain raw inside.", "Break up clumps and continue simmering to temperature.", True,
+)
+soup_protein_method(
+    "sausage", ("fresh raw", "frozen raw"), 3, 20,
+    "Thaw {name} when frozen and leave links whole for an accurate center-temperature check.",
+    "Gently simmer {name} in the soup until safely cooked, then slice if desired.",
+    "Juicy sausage that seasons the broth.",
+    "Poultry sausage reaches 165°F; pork or beef sausage reaches 160°F.",
+    "A hard boil can split casings while the center remains undercooked.",
+    "Lower the heat and continue gently to the required temperature.", True,
+)
+for _code in ("ready_protein", "plant_protein"):
+    soup_protein_method(
+        _code, ("cooked", "canned", "ready to eat", "refrigerated", "fresh"), 2, 8,
+        "Drain, portion, or cut {name} into soup-size pieces as needed.",
+        "Add {name} near the end and simmer gently only until steaming hot.",
+        "Hot, moist pieces that retain their intended texture.", "Steaming hot throughout.",
+        "Prolonged simmering can make a ready ingredient dry or mushy.",
+        "Add it later or remove the pot from heat once hot.",
+    )
+soup_protein_method(
+    "fish_fillet", ("fresh raw", "frozen raw"), 3, 8,
+    "Thaw {name} when frozen, pat dry, and cut it into large even pieces.",
+    "Slip {name} into the soup near the finish and poach gently without stirring hard.",
+    "Moist tender flakes in the broth.", "The thickest piece reaches 145°F and flakes easily.",
+    "A long or hard simmer breaks fish apart and dries it.",
+    "Lower the heat and remove the pot promptly once the fish is done.", True,
+)
+soup_protein_method(
+    "shellfish_quick", ("fresh raw", "frozen raw"), 3, 5,
+    "Thaw {name} when frozen, peel or clean it as needed, and pat it dry.",
+    "Add {name} during the final minutes and poach gently until opaque.",
+    "Juicy opaque shellfish.", "Opaque and pearly throughout; 145°F when checked.",
+    "Shellfish becomes rubbery with prolonged simmering.", "Remove from heat immediately when opaque.", True,
+)
+
+
 _add_family_method("ground_meat", grill_method(
     ("fresh raw", "frozen raw"), 5, 10, 7, "middle",
     "Thaw {name}, keep it cold, and shape even patties without compacting them heavily.",
@@ -850,6 +996,21 @@ _add_family_method("tomato", grill_method(
     "Thin pieces collapse through the grates and prolonged heat turns them into sauce.",
     "Use a grill basket and remove promptly; use collapsed pieces deliberately as a smoky sauce.",
 ))
+
+# Handheld meals still use trained component methods: raw proteins cook in a
+# skillet, ready proteins reheat, and produce that belongs fresh in a sandwich
+# or wrap publishes a no-cook assembly activity.
+for _family_code in ("tomato", "leafy_tender", "pepper"):
+    _add_family_method(_family_code, method(
+        "assemble", ("fresh", "fresh raw", "refrigerated"), "no-cook counter",
+        "fresh handheld filling", 3, 0, 3, .8, "counter", "finish",
+        "Wash and dry {name}; trim it and cut it into practical handheld pieces.",
+        "Keep {name} fresh and add it during assembly so it retains its intended texture.",
+        "Fresh, tidy pieces that fit the bread or wrap.",
+        "The pieces are dry enough not to soak the wrapper and small enough for an even bite.",
+        "Wet or oversized pieces make a handheld difficult to eat.",
+        "Drain or blot excess moisture and cut the pieces smaller.", "poor",
+    ))
 
 FAMILY_LIBRARY.update({
     "citrus_finish": BehaviorFamily(
@@ -1264,6 +1425,15 @@ FAMILY_LIBRARY.update({
     ),
 })
 
+soup_protein_method(
+    "ready_cured_meat", ("cooked", "ready to eat", "refrigerated"), 2, 8,
+    "Cut {name} into soup-size pieces and account for its salt before seasoning the broth.",
+    "Add {name} near the end and simmer gently only until steaming hot.",
+    "Hot savory pieces that retain their texture.", "Steaming hot throughout.",
+    "A long simmer can make cured meat dry and oversalt the broth.",
+    "Add it later, dilute the broth if needed, and taste before salting.",
+)
+
 
 def _set_portion(family_code, basis, amount, label, rounding="practical", stretchable=False):
     FAMILY_LIBRARY[family_code] = replace(
@@ -1299,6 +1469,9 @@ for _code in (
     _set_portion(_code, "prepared_cups", .5, "cup", "quarter_cup_up", True)
 for _code in ("aromatic_slow", "pepper"):
     _set_portion(_code, "prepared_cups", .25, "cup", "quarter_cup_up", True)
+_set_portion("aromatic_fast", "prepared_cups", .125, "cup", "quarter_cup_up", True)
+_set_portion("fresh_herb", "prepared_cups", .0625, "cup", "tablespoon_up", True)
+_set_portion("citrus_finish", "whole_count", .25, "whole fruit", "whole_up", True)
 
 
 def _set_sensory(family_code, flavors=(), functions=(), texture="", color=""):
@@ -1608,7 +1781,7 @@ def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> Res
             "simmer", "braise", "saute", "saute_steam", "bloom", "wilt",
             "brief_heat", "reheat", "assemble",
         }
-        casserole_methods = {"roast", "bake", "reheat", "assemble", "simmer"}
+        casserole_methods = {"casserole", "roast", "bake", "reheat", "assemble"}
         oven_braise_methods = {
             "oven_braise", "roast", "bake", "reheat", "assemble", "simmer",
             "saute", "saute_steam", "bloom", "wilt", "brief_heat",
@@ -1618,7 +1791,14 @@ def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> Res
             "brief_heat", "reheat", "assemble", "skillet",
         }
         grill_side_methods = {"simmer", "boil", "warm", "reheat", "saute", "assemble"}
-        for candidate in primary.methods:
+        handheld_methods = {
+            "skillet", "saute", "saute_steam", "brief_heat", "reheat",
+            "warm", "assemble", "wilt",
+        }
+        method_candidates = list(primary.methods)
+        if strategy_key == "handheld":
+            method_candidates.sort(key=lambda item: item.method != "assemble")
+        for candidate in method_candidates:
             form_matches = not form_key or not candidate.forms or any(value in form_key for value in candidate.forms)
             strategy_matches = not strategy_key or candidate.method == strategy_key or (
                 strategy_key == "skillet" and candidate.method in skillet_methods
@@ -1632,6 +1812,8 @@ def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> Res
                 strategy_key == "braise" and candidate.method in braise_methods
             ) or (
                 strategy_key == "grill" and role == "foundation" and candidate.method in grill_side_methods
+            ) or (
+                strategy_key == "handheld" and candidate.method in handheld_methods
             )
             if form_matches and strategy_matches:
                 selected = candidate
@@ -1773,7 +1955,10 @@ def seed_behavior_memberships(con):
             )
 
     attribute_rows = {
-        "garlic": {"flavor_identity": "garlic"},
+        "garlic": {
+            "flavor_identity": "garlic", "quantity_basis": "pieces",
+            "quantity_per_standard": "0.5", "quantity_label": "clove",
+        },
         "garlic powder": {"flavor_identity": "garlic"},
         "onions": {"flavor_identity": "onion"},
         "onion powder": {"flavor_identity": "onion"},
@@ -1788,8 +1973,46 @@ def seed_behavior_memberships(con):
         "italian seasoning": {"cuisine_affinity": "Italian"},
         "chili powder": {"cuisine_affinity": "Mexican"},
         "cumin": {"cuisine_affinity": "Mexican"},
-        "lemons": {"cuisine_affinity": "Mediterranean"},
-        "limes": {"cuisine_affinity": "Mexican,Mediterranean"},
+        "lemons": {
+            "cuisine_affinity": "Mediterranean", "quantity_basis": "whole_count",
+            "quantity_per_standard": "0.25", "quantity_label": "lemon",
+        },
+        "limes": {
+            "cuisine_affinity": "Mexican,Mediterranean", "quantity_basis": "whole_count",
+            "quantity_per_standard": "0.25", "quantity_label": "lime",
+        },
+        "scallions": {
+            "quantity_basis": "prepared_cups", "quantity_per_standard": "0.125",
+            "quantity_label": "cup",
+        },
+        "jalapenos": {
+            "quantity_basis": "whole_count", "quantity_per_standard": "0.125",
+            "quantity_label": "jalapeno",
+        },
+        "serranos": {
+            "quantity_basis": "whole_count", "quantity_per_standard": "0.125",
+            "quantity_label": "serrano",
+        },
+        "poblanos": {
+            "quantity_basis": "whole_count", "quantity_per_standard": "0.25",
+            "quantity_label": "poblano",
+        },
+        "avocado": {
+            "quantity_basis": "whole_count", "quantity_per_standard": "0.25",
+            "quantity_label": "avocado",
+        },
+        "black olives": {
+            "quantity_basis": "prepared_cups", "quantity_per_standard": "0.125",
+            "quantity_label": "cup",
+        },
+        "green olives": {
+            "quantity_basis": "prepared_cups", "quantity_per_standard": "0.125",
+            "quantity_label": "cup",
+        },
+        "pickles": {
+            "quantity_basis": "prepared_cups", "quantity_per_standard": "0.125",
+            "quantity_label": "cup",
+        },
         "olive oil": {"cuisine_affinity": "Mediterranean"},
         "greek yogurt": {"cuisine_affinity": "Mediterranean"},
         "bbq sauce": {"cuisine_affinity": "BBQ"},
@@ -1808,4 +2031,64 @@ def seed_behavior_memberships(con):
                      notes=excluded.notes,
                      verified=excluded.verified""",
                 (ingredient_id, attribute_name, attribute_value),
+            )
+
+    # These rows are the first durable, queryable expression of cross-KO
+    # knowledge.  The marker makes schema refreshes idempotent without touching
+    # future hand-trained rules.
+    con.execute("DELETE FROM ko_relationship_rules WHERE rule_text LIKE '[SNS seed] %'")
+    relationship_rows = (
+        ("tough_meat", "balances_with", "citrus_finish", "[SNS seed] Bright acidity balances a rich long-cooked protein."),
+        ("tough_meat", "supported_by", "aromatic_slow", "[SNS seed] Slow aromatics reinforce a braise without competing with it."),
+        ("poultry_piece", "supported_by", "aromatic_slow", "[SNS seed] Aromatics support poultry across skillet, soup, and bake routes."),
+        ("ground_meat", "supported_by", "tomato", "[SNS seed] Tomato supplies moisture and acidity for browned ground meat."),
+        ("sausage", "balances_with", "cabbage", "[SNS seed] Cabbage provides a sturdy, less-rich counterpoint to sausage."),
+        ("protein", "completed_by", "prepared_legume", "[SNS seed] Legumes can stretch protein and provide meal structure."),
+        ("protein", "completed_by", "white_rice", "[SNS seed] Rice can carry sauce and complete a composed or layered meal."),
+        ("protein", "completed_by", "pasta", "[SNS seed] Pasta can carry sauce and complete a composed or layered meal."),
+    )
+    for source, relationship, target, rule_text in relationship_rows:
+        family_id = family_ids.get(source)
+        if family_id:
+            con.execute(
+                """INSERT INTO ko_relationship_rules
+                   (family_id,relationship_type,target_family_code,rule_text,priority,verified)
+                   VALUES (?,?,?,?,100,1)""",
+                (family_id, relationship, target, rule_text),
+            )
+
+    con.execute("DELETE FROM compatibility_rules WHERE reason LIKE '[SNS seed] %'")
+    compatibility_rows = (
+        ("tough_meat", "citrus_finish", "excellent", "[SNS seed] Brightness balances rendered richness."),
+        ("ground_meat", "tomato", "excellent", "[SNS seed] Moisture and acidity support browned meat."),
+        ("poultry_piece", "aromatic_slow", "good", "[SNS seed] Aromatics build a flexible savory base."),
+        ("sausage", "cabbage", "excellent", "[SNS seed] The vegetable tempers richness and holds its texture."),
+        ("fish_fillet", "citrus_finish", "excellent", "[SNS seed] Citrus adds brightness without extending delicate cooking."),
+    )
+    for source, target, rating, reason in compatibility_rows:
+        source_id, target_id = family_ids.get(source), family_ids.get(target)
+        if source_id and target_id:
+            con.execute(
+                """INSERT INTO compatibility_rules
+                   (component_a_type,component_a_id,component_b_type,component_b_id,rating,reason,active)
+                   VALUES ('behavior_family',?,'behavior_family',?,?,?,1)""",
+                (source_id, target_id, rating, reason),
+            )
+
+    con.execute("DELETE FROM substitution_rules WHERE adjustment_notes LIKE '[SNS seed] %'")
+    substitution_rows = (
+        ("chicken broth", "vegetable broth", "good", "[SNS seed] Use the same volume; the result will be less poultry-forward."),
+        ("beef broth", "chicken broth", "good", "[SNS seed] Use the same volume; the result will be lighter."),
+        ("butter", "olive oil", "good", "[SNS seed] Use the same volume; expect less dairy richness."),
+        ("sour cream", "greek yogurt", "excellent", "[SNS seed] Stir in off heat to reduce the chance of splitting."),
+        ("tomato sauce", "diced tomatoes", "good", "[SNS seed] Use the same volume and simmer longer for a smoother sauce."),
+    )
+    for original, substitute, quality, note in substitution_rows:
+        original_id, substitute_id = ingredient_ids.get(original), ingredient_ids.get(substitute)
+        if original_id and substitute_id:
+            con.execute(
+                """INSERT INTO substitution_rules
+                   (original_type,original_id,substitute_type,substitute_id,quality,adjustment_notes)
+                   VALUES ('ingredient',?,'ingredient',?,?,?)""",
+                (original_id, substitute_id, quality, note),
             )

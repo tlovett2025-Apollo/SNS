@@ -102,6 +102,7 @@ def state_candidate(state):
         "Low", "Budget", 45, 4, 1,
         vegetable_names=["Swiss chard"],
         protein_state=state,
+        requested_method="skillet",
     )[0]
 
 
@@ -217,6 +218,7 @@ def test_microwave_thaw_launches_first_and_prep_overlaps_it():
         vegetable_names=["Onions", "Carrots"],
         protein_state="Frozen Raw",
         available_equipment=["Microwave"],
+        requested_method="skillet",
     )[0]
     schedule = build_kitchen_lane_schedule(candidate)
     by_id = {item.activity.activity_id: item for item in schedule}
@@ -239,6 +241,7 @@ def test_skillet_vegetables_share_one_pan_after_chicken_is_verified():
         vegetable_names=["Onions", "Carrots"],
         protein_state="Frozen Raw",
         available_equipment=["Microwave"],
+        requested_method="skillet",
     )[0]
     graph = build_activity_graph(candidate)
 

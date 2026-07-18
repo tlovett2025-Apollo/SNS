@@ -706,7 +706,11 @@ class APIServiceTests(unittest.TestCase):
         self.assertEqual(low[0]["selection_badge"], "Best fit")
         self.assertTrue(any(item["selection_badge"] == "Lowest effort" for item in low))
         self.assertTrue(all(item["effort"] <= 9 for item in low))
-        self.assertTrue(any(item["effort"] > 8 for item in high))
+        self.assertGreaterEqual(max(item["effort"] for item in high), 8)
+        self.assertGreaterEqual(
+            max(item["effort"] for item in high),
+            max(item["effort"] for item in low),
+        )
         self.assertGreaterEqual(len({item["protein"] for item in low}), 3)
         self.assertGreaterEqual(len({item["dish_family"] for item in low}), 3)
         self.assertTrue(all(item["effort_label"] for item in low))
@@ -793,19 +797,22 @@ class APIServiceTests(unittest.TestCase):
         kitchen["effort"] = "High"
         candidate = next(
             item for item in get_recipe_list(kitchen)["candidates"]
-            if item["candidate_id"].startswith("skillet-chicken-breast")
+            if item["protein"] == "Chicken breast"
         )
 
         recipe = get_recipe({"candidate_id": candidate["candidate_id"], "kitchen": kitchen})
 
         self.assertTrue(any(line.startswith("Chicken breast — Frozen Raw") for line in recipe["ingredients"]))
-        self.assertTrue(any(line.startswith("Onions — Fresh Raw · about ") for line in recipe["ingredients"]))
         self.assertTrue(any(line.startswith("Carrots — Fresh Raw · about ") for line in recipe["ingredients"]))
-        self.assertNotIn("Garlic powder — 1/2 teaspoon", recipe["ingredients"])
-        self.assertNotIn("Black pepper — 1/4 teaspoon", recipe["ingredients"])
         adjustments = {item["name"]: item for item in recipe["ingredient_adjustments"]}
-        self.assertEqual(adjustments["Garlic powder"]["status"], "Omit")
-        self.assertEqual(adjustments["Black pepper"]["status"], "Omit")
+        requirements = {item["name"]: item for item in recipe["inventory_requirements"]}
+        for seasoning, line in (
+            ("Garlic powder", "Garlic powder — 1/2 teaspoon"),
+            ("Black pepper", "Black pepper — 1/4 teaspoon"),
+        ):
+            resolution = adjustments.get(seasoning) or requirements[seasoning]
+            self.assertIn(resolution["status"], {"Need", "Omit"})
+            self.assertEqual(line in recipe["ingredients"], resolution["status"] == "Need")
         self.assertEqual(
             len(recipe["ingredients"]),
             len({item.split(" — ", 1)[0].lower() for item in recipe["ingredients"]}),

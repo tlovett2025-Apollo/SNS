@@ -25,6 +25,28 @@ PRESSURE_COOKER = EquipmentProfile(
     "Off-burner cooking with pressurize, cook, and natural-release phases.",
 )
 
+SLOW_COOKER = EquipmentProfile(
+    "Slow cooker", "Slow Cooker", 0,
+    "Long unattended moist cooking for collagen-rich foods.",
+)
+
+
+def _equipment_names(available_equipment) -> set[str]:
+    return {str(item or "").strip().lower() for item in (available_equipment or []) if str(item or "").strip()}
+
+
+def choose_braise_equipment(available_equipment, available_minutes=0) -> str:
+    """Choose only equipment with a complete SNS braise grammar."""
+    available = _equipment_names(available_equipment)
+    minutes = int(available_minutes or 0)
+    if available & {"pressure cooker", "instant pot"} and (not minutes or minutes <= 300):
+        return "pressure cooker"
+    if "slow cooker" in available and minutes >= 360:
+        return "slow cooker"
+    if "dutch oven" in available:
+        return "dutch oven"
+    return "stovetop"
+
 
 def build_rice_equipment_activities(rice_name: str, equipment_name: str) -> List[KitchenActivity]:
     equipment = equipment_name.lower()
@@ -77,9 +99,9 @@ def build_rice_equipment_activities(rice_name: str, equipment_name: str) -> List
 
 
 def choose_rice_equipment(available_equipment) -> str:
-    available = {str(item).strip().lower() for item in (available_equipment or [])}
+    available = _equipment_names(available_equipment)
     if "rice cooker" in available:
         return "rice cooker"
-    if "pressure cooker" in available:
+    if available & {"pressure cooker", "instant pot"}:
         return "pressure cooker"
     return "stovetop"

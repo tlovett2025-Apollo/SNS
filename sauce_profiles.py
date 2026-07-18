@@ -145,6 +145,98 @@ BBQ_BRAISING_SAUCE = SauceProfile(
 )
 
 
+ITALIAN_TOMATO_SAUCE = SauceProfile(
+    name="Italian tomato sauce",
+    ingredients=[
+        SauceIngredient("Tomato sauce", "1 1/2 cups"),
+        SauceIngredient("Olive oil", "1 tablespoon", substitutes=("Butter", "Cooking oil")),
+        SauceIngredient("Garlic powder", "1/2 teaspoon", pantry_optional=True),
+        SauceIngredient("Italian seasoning", "1 teaspoon", pantry_optional=True),
+        SauceIngredient("Black pepper", "1/4 teaspoon", pantry_optional=True),
+    ],
+    prep_instruction="Measure the tomato sauce, olive oil, garlic powder, Italian seasoning, and black pepper.",
+    cook_instruction=(
+        "Add the tomato sauce and seasonings to the browned cooking flavor. Simmer gently until hot and slightly reduced. "
+        "Taste before adding salt."
+    ),
+)
+
+
+MEXICAN_TACO_SAUCE = SauceProfile(
+    name="Mexican taco sauce",
+    ingredients=[
+        SauceIngredient("Tomato sauce", "1 cup"),
+        SauceIngredient("Broth or water", "1/2 cup", substitutes=("Chicken broth", "Beef broth", "Vegetable broth", "Water")),
+        SauceIngredient("Chili powder", "1 teaspoon"),
+        SauceIngredient("Cumin", "1/2 teaspoon"),
+        SauceIngredient("Garlic powder", "1/2 teaspoon", pantry_optional=True),
+        SauceIngredient("Limes", "1 lime", pantry_optional=True, omission_consequence="The sauce will be less bright but will still work."),
+    ],
+    prep_instruction="Whisk the tomato sauce, broth or water, chili powder, cumin, and garlic powder together. Keep the lime for the finish.",
+    cook_instruction="Simmer the sauce with the cooked components until it coats them lightly. Take it off the heat, add lime to taste, and taste before salting.",
+)
+
+
+INDIAN_CURRY_SAUCE = SauceProfile(
+    name="Indian curry sauce",
+    ingredients=[
+        SauceIngredient("Coconut milk", "1 can"),
+        SauceIngredient("Broth or water", "1/2 cup", substitutes=("Chicken broth", "Vegetable broth", "Water")),
+        SauceIngredient("Cumin", "1 teaspoon"),
+        SauceIngredient("Coriander", "1 teaspoon"),
+        SauceIngredient("Turmeric", "1/2 teaspoon"),
+        SauceIngredient("Ginger", "1 teaspoon", pantry_optional=True),
+        SauceIngredient("Garlic powder", "1/2 teaspoon", pantry_optional=True),
+    ],
+    prep_instruction="Whisk the coconut milk, broth or water, cumin, coriander, turmeric, ginger, and garlic powder together.",
+    cook_instruction="Add the curry mixture and simmer gently until the components are cooked and the sauce lightly coats a spoon. Taste before adding salt.",
+)
+
+
+MEDITERRANEAN_LEMON_HERB_SAUCE = SauceProfile(
+    name="Mediterranean lemon herb sauce",
+    ingredients=[
+        SauceIngredient("Olive oil", "2 tablespoons", substitutes=("Butter", "Cooking oil")),
+        SauceIngredient("Chicken broth", "3/4 cup", substitutes=("Vegetable broth", "Water")),
+        SauceIngredient("Lemons", "1 lemon"),
+        SauceIngredient("Oregano", "1 teaspoon", pantry_optional=True),
+        SauceIngredient("Garlic powder", "1/2 teaspoon", pantry_optional=True),
+        SauceIngredient("Black pepper", "1/4 teaspoon", pantry_optional=True),
+    ],
+    prep_instruction="Measure the olive oil, broth, oregano, garlic powder, and black pepper. Zest or cut the lemon, but keep its juice for the finish.",
+    cook_instruction="Add the broth and seasonings to the browned cooking flavor and simmer briefly. Take the pan off the heat, add lemon to taste, and taste before salting.",
+)
+
+
+CAJUN_PAN_SAUCE = SauceProfile(
+    name="Cajun pan sauce",
+    ingredients=[
+        SauceIngredient("Chicken broth", "3/4 cup", substitutes=("Vegetable broth", "Water")),
+        SauceIngredient("Butter", "1 tablespoon", substitutes=("Olive oil", "Cooking oil")),
+        SauceIngredient("Paprika", "1 teaspoon"),
+        SauceIngredient("Garlic powder", "1/2 teaspoon"),
+        SauceIngredient("Onion powder", "1/2 teaspoon"),
+        SauceIngredient("Thyme", "1/2 teaspoon", pantry_optional=True),
+        SauceIngredient("Hot sauce", "to taste", pantry_optional=True),
+    ],
+    prep_instruction="Measure the broth, butter, paprika, garlic powder, onion powder, and thyme. Keep the hot sauce for the final taste.",
+    cook_instruction="Add the broth and seasonings to the browned cooking flavor and simmer until lightly reduced. Stir in the butter, then add hot sauce gradually and taste before salting.",
+)
+
+
+MILD_FAVORITE_SAUCE = SauceProfile(
+    name="mild favorite sauce",
+    ingredients=[
+        SauceIngredient("Chicken broth", "1/2 cup", substitutes=("Vegetable broth", "Milk", "Water")),
+        SauceIngredient("Butter", "1 tablespoon", substitutes=("Olive oil", "Cooking oil")),
+        SauceIngredient("Ketchup", "2 tablespoons", pantry_optional=True),
+        SauceIngredient("Garlic powder", "1/4 teaspoon", pantry_optional=True),
+    ],
+    prep_instruction="Measure the broth, butter, ketchup, and garlic powder.",
+    cook_instruction="Add the broth and garlic powder and simmer briefly. Stir in the butter and ketchup when using, then taste before adding salt.",
+)
+
+
 def get_sauce_profile(name: str):
     key = str(name or "").strip().lower()
     if key == "simple stir-fry sauce" or "stir-fry" in key:
@@ -153,4 +245,18 @@ def get_sauce_profile(name: str):
         return SIMPLE_COMFORT_PAN_SAUCE
     if key == "bbq sauce" or "barbecue" in key:
         return BBQ_BRAISING_SAUCE
+    if "italian" in key or "tomato sauce or cream" in key:
+        return ITALIAN_TOMATO_SAUCE
+    if "taco" in key or "mexican" in key:
+        return MEXICAN_TACO_SAUCE
+    if "curry" in key or "indian" in key:
+        return INDIAN_CURRY_SAUCE
+    if "lemon herb" in key or "mediterranean" in key:
+        return MEDITERRANEAN_LEMON_HERB_SAUCE
+    if "cajun" in key:
+        return CAJUN_PAN_SAUCE
+    if "favorite" in key or "kid" in key:
+        return MILD_FAVORITE_SAUCE
+    if key == "simple sauce":
+        return SIMPLE_COMFORT_PAN_SAUCE
     return None

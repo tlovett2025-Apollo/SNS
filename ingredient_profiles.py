@@ -37,7 +37,7 @@ def _handling_for_state(template: str, name: str, state_name: str) -> str:
     # when the selected item is already fresh rather than telling every cook to
     # thaw every protein defensively.
     patterns = (
-        rf"Thaw {re.escape(name)} when frozen[.,]\s*",
+        rf"Thaw {re.escape(name)} when frozen[.,;]\s*",
         rf"Thaw {re.escape(name)} safely,\s*",
         rf"Thaw {re.escape(name)},\s*",
         r"Thaw safely,\s*",

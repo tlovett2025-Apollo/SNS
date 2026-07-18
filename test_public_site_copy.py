@@ -4,11 +4,15 @@ from pathlib import Path
 PUBLIC_FLOW = Path(__file__).parent / "web" / "public-site" / "sns-flow.js"
 
 
-def test_recipe_fallback_uses_kitchen_language_instead_of_engine_jargon():
-    public_copy = PUBLIC_FLOW.read_text(encoding="utf-8").lower()
+def test_recipe_failures_are_visible_and_never_fabricate_a_recipe():
+    public_copy = PUBLIC_FLOW.read_text(encoding="utf-8")
 
-    assert "longest-lead" not in public_copy
-    assert "extra cooking time" in public_copy
+    assert "fallbackRecipes" not in public_copy
+    assert "fallbackBuilderOptions" not in public_copy
+    assert "Gather the selected ingredients and the equipment you need." not in public_copy
+    assert "This recipe could not load." in public_copy
+    assert "Meal ideas could not load." in public_copy
+    assert "data-retry-recipes" in public_copy
 
 
 def test_my_kitchen_supports_add_remove_equipment_and_browser_persistence():
@@ -65,13 +69,11 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     assert "Choose one or more" in builder_page
     assert "Vegetables &amp; fruit" in builder_page
     assert "Pantry &amp; fridge extras" in builder_page
-    assert "Composed Plate" in flow
-    assert "Layered Bowl" in flow
-    assert "Cooked Together" in flow
-    assert 'label:"Stovetop"' in flow
+    assert "options.meal_structures" in flow
+    assert "options.methods" in flow
     assert "data-protein-search" in builder_page
     assert '>Canned</option>' in flow
-    assert 'id:"grill"' in flow
+    assert 'item.id' in flow
     assert 'input[name="extras"]:checked' in flow
     assert "Cold <small>training next" in builder_page
     assert "How should the finished meal come together?" in builder_page
