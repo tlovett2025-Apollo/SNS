@@ -3,10 +3,14 @@ const SNS = (() => {
   const apiBase = String(runtime.apiBaseUrl || "https://sns-api-xsq4.onrender.com").replace(/\/$/, "");
   const endpoint = path => `${apiBase}${path}`;
   const API = {
+    myKitchen: endpoint("/api/MyKitchen"),
     saveKitchen: endpoint("/api/SaveMyKitchen"),
+    resolveBarcode: endpoint("/api/ResolveBarcode"),
+    recognizePantryPhoto: endpoint("/api/RecognizePantryPhoto"),
     getMealBuilderOptions: endpoint("/api/GetMealBuilderOptions"),
     getRecipeList: endpoint("/api/GetRecipeList"),
     getRecipe: endpoint("/api/GetRecipe"),
+    reportRecipe: endpoint("/api/ReportRecipe"),
     createCheckout: endpoint("/api/CreateCheckoutSession"),
     billingPortal: endpoint("/api/CreateBillingPortalSession")
   };
@@ -140,13 +144,14 @@ const SNS = (() => {
     }
   }
 
-  function renderHome() {
+  async function renderHome() {
     const target = document.querySelector("[data-welcome-name]");
     if (!target) return;
-    let auth = {};
-    try { auth = JSON.parse(sessionStorage.getItem("snsAuthPrototype") || "{}"); } catch {}
-    const emailName = String(auth.email || "").split("@")[0].replace(/[._-]+/g, " ").trim();
-    target.textContent = String(auth.displayName || "").trim() || emailName || "there";
+    let session = null;
+    try { session = await window.SNS_AUTH?.session?.(); } catch {}
+    const metadataName = String(session?.user?.user_metadata?.display_name || "").trim();
+    const emailName = String(session?.user?.email || "").split("@")[0].replace(/[._-]+/g, " ").trim();
+    target.textContent = metadataName || emailName || "there";
     let kitchen = {};
     try { kitchen = JSON.parse(localStorage.getItem(kitchenStorageKey) || "{}"); } catch {}
     const count = (kitchen.foods || []).filter(item => Number(item.quantity || 0) > 0).length;
@@ -200,25 +205,38 @@ const SNS = (() => {
     ).join("");
   }
 
-  function postJson(url, payload) {
-    return fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    }).then(async response => {
-      if (!response.ok) {
-        const raw = await response.text();
-        let message = raw;
-        try {
-          const body = JSON.parse(raw);
-          message = body.detail || body.message || raw;
-        } catch {
-          // Keep a plain-text service response as-is.
-        }
-        throw new Error(message || `Request failed: ${response.status}`);
+  async function authorizationHeaders() {
+    const token = await window.SNS_AUTH?.accessToken?.();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  async function responseJson(response) {
+    if (!response.ok) {
+      const raw = await response.text();
+      let message = raw;
+      try {
+        const body = JSON.parse(raw);
+        message = body.detail || body.message || raw;
+      } catch {
+        // Keep a plain-text service response as-is.
       }
-      return response.json();
+      throw new Error(message || `Request failed: ${response.status}`);
+    }
+    return response.json();
+  }
+
+  async function getJson(url) {
+    const response = await fetch(url, { headers: await authorizationHeaders() });
+    return responseJson(response);
+  }
+
+  async function postJson(url, payload) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await authorizationHeaders()) },
+      body: JSON.stringify(payload)
     });
+    return responseJson(response);
   }
 
   function kitchenPayload() {
@@ -257,7 +275,7 @@ const SNS = (() => {
     return {
       api_version: "1.0",
       contract_version: "my-kitchen-v1",
-      household_id: "local-demo-household",
+      household_id: saved.household_id || "local-demo-household",
       generated_at: new Date().toISOString(),
       servings: members.length || 4,
       energy: effort,
@@ -266,6 +284,11 @@ const SNS = (() => {
       equipment,
       meal_preferences: {
         household_members: members,
+        excluded_items: (saved.preferences || [])
+          .filter(item => ["allergy", "medical_exclusion", "religious_exclusion", "exclusion"].includes(item.preference_type))
+          .filter(item => ["never", "avoid"].includes(item.severity))
+          .map(item => item.target_value),
+        stored_preferences: saved.preferences || [],
         recent_meals: recentMealHistory()
       },
       cost_filter: null
@@ -424,7 +447,18 @@ const SNS = (() => {
     const foodRows = [...document.querySelectorAll("[data-food]")];
     const equipmentButtons = [...document.querySelectorAll("[data-equipment]")];
     const memberRows = [...document.querySelectorAll("[data-household-member]")];
+    const preferenceInputs = [...document.querySelectorAll("[data-preference-type]")];
+    const preferences = preferenceInputs.length
+      ? preferenceInputs.flatMap(input => String(input.value || "").split(/[,\n]/).map(value => value.trim()).filter(Boolean).map(value => ({
+          preference_type: input.dataset.preferenceType,
+          target_type: input.dataset.targetType || "ingredient",
+          target_value: value,
+          severity: input.dataset.severity || "avoid",
+          notes: ""
+        })))
+      : (saved.preferences || []);
     return {
+      household_id: saved.household_id || null,
       foods: foodRows.length ? foodRows.map(row => ({
         name: row.dataset.food,
         storage: row.dataset.storage,
@@ -446,6 +480,7 @@ const SNS = (() => {
         name: row.querySelector("[data-member-name]")?.value || "",
         appetite: row.querySelector("[data-member-appetite]")?.value || "standard"
       })) : (saved.household_members || []),
+      preferences,
       tonight_effort: document.querySelector("[data-make-effort]")?.value || saved.tonight_effort || "Low"
     };
   }
@@ -765,6 +800,263 @@ const SNS = (() => {
     });
   }
 
+  function captureUnitOptions(selected = "package") {
+    const known = inventoryUnits.some(([value]) => value === selected) ? selected : "package";
+    return inventoryUnits.map(([value, label]) =>
+      `<option value="${value}"${value === known ? " selected" : ""}>${label}</option>`
+    ).join("");
+  }
+
+  async function pantryPhotoDataUrl(file) {
+    if (!file || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      throw new Error("Choose a JPEG, PNG, or WebP photo.");
+    }
+    if (file.size > 15 * 1024 * 1024) throw new Error("Choose a photo smaller than 15 MB.");
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const image = new Image();
+      image.decoding = "async";
+      image.src = objectUrl;
+      await image.decode();
+      const longest = Math.max(image.naturalWidth, image.naturalHeight);
+      const scale = Math.min(1, 1600 / longest);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      canvas.getContext("2d", { alpha: false }).drawImage(image, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", .78);
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+
+  function bindInventoryCapture() {
+    const dialog = document.querySelector("[data-inventory-capture-dialog]");
+    if (!dialog) return;
+    const barcodePanel = dialog.querySelector("[data-capture-barcode]");
+    const photoPanel = dialog.querySelector("[data-capture-photo]");
+    const barcodeInput = dialog.querySelector("[data-capture-barcode-input]");
+    const lookupButton = dialog.querySelector("[data-lookup-barcode]");
+    const cameraButton = dialog.querySelector("[data-start-barcode-camera]");
+    const cameraHolder = dialog.querySelector("[data-barcode-camera]");
+    const video = dialog.querySelector("[data-barcode-video]");
+    const photoInput = dialog.querySelector("[data-pantry-photo]");
+    const photoButton = dialog.querySelector("[data-recognize-pantry-photo]");
+    const progress = dialog.querySelector("[data-capture-progress]");
+    const error = dialog.querySelector("[data-capture-error]");
+    const review = dialog.querySelector("[data-capture-review]");
+    const reviewItems = dialog.querySelector("[data-capture-review-items]");
+    const applyButton = dialog.querySelector("[data-apply-captured-items]");
+    let stream = null;
+    let scanning = false;
+
+    async function barcodeDetectorClass() {
+      if ("BarcodeDetector" in window) return window.BarcodeDetector;
+      try {
+        const module = await import("https://cdn.jsdelivr.net/npm/@undecaf/barcode-detector-polyfill@0.9.23/dist/main.js");
+        window.BarcodeDetector = module.BarcodeDetectorPolyfill;
+        return window.BarcodeDetector;
+      } catch {
+        return null;
+      }
+    }
+
+    function setError(message = "") {
+      error.hidden = !message;
+      error.textContent = message;
+    }
+
+    function setBusy(busy, message = "Reading the items…") {
+      progress.hidden = !busy;
+      progress.textContent = message;
+      lookupButton.disabled = busy;
+      photoButton.disabled = busy || !photoInput.files?.[0];
+    }
+
+    function selectedItems() {
+      return [...reviewItems.querySelectorAll("[data-capture-item]")]
+        .filter(row => row.querySelector("[data-capture-include]").checked)
+        .map(row => ({
+          name: row.querySelector("[data-capture-name]").value.trim(),
+          form: row.querySelector("[data-capture-form]").value.trim(),
+          storage_location: row.querySelector("[data-capture-storage]").value,
+          quantity: Number(row.querySelector("[data-capture-quantity]").value || 1),
+          unit: row.querySelector("[data-capture-unit]").value,
+          unresolved: row.dataset.status !== "matched"
+        })).filter(item => item.name && item.quantity > 0);
+    }
+
+    function refreshApply() {
+      applyButton.disabled = selectedItems().length === 0;
+    }
+
+    function showReview(payload) {
+      const items = Array.isArray(payload?.items) ? payload.items : [];
+      if (!items.length) throw new Error("No items were clear enough to review.");
+      review.hidden = false;
+      dialog.querySelector("[data-capture-review-summary]").textContent =
+        `${items.length} ${items.length === 1 ? "item" : "items"} found. Confirm only what is really there.`;
+      reviewItems.innerHTML = items.map((item, index) => {
+        const needsReview = item.status !== "matched" || Number(item.confidence) < .75;
+        const existing = item.already_on_hand
+          ? `<span class="capture-existing">Already in My Kitchen: ${escapeHtml(item.existing_quantity)} ${escapeHtml(item.existing_unit || "")}</span>` : "";
+        return `<article class="capture-review-item${needsReview ? " needs-review" : ""}" data-capture-item data-status="${escapeHtml(item.status)}">
+          <label class="capture-include"><input type="checkbox" data-capture-include${needsReview ? "" : " checked"}><span class="sr-only">Include item ${index + 1}</span></label>
+          <div class="capture-item-fields">
+            <label class="capture-name"><span>Item</span><input data-capture-name value="${escapeHtml(item.name)}" autocomplete="off"></label>
+            <label><span>Form</span><input data-capture-form value="${escapeHtml(item.form)}" placeholder="Canned, fresh, frozen…"></label>
+            <label><span>Stored in</span><select data-capture-storage>${["Pantry", "Fridge", "Freezer", "Fresh"].map(value => `<option${value === item.storage_location ? " selected" : ""}>${value}</option>`).join("")}</select></label>
+            <label><span>Amount</span><input data-capture-quantity type="number" inputmode="decimal" min="0.25" step="0.25" value="${escapeHtml(item.quantity || 1)}"></label>
+            <label><span>Unit</span><select data-capture-unit>${captureUnitOptions(item.unit)}</select></label>
+          </div>
+          <div class="capture-item-note"><span>${needsReview ? "Please check this match" : "Strong catalog match"}</span>${existing}</div>
+        </article>`;
+      }).join("");
+      reviewItems.querySelectorAll("input,select").forEach(input => input.addEventListener("input", refreshApply));
+      refreshApply();
+    }
+
+    async function signedIn() {
+      try {
+        return Boolean(await window.SNS_AUTH?.session?.());
+      } catch {
+        return false;
+      }
+    }
+
+    function stopCamera() {
+      scanning = false;
+      (stream?.getTracks?.() || []).forEach(track => track.stop());
+      stream = null;
+      video.srcObject = null;
+      cameraHolder.hidden = true;
+      cameraButton.textContent = "Use phone camera";
+    }
+
+    async function lookupBarcode() {
+      const barcode = barcodeInput.value.replace(/\D/g, "");
+      if (barcode.length < 8 || barcode.length > 14) {
+        setError("Enter or scan an 8- to 14-digit barcode.");
+        return;
+      }
+      stopCamera();
+      setError();
+      review.hidden = true;
+      setBusy(true, "Looking up that package…");
+      try {
+        showReview(await postJson(API.resolveBarcode, { barcode }));
+      } catch (caught) {
+        setError(caught.message || "That barcode could not be read. Enter the item manually instead.");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function startCamera() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError("This browser cannot open the camera. Type the barcode numbers above instead.");
+        return;
+      }
+      if (stream) return stopCamera();
+      setError();
+      try {
+        cameraButton.disabled = true;
+        cameraButton.textContent = "Preparing camera…";
+        const Detector = await barcodeDetectorClass();
+        if (!Detector) throw new Error("barcode decoder unavailable");
+        const supported = await Detector.getSupportedFormats?.() || [];
+        const wanted = ["ean_13", "ean_8", "upc_a", "upc_e"].filter(format => !supported.length || supported.includes(format));
+        const detector = new Detector(wanted.length ? { formats: wanted } : undefined);
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+        video.srcObject = stream;
+        await video.play();
+        cameraHolder.hidden = false;
+        cameraButton.textContent = "Stop camera";
+        scanning = true;
+        const scan = async () => {
+          if (!scanning) return;
+          try {
+            const codes = await detector.detect(video);
+            const value = String(codes?.[0]?.rawValue || "").replace(/\D/g, "");
+            if (value) {
+              barcodeInput.value = value;
+              await lookupBarcode();
+              return;
+            }
+          } catch {
+            // A frame can fail while autofocus settles; keep scanning.
+          }
+          if (scanning) requestAnimationFrame(scan);
+        };
+        requestAnimationFrame(scan);
+      } catch {
+        stopCamera();
+        setError("Camera access was not available. Type the barcode numbers above instead.");
+      } finally {
+        cameraButton.disabled = false;
+      }
+    }
+
+    async function recognizePhoto() {
+      const file = photoInput.files?.[0];
+      if (!file) return;
+      setError();
+      review.hidden = true;
+      setBusy(true, "Preparing the photo on this device…");
+      try {
+        const imageDataUrl = await pantryPhotoDataUrl(file);
+        progress.textContent = "Finding visible pantry items…";
+        showReview(await postJson(API.recognizePantryPhoto, { image_data_url: imageDataUrl }));
+      } catch (caught) {
+        setError(caught.message || "The photo could not be read. Try a clearer photo or add the items manually.");
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function openCapture(mode) {
+      setError();
+      review.hidden = true;
+      reviewItems.replaceChildren();
+      applyButton.disabled = true;
+      barcodePanel.hidden = mode !== "barcode";
+      photoPanel.hidden = mode !== "photo";
+      dialog.querySelector("[data-capture-title]").textContent = mode === "photo" ? "Add from a pantry photo" : "Scan a barcode";
+      if (!(await signedIn())) {
+        setError("Log in first so confirmed items can be saved to the same kitchen on every device.");
+      }
+      dialog.showModal();
+      if (mode === "barcode") barcodeInput.focus();
+    }
+
+    document.querySelectorAll("[data-open-inventory-capture]").forEach(button =>
+      button.addEventListener("click", () => openCapture(button.dataset.openInventoryCapture))
+    );
+    dialog.querySelectorAll("[data-close-inventory-capture]").forEach(button => button.addEventListener("click", () => dialog.close()));
+    dialog.addEventListener("close", stopCamera);
+    lookupButton.addEventListener("click", lookupBarcode);
+    barcodeInput.addEventListener("keydown", event => {
+      if (event.key === "Enter") { event.preventDefault(); lookupBarcode(); }
+    });
+    cameraButton.addEventListener("click", startCamera);
+    photoInput.addEventListener("change", () => { photoButton.disabled = !photoInput.files?.[0]; });
+    photoButton.addEventListener("click", recognizePhoto);
+    dialog.querySelector("[data-select-all-capture]").addEventListener("click", () => {
+      reviewItems.querySelectorAll("[data-capture-include]").forEach(input => { input.checked = true; });
+      refreshApply();
+    });
+    applyButton.addEventListener("click", async () => {
+      const items = selectedItems();
+      if (!items.length) return;
+      applyButton.disabled = true;
+      applyImportedPantry(items, "merge");
+      dialog.close();
+      await saveKitchen();
+      const status = document.querySelector("[data-save-status]");
+      if (status) status.textContent = `${items.length} reviewed ${items.length === 1 ? "item" : "items"} added to My Kitchen.`;
+    });
+  }
+
   function syncInventoryDetails(group) {
     if (!group) return;
     const unit = group.querySelector("[data-unit]")?.value;
@@ -823,6 +1115,13 @@ const SNS = (() => {
     if (memberHolder && (state.household_members || []).length) {
       memberHolder.replaceChildren(...state.household_members.map(createHouseholdMember));
     }
+    document.querySelectorAll("[data-preference-type]").forEach(input => {
+      const values = (state.preferences || [])
+        .filter(item => item.preference_type === input.dataset.preferenceType)
+        .map(item => item.target_value)
+        .filter(Boolean);
+      input.value = values.join(", ");
+    });
   }
 
   function ensureRemoveControl(row) {
@@ -1111,16 +1410,66 @@ const SNS = (() => {
     return escapeHtml(error?.message || "The cooking service did not return a recipe.");
   }
 
+  async function hydrateSharedKitchen() {
+    if (!window.SNS_AUTH?.configured) return;
+    let session;
+    try { session = await window.SNS_AUTH.session(); }
+    catch { return; }
+    if (!session) return;
+
+    try {
+      let remote = await getJson(API.myKitchen);
+      const local = savedKitchenState();
+      const localFoods = (local.foods || []).filter(item => Number(item.quantity || 0) > 0);
+      const remoteFoods = (remote.foods || remote.inventory || []).filter(item => Number(item.quantity || 0) > 0);
+      const marker = `snsKitchenMigrated:${session.user.id}`;
+
+      if (!remoteFoods.length && localFoods.length && !localStorage.getItem(marker)) {
+        const move = window.confirm(
+          `We found ${localFoods.length} foods saved on this device. Move them into your shared Stock & Stir kitchen so they appear on your phone and other devices?`
+        );
+        if (move) {
+          remote = await postJson(API.saveKitchen, {
+            ...local,
+            inventory: localFoods,
+            servings: (local.household_members || []).length || 4,
+            energy: local.tonight_effort || "Low",
+            effort: local.tonight_effort || "Low",
+            sync_source_type: "browser_migration",
+            sync_source_fingerprint: `browser-v1:${session.user.id}`
+          });
+        }
+        localStorage.setItem(marker, move ? "moved" : "kept-local");
+      }
+
+      const sharedFoods = (remote.foods || remote.inventory || []).filter(item => Number(item.quantity || 0) > 0);
+      if (sharedFoods.length || !localFoods.length) {
+        localStorage.setItem(kitchenStorageKey, JSON.stringify(remote));
+      }
+      const status = document.querySelector("[data-save-status]");
+      if (status) status.textContent = "This kitchen is shared across your signed-in devices.";
+    } catch (error) {
+      const status = document.querySelector("[data-save-status]");
+      if (status) status.textContent = `Using this device's saved kitchen for now. ${error.message || "Shared sync is unavailable."}`;
+    }
+  }
+
   async function saveKitchen() {
     const payload = kitchenPayload();
     sessionStorage.setItem("snsKitchenPayload", JSON.stringify(payload));
     storeBrowserKitchen();
     try {
-      await postJson(API.saveKitchen, payload);
+      const response = await postJson(API.saveKitchen, {
+        ...payload,
+        preferences: browserKitchenState().preferences
+      });
+      if (response?.storage_mode === "supabase_household") {
+        localStorage.setItem(kitchenStorageKey, JSON.stringify(response));
+      }
       const status = document.querySelector("[data-save-status]");
       if (status) status.textContent = document.querySelector("[data-save-household]")
-        ? "Household preferences are saved."
-        : "My Kitchen is saved.";
+        ? "Household preferences are saved to every signed-in device."
+        : "My Kitchen is saved to every signed-in device.";
     } catch {
       const status = document.querySelector("[data-save-status]");
       if (status) status.textContent = "Saved in this browser; API connection is pending.";
@@ -1690,6 +2039,46 @@ const SNS = (() => {
         .map(file => `<li><span>${escapeHtml(file.path)}</span><code>${escapeHtml(file.sha256)}</code></li>`)
         .join("");
     }
+    installRecipeReport(recipe);
+  }
+
+  function installRecipeReport(recipe) {
+    const dialog = document.querySelector("[data-recipe-report-dialog]");
+    const form = document.querySelector("[data-recipe-report-form]");
+    const open = document.querySelector("[data-open-recipe-report]");
+    const status = document.querySelector("[data-recipe-report-status]");
+    if (!dialog || !form || !open || open.dataset.bound === "true") return;
+    open.dataset.bound = "true";
+    open.addEventListener("click", () => dialog.showModal());
+    document.querySelectorAll("[data-close-recipe-report]").forEach(button =>
+      button.addEventListener("click", () => dialog.close())
+    );
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const submit = form.querySelector("[data-submit-recipe-report]");
+      const categories = [...form.querySelectorAll('input[name="issue"]:checked')]
+        .map(input => input.value);
+      submit.disabled = true;
+      status.textContent = "Sending this recipe for review…";
+      try {
+        await postJson(API.reportRecipe, {
+          candidate_id: recipe.candidate_id,
+          recipe_snapshot: recipe,
+          rendered_recipe_text: document.querySelector("main")?.innerText || "",
+          issue_categories: categories.length ? categories : ["general_review"],
+          user_note: form.elements.note.value
+        });
+        dialog.close();
+        form.reset();
+        open.disabled = true;
+        open.textContent = "Sent for review";
+        status.textContent = "Thank you. Stock & Stir received this exact recipe for review.";
+      } catch (error) {
+        status.textContent = error.message || "This report could not be sent. Please try again.";
+      } finally {
+        submit.disabled = false;
+      }
+    });
   }
 
   async function checkout(plan) {
@@ -1714,14 +2103,16 @@ const SNS = (() => {
     }
   }
 
-  function init() {
+  async function init() {
     installAppShell();
+    await hydrateSharedKitchen();
     upgradeQuantityEditors();
     restoreBrowserKitchen();
     organizeInventory();
     bindAmounts();
     bindKitchenDashboard();
     bindPantryImporter();
+    bindInventoryCapture();
     updateCount();
     initializeKitchenAccordion();
     renderRecipeChoices();

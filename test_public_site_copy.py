@@ -25,6 +25,27 @@ def test_my_kitchen_supports_add_remove_equipment_and_browser_persistence():
     assert "data-kitchen-dialog" in kitchen_page
 
 
+def test_accounts_use_supabase_and_migrate_the_browser_kitchen_once():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    auth = (PUBLIC_FLOW.parent / "sns-auth.js").read_text(encoding="utf-8")
+    config = (PUBLIC_FLOW.parent / "sns-config.js").read_text(encoding="utf-8")
+    login = (PUBLIC_FLOW.parent / "login.html").read_text(encoding="utf-8")
+    preferences = (PUBLIC_FLOW.parent / "household-preferences.html").read_text(encoding="utf-8")
+
+    assert "signInWithPassword" in auth
+    assert "resetPasswordForEmail" in auth
+    assert "persistSession: true" in auth
+    assert "sb_publishable_" in config
+    assert "service_role" not in config
+    assert "snsAuthPrototype" not in login
+    assert "snsKitchenMigrated:" in flow
+    assert "Move them into your shared Stock & Stir kitchen" in flow
+    assert 'myKitchen: endpoint("/api/MyKitchen")' in flow
+    assert "Authorization: `Bearer ${token}`" in flow
+    assert 'data-preference-type="allergy"' in preferences
+    assert 'data-preference-type="exclusion"' in preferences
+
+
 def test_my_kitchen_uses_real_quantities_and_units_for_countable_food():
     flow = PUBLIC_FLOW.read_text(encoding="utf-8")
     kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
@@ -78,6 +99,31 @@ def test_my_kitchen_can_preview_merge_replace_and_undo_sample_or_csv_imports():
     assert "max-height:96dvh" in css
 
 
+def test_my_kitchen_capture_is_phone_first_reviewed_and_never_auto_saves_photos():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
+    css = (PUBLIC_FLOW.parent / "sns-flow.css").read_text(encoding="utf-8")
+    blueprint = (PUBLIC_FLOW.parents[2] / "render.yaml").read_text(encoding="utf-8")
+
+    assert 'data-open-inventory-capture="barcode"' in kitchen_page
+    assert 'data-open-inventory-capture="photo"' in kitchen_page
+    assert 'capture="environment"' in kitchen_page
+    assert "Nothing is added automatically" in kitchen_page
+    assert "Stock &amp; Stir does not save the photo" in kitchen_page
+    assert 'resolveBarcode: endpoint("/api/ResolveBarcode")' in flow
+    assert 'recognizePantryPhoto: endpoint("/api/RecognizePantryPhoto")' in flow
+    assert "function pantryPhotoDataUrl(file)" in flow
+    assert "function bindInventoryCapture()" in flow
+    assert "@undecaf/barcode-detector-polyfill@0.9.23" in flow
+    assert 'applyImportedPantry(items, "merge")' in flow
+    assert ".inventory-capture-dialog" in css
+    assert ".capture-item-fields" in css
+    assert "max-height:96dvh" in css
+    assert "OPENAI_API_KEY" in blueprint
+    assert "sync: false" in blueprint
+    assert "SNS_PANTRY_VISION_MODEL" in blueprint
+
+
 def test_recipe_page_exposes_inventory_resolutions_and_preserves_substep_breaks():
     flow = PUBLIC_FLOW.read_text(encoding="utf-8")
     recipe_page = (PUBLIC_FLOW.parent / "recipe.html").read_text(encoding="utf-8")
@@ -94,6 +140,10 @@ def test_recipe_page_exposes_inventory_resolutions_and_preserves_substep_breaks(
     assert "data-recipe-work-time" in recipe_page
     assert "total minutes" in flow
     assert "mostly waiting" in flow
+    assert "Report this recipe" in recipe_page
+    assert 'reportRecipe: endpoint("/api/ReportRecipe")' in flow
+    assert "recipe_snapshot: recipe" in flow
+    assert "rendered_recipe_text" in flow
 
 
 def test_build_your_meal_is_a_direct_shared_engine_path():

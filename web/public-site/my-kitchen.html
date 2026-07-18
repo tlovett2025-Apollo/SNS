@@ -48,9 +48,13 @@
   <section class="pantry-import-callout" aria-label="Pantry setup tools">
     <div>
       <strong>Need a faster start?</strong>
-      <span>Try a regional sample pantry or import your own CSV, then adjust anything that does not match your kitchen.</span>
+      <span>Scan one package, photograph a pantry shelf, or load a testing pantry. You review every item before it is saved.</span>
     </div>
-    <button class="btn btn-secondary" type="button" data-open-pantry-import>Load sample or CSV</button>
+    <div class="pantry-quick-actions">
+      <button class="btn btn-secondary" type="button" data-open-inventory-capture="barcode">Scan barcode</button>
+      <button class="btn btn-secondary" type="button" data-open-inventory-capture="photo">Add from photo</button>
+      <button class="btn btn-secondary" type="button" data-open-pantry-import>Sample or CSV</button>
+    </div>
   </section>
   <section class="pantry-import-undo" data-pantry-import-undo hidden aria-live="polite">
     <span data-pantry-import-undo-message>Your previous pantry can be restored.</span>
@@ -212,6 +216,57 @@
   <p class="empty-search" data-empty-search hidden>No kitchen items match that search.</p>
   <details class="dev-panel"><summary>Developer view · My Kitchen payload</summary><pre data-payload></pre></details>
 </main>
+<dialog class="inventory-capture-dialog" data-inventory-capture-dialog>
+  <form class="inventory-capture-form" method="dialog" data-inventory-capture-form>
+    <header>
+      <div>
+        <div class="eyebrow">Add to My Kitchen</div>
+        <h2 data-capture-title>Scan a barcode</h2>
+        <p>Nothing is added automatically. Check the names, amounts, and storage locations first.</p>
+      </div>
+      <button class="catalog-close" type="button" data-close-inventory-capture aria-label="Close">×</button>
+    </header>
+
+    <section class="capture-source" data-capture-barcode>
+      <label>
+        <span>UPC or EAN barcode</span>
+        <span class="capture-barcode-entry"><input type="text" inputmode="numeric" autocomplete="off" maxlength="14" placeholder="Scan or type the numbers" data-capture-barcode-input><button class="btn btn-primary" type="button" data-lookup-barcode>Look it up</button></span>
+      </label>
+      <button class="btn btn-secondary capture-camera-button" type="button" data-start-barcode-camera>Use phone camera</button>
+      <div class="barcode-camera" data-barcode-camera hidden>
+        <video playsinline muted data-barcode-video></video>
+        <p>Hold the barcode inside the camera view. You can type the number instead at any time.</p>
+      </div>
+      <p class="field-note" data-barcode-support>Camera scanning works in supported mobile browsers over HTTPS. Manual entry always works.</p>
+    </section>
+
+    <section class="capture-source" data-capture-photo hidden>
+      <label class="capture-photo-picker">
+        <span>Photograph one shelf or a small group of groceries</span>
+        <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" data-pantry-photo>
+      </label>
+      <p class="field-note">For the cleanest list, keep labels visible and use more than one photo for a crowded pantry. Stock &amp; Stir does not save the photo.</p>
+      <button class="btn btn-primary" type="button" data-recognize-pantry-photo disabled>Review this photo</button>
+    </section>
+
+    <div class="capture-progress" data-capture-progress hidden role="status">Reading the items…</div>
+    <div class="pantry-import-error" data-capture-error hidden role="alert"></div>
+
+    <section class="capture-review" data-capture-review hidden>
+      <div class="capture-review-heading">
+        <div><strong>Check before adding</strong><p data-capture-review-summary></p></div>
+        <button type="button" data-select-all-capture>Select all</button>
+      </div>
+      <div class="capture-review-items" data-capture-review-items></div>
+      <p class="field-note">Yellow rows need a closer look. Edit anything the scanner misunderstood or leave it unchecked.</p>
+    </section>
+
+    <footer>
+      <button class="btn btn-secondary" type="button" data-close-inventory-capture>Cancel</button>
+      <button class="btn btn-primary" type="button" data-apply-captured-items disabled>Add selected to My Kitchen</button>
+    </footer>
+  </form>
+</dialog>
 <dialog class="pantry-import-dialog" data-pantry-import-dialog>
   <form class="pantry-import-form" data-pantry-import-form method="dialog">
     <header>
@@ -294,6 +349,6 @@
   </form>
 </dialog>
 <script src="sample-pantries.js"></script>
-<script src="sns-flow.js"></script>
+<script src="sns-config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script><script src="sns-auth.js"></script><script src="sns-flow.js"></script>
 </body>
 </html>

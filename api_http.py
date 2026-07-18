@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from api_service import (
@@ -18,6 +18,8 @@ from api_service import (
     get_meal_builder_options,
     get_recipe,
     get_recipe_list,
+    normalize_kitchen_snapshot,
+    resolve_inventory,
     save_my_kitchen,
 )
 from build_provenance import DEPLOYED_BUILD_PROVENANCE, public_build_provenance
@@ -26,6 +28,17 @@ from household_inventory import (
     InventoryAccessError,
     InventoryError,
     bootstrap_local_household,
+)
+from inventory_capture import (
+    InventoryCaptureError,
+    recognize_pantry_photo,
+    resolve_barcode,
+)
+from recipe_reports import RecipeReportError, normalize_recipe_report
+from supabase_gateway import (
+    SupabaseGateway,
+    SupabaseGatewayError,
+    apply_durable_kitchen,
 )
 
 
@@ -58,19 +71,22 @@ app.add_middleware(
     allow_origins=_cors_origins(),
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 
 # Build identity is constant for the lifetime of a deployed process. Compute
 # it once so readiness probes never repeat filesystem and Git inspection.
 _BUILD_PROVENANCE = DEPLOYED_BUILD_PROVENANCE
+_SUPABASE = SupabaseGateway()
 
 
 def _domain_error(exc: Exception) -> HTTPException:
     if isinstance(exc, InventoryAccessError):
         return HTTPException(status_code=403, detail=str(exc))
-    if isinstance(exc, (APIContractError, InventoryError)):
+    if isinstance(exc, SupabaseGatewayError):
+        return HTTPException(status_code=401, detail=str(exc))
+    if isinstance(exc, (APIContractError, InventoryError, InventoryCaptureError, RecipeReportError)):
         return HTTPException(status_code=400, detail=str(exc))
     return HTTPException(status_code=500, detail="The Stock & Stir API could not complete the request.")
 
@@ -107,15 +123,79 @@ def health_head() -> Response:
     return Response(status_code=200)
 
 
-@app.post("/api/SaveMyKitchen")
-def save_kitchen_endpoint(payload: dict) -> dict:
-    """Save to the shared pre-authentication tester household.
+def _access_token(authorization: str | None) -> str:
+    return _SUPABASE.token_from_authorization(authorization)
 
-    Recipe requests carry their own kitchen snapshot, so testers do not rely
-    on this shared saved state to generate or open a meal.  Managed identity
-    will replace this bootstrap before production billing is enabled.
-    """
+
+def _durable_payload(payload: dict, authorization: str | None) -> dict:
+    token = _access_token(authorization)
+    if not token:
+        return payload
+    snapshot = _SUPABASE.kitchen_snapshot(token)
+    if isinstance(payload.get("kitchen"), dict):
+        hydrated = dict(payload)
+        hydrated["kitchen"] = apply_durable_kitchen(payload["kitchen"], snapshot)
+        return hydrated
+    return apply_durable_kitchen(payload, snapshot)
+
+
+def _canonical_sync_payload(payload: dict) -> dict:
+    """Resolve known aliases before they become the household source of truth."""
+    normalized = normalize_kitchen_snapshot(payload)
+    resolved, _pending = resolve_inventory(normalized, DB_PATH)
+    canonical = {
+        str(item.source.get("name") or "").strip().lower(): (item.name, item.form_name)
+        for item in resolved
+    }
+    inventory = []
+    for item in normalized["inventory_lots"]:
+        name, form = canonical.get(
+            str(item.get("name") or "").strip().lower(),
+            (item.get("name"), item.get("form")),
+        )
+        inventory.append({
+            "name": name,
+            "form": form,
+            "storage": item.get("storage_location"),
+            "quantity": item.get("quantity"),
+            "unit": item.get("unit"),
+            "origin": item.get("origin"),
+            "opened_at": item.get("opened_at"),
+            "refrigerated_after_opening": item.get("refrigerated_after_opening"),
+            "package_weight_oz": item.get("package_weight_oz"),
+            "expiration_date": item.get("expiration_date"),
+        })
+    canonical_payload = dict(payload)
+    canonical_payload["inventory"] = inventory
+    return canonical_payload
+
+
+@app.get("/api/MyKitchen")
+def get_kitchen_endpoint(authorization: str | None = Header(default=None)) -> dict:
+    """Return the signed-in user's RLS-protected household kitchen."""
     try:
+        return _SUPABASE.kitchen_snapshot(_access_token(authorization))
+    except Exception as exc:
+        raise _domain_error(exc) from exc
+
+
+@app.post("/api/SaveMyKitchen")
+def save_kitchen_endpoint(
+    payload: dict,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Save the authenticated household, retaining a local test fallback."""
+    try:
+        token = _access_token(authorization)
+        if token:
+            response = _SUPABASE.sync_kitchen(
+                token,
+                _canonical_sync_payload(payload),
+                source_type=payload.get("sync_source_type"),
+                source_fingerprint=payload.get("sync_source_fingerprint"),
+            )
+            response["storage_mode"] = "supabase_household"
+            return response
         user_id, household_id = bootstrap_local_household(DB_PATH)
         response = save_my_kitchen(
             payload,
@@ -129,25 +209,96 @@ def save_kitchen_endpoint(payload: dict) -> dict:
         raise _domain_error(exc) from exc
 
 
-@app.post("/api/GetRecipeList")
-def recipe_list_endpoint(payload: dict) -> dict:
+def _signed_in_kitchen(authorization: str | None) -> dict:
+    """Validate the user JWT and return only that user's RLS-protected kitchen."""
+    token = _access_token(authorization)
+    if not token:
+        raise SupabaseGatewayError("Log in to scan items into your shared kitchen.")
+    return _SUPABASE.kitchen_snapshot(token)
+
+
+def _snapshot_inventory(snapshot: dict) -> list[dict]:
+    values = snapshot.get("inventory") or snapshot.get("foods") or []
+    return values if isinstance(values, list) else []
+
+
+@app.post("/api/ResolveBarcode")
+def resolve_barcode_endpoint(
+    payload: dict,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Return a canonical review draft for a UPC/EAN; never save it."""
     try:
-        return get_recipe_list(payload, db_path=DB_PATH)
+        snapshot = _signed_in_kitchen(authorization)
+        return resolve_barcode(
+            payload.get("barcode"),
+            db_path=DB_PATH,
+            existing_inventory=_snapshot_inventory(snapshot),
+        )
+    except Exception as exc:
+        raise _domain_error(exc) from exc
+
+
+@app.post("/api/RecognizePantryPhoto")
+def recognize_pantry_photo_endpoint(
+    payload: dict,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Return a transient pantry-photo review draft; never store image bytes."""
+    try:
+        snapshot = _signed_in_kitchen(authorization)
+        return recognize_pantry_photo(
+            payload.get("image_data_url"),
+            db_path=DB_PATH,
+            existing_inventory=_snapshot_inventory(snapshot),
+        )
+    except Exception as exc:
+        raise _domain_error(exc) from exc
+
+
+@app.post("/api/GetRecipeList")
+def recipe_list_endpoint(
+    payload: dict,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    try:
+        return get_recipe_list(_durable_payload(payload, authorization), db_path=DB_PATH)
     except Exception as exc:
         raise _domain_error(exc) from exc
 
 
 @app.post("/api/GetMealBuilderOptions")
-def meal_builder_options_endpoint(payload: dict) -> dict:
+def meal_builder_options_endpoint(
+    payload: dict,
+    authorization: str | None = Header(default=None),
+) -> dict:
     try:
-        return get_meal_builder_options(payload, db_path=DB_PATH)
+        return get_meal_builder_options(_durable_payload(payload, authorization), db_path=DB_PATH)
     except Exception as exc:
         raise _domain_error(exc) from exc
 
 
 @app.post("/api/GetRecipe")
-def recipe_endpoint(payload: dict) -> dict:
+def recipe_endpoint(
+    payload: dict,
+    authorization: str | None = Header(default=None),
+) -> dict:
     try:
-        return get_recipe(payload, db_path=DB_PATH)
+        return get_recipe(_durable_payload(payload, authorization), db_path=DB_PATH)
+    except Exception as exc:
+        raise _domain_error(exc) from exc
+
+
+@app.post("/api/ReportRecipe")
+def report_recipe_endpoint(
+    payload: dict,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Store a signed-in cook's recipe snapshot for human review."""
+    try:
+        token = _access_token(authorization)
+        if not token:
+            raise SupabaseGatewayError("Log in to report a recipe.")
+        return _SUPABASE.submit_recipe_report(token, normalize_recipe_report(payload))
     except Exception as exc:
         raise _domain_error(exc) from exc

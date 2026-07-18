@@ -39,6 +39,47 @@ class APIHTTPTests(unittest.TestCase):
         self.assertEqual(body["api_version"], "1.0")
         self.assertTrue(body["candidates"])
 
+    def test_signed_in_kitchen_is_loaded_from_supabase(self):
+        snapshot = {
+            "household_id": "house-1",
+            "inventory": kitchen_payload()["inventory"],
+            "equipment": kitchen_payload().get("equipment", [{"name": "Stovetop"}]),
+            "household_members": [],
+            "preferences": [],
+        }
+        with patch("api_http._SUPABASE") as gateway:
+            gateway.token_from_authorization.return_value = "user-token"
+            gateway.kitchen_snapshot.return_value = snapshot
+            response = self.client.get(
+                "/api/MyKitchen",
+                headers={"Authorization": "Bearer user-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["household_id"], "house-1")
+
+    def test_signed_in_recipe_request_uses_the_durable_inventory(self):
+        kitchen = kitchen_payload()
+        snapshot = {
+            "household_id": "house-1",
+            "inventory": kitchen["inventory"],
+            "equipment": kitchen.get("equipment", [{"name": "Stovetop"}]),
+            "household_members": [],
+            "preferences": [],
+        }
+        with patch("api_http._SUPABASE") as gateway:
+            gateway.token_from_authorization.return_value = "user-token"
+            gateway.kitchen_snapshot.return_value = snapshot
+            response = self.client.post(
+                "/api/GetRecipeList",
+                json={**kitchen, "inventory": [{"name": "Stale browser food", "quantity": 1}]},
+                headers={"Authorization": "Bearer user-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["candidates"])
+        gateway.kitchen_snapshot.assert_called_once_with("user-token")
+
     def test_meal_builder_options_endpoint_marks_owned_choices(self):
         response = self.client.post("/api/GetMealBuilderOptions", json=kitchen_payload())
         self.assertEqual(response.status_code, 200)
@@ -72,6 +113,75 @@ class APIHTTPTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Unknown or unavailable candidate_id", response.json()["detail"])
 
+    def test_signed_in_cook_can_report_the_exact_recipe(self):
+        recipe = {
+            "candidate_id": "candidate-1",
+            "title": "Dinner",
+            "ingredients": ["Chicken breast"],
+            "steps": ["Cook safely."],
+            "build_provenance": {"build_id": "SNS-test", "git": {"commit": "abc"}},
+        }
+        with patch("api_http._SUPABASE") as gateway:
+            gateway.token_from_authorization.return_value = "user-token"
+            gateway.submit_recipe_report.return_value = {
+                "report_id": "report-1", "status": "received"
+            }
+            response = self.client.post(
+                "/api/ReportRecipe",
+                json={
+                    "recipe_snapshot": recipe,
+                    "rendered_recipe_text": "The full visible recipe",
+                    "issue_categories": ["weird_instructions"],
+                },
+                headers={"Authorization": "Bearer user-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "received")
+        report = gateway.submit_recipe_report.call_args.args[1]
+        self.assertEqual(report["p_candidate_id"], "candidate-1")
+        self.assertEqual(report["p_build_id"], "SNS-test")
+        self.assertEqual(report["p_issue_categories"], ["weird_instructions"])
+
+    def test_anonymous_recipe_report_is_not_stored(self):
+        response = self.client.post(
+            "/api/ReportRecipe",
+            json={"recipe_snapshot": {"candidate_id": "candidate-1"}},
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("Log in", response.json()["detail"])
+
+    def test_anonymous_inventory_capture_is_rejected_before_external_lookup(self):
+        barcode = self.client.post("/api/ResolveBarcode", json={"barcode": "000240001628"})
+        photo = self.client.post(
+            "/api/RecognizePantryPhoto",
+            json={"image_data_url": "data:image/jpeg;base64,c21hbGw="},
+        )
+
+        self.assertEqual(barcode.status_code, 401)
+        self.assertEqual(photo.status_code, 401)
+        self.assertIn("Log in", barcode.json()["detail"])
+
+    def test_signed_in_barcode_capture_uses_rls_kitchen_and_returns_only_a_draft(self):
+        with patch("api_http._SUPABASE") as gateway, patch("api_http.resolve_barcode") as resolver:
+            gateway.token_from_authorization.return_value = "user-token"
+            gateway.kitchen_snapshot.return_value = {
+                "inventory": [{"name": "Green beans", "quantity": 1, "unit": "can"}]
+            }
+            resolver.return_value = {"source": "barcode", "items": [{"name": "Green beans"}]}
+            response = self.client.post(
+                "/api/ResolveBarcode",
+                json={"barcode": "000240001628"},
+                headers={"Authorization": "Bearer user-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("saved", response.json())
+        gateway.kitchen_snapshot.assert_called_once_with("user-token")
+        self.assertEqual(
+            resolver.call_args.kwargs["existing_inventory"][0]["name"], "Green beans"
+        )
+
     def test_default_cors_preflight_allows_tester_site(self):
         response = self.client.options(
             "/api/GetRecipeList",
@@ -82,6 +192,18 @@ class APIHTTPTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["access-control-allow-origin"], "*")
+
+    def test_cors_preflight_allows_the_user_authorization_header(self):
+        response = self.client.options(
+            "/api/MyKitchen",
+            headers={
+                "Origin": "https://stockandstir.co",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Authorization", response.headers["access-control-allow-headers"])
 
     def test_configured_cors_origins_are_parsed_for_fastapi(self):
         configured = "https://sns-web-um3d.onrender.com"
