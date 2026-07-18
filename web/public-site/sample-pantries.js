@@ -1,18 +1,30 @@
 (() => {
   const rawPieces = new Set(["Chicken breast", "Chicken drumsticks", "Chicken thighs", "Chicken wings", "Whole chicken", "Pork chops", "Pork loin", "Turkey breast", "Turkey sausage", "Breakfast sausage", "Italian sausage", "Kielbasa"]);
   const rawPounds = new Set(["Ground beef", "Beef brisket", "Beef stew meat", "Chuck roast", "Flank steak", "Ribeye steak", "Sirloin steak", "Ground chicken", "Ground turkey", "Pork shoulder", "Salmon", "Cod", "Shrimp", "Tilapia"]);
+  const freshRawPounds = new Set(["Corned beef"]);
   const refrigerated = new Set(["Butter", "Cheddar cheese", "Colby Jack cheese", "Cottage cheese", "Cream cheese", "Greek yogurt", "Heavy cream", "Milk", "Monterey Jack cheese", "Pepper Jack cheese", "Sour cream", "Swiss cheese", "Eggs"]);
+  const frozenPackaged = new Set(["Hash browns"]);
   const canned = new Set(["Baked beans", "Black beans", "Black-eyed peas", "Butter beans", "Cannellini beans", "Chickpeas", "Cranberry beans", "Great Northern beans", "Kidney beans", "Lima beans", "Navy beans", "Pinto beans", "Refried beans", "White beans", "Canned tuna", "Coconut milk", "Cream of chicken soup", "Cream of mushroom soup", "Diced tomatoes", "Rotel", "Tomato sauce"]);
   const bottles = new Set(["Apple cider vinegar", "BBQ sauce", "Chicken broth", "Hot sauce", "Maple syrup", "Molasses", "Mustard", "Olive oil", "Sesame oil", "Vegetable oil", "Worcestershire sauce"]);
-  const pantryFoundations = new Set(["Brown rice", "Cornbread", "Egg noodles", "Jasmine rice", "Macaroni", "Pasta", "Quinoa", "White rice", "Wild rice"]);
+  const pantryFoundations = new Set(["Brown rice", "Egg noodles", "Jasmine rice", "Macaroni", "Pasta", "Quinoa", "White rice", "Wild rice"]);
   const herbs = new Set(["Cilantro", "Fresh thyme"]);
   const shelfProduce = new Set(["Garlic", "Onions", "Potatoes", "Sweet potatoes", "Butternut squash"]);
-  const packagedProduce = new Set(["Asparagus", "Blackberries", "Blueberries", "Broccoli", "Brussels sprouts", "Cranberries", "Green beans", "Kale", "Mushrooms", "Mustard greens"]);
+  const packagedProduce = new Set(["Asparagus", "Blackberries", "Blueberries", "Broccoli", "Brussels sprouts", "Cranberries", "Green beans", "Green bell pepper", "Kale", "Mushrooms", "Mustard greens", "Red bell pepper"]);
 
-  function pantryItem(name) {
+  const regionalCannedProduce = {
+    great_plains: new Set(["Corn", "Green beans", "Peas"]),
+    great_lakes_midwest: new Set(["Corn", "Green beans", "Peas"]),
+    gulf_deep_south: new Set(["Collard greens", "Mustard greens"]),
+    appalachia_upper_south: new Set(["Corn", "Green beans", "Collard greens", "Mustard greens"]),
+    mid_atlantic: new Set(["Corn", "Green beans", "Collard greens"])
+  };
+
+  function pantryItem(name, regionId = "") {
     let form = "Fresh", storage_location = "Fresh", quantity = 2, unit = "piece";
     if (rawPieces.has(name)) [form, storage_location, quantity, unit] = ["Frozen Raw", "Freezer", 4, "piece"];
     else if (rawPounds.has(name)) [form, storage_location, quantity, unit] = ["Frozen Raw", "Freezer", 1.5, "lb"];
+    else if (freshRawPounds.has(name)) [form, storage_location, quantity, unit] = ["Fresh Raw", "Fridge", 1.5, "lb"];
+    else if (frozenPackaged.has(name)) [form, storage_location, quantity, unit] = ["Frozen", "Freezer", 1, "package"];
     else if (refrigerated.has(name)) {
       [form, storage_location, quantity, unit] = ["Refrigerated", "Fridge", 1, "package"];
       if (name === "Eggs") [quantity, unit] = [12, "egg"];
@@ -20,16 +32,17 @@
       if (name === "Butter") [quantity, unit] = [1, "lb"];
     } else if (pantryFoundations.has(name)) [form, storage_location, quantity, unit] = ["Dry", "Pantry", 2, name.includes("rice") || name === "Quinoa" ? "lb" : "box"];
     else if (name === "Corn tortillas") [form, storage_location, quantity, unit] = ["Refrigerated", "Fridge", 1, "package"];
-    else if (canned.has(name)) [form, storage_location, quantity, unit] = ["Canned", "Pantry", 2, "can"];
+    else if (canned.has(name) || regionalCannedProduce[regionId]?.has(name)) [form, storage_location, quantity, unit] = ["Canned", "Pantry", 2, "can"];
     else if (bottles.has(name)) [form, storage_location, quantity, unit] = ["Shelf-stable", "Pantry", name === "Chicken broth" ? 2 : 1, name === "Chicken broth" ? "carton" : "bottle"];
     else if (herbs.has(name)) [form, storage_location, quantity, unit] = ["Fresh", "Fridge", 1, "bunch"];
     else if (shelfProduce.has(name)) [form, storage_location, quantity, unit] = ["Fresh", "Fresh", name === "Garlic" ? 2 : 3, "piece"];
     else if (packagedProduce.has(name)) [form, storage_location, quantity, unit] = ["Fresh", "Fridge", 1, "package"];
+    else if (name === "Sauerkraut") [form, storage_location, quantity, unit] = ["Refrigerated", "Fridge", 1, "jar"];
     else if (["All-purpose flour", "Sugar", "Brown sugar"].includes(name)) [form, storage_location, quantity, unit] = ["Shelf-stable", "Pantry", 3, "lb"];
-    else if (["Bread", "Biscuits"].includes(name)) [form, storage_location, quantity, unit] = ["Shelf-stable", "Pantry", 1, "package"];
+    else if (["Bread", "Biscuits", "Cornbread"].includes(name)) [form, storage_location, quantity, unit] = ["Shelf-stable", "Pantry", 1, "package"];
     else if (["Bacon", "Ham"].includes(name)) [form, storage_location, quantity, unit] = ["Cooked", "Fridge", 1, "package"];
     else if (/beans|lentils/.test(name.toLowerCase()) || name === "Split peas") [form, storage_location, quantity, unit] = ["Dry", "Pantry", 1, "lb"];
-    else if (/salt|pepper|powder|cumin|paprika|dill|sage|turmeric|ginger/i.test(name)) [form, storage_location, quantity, unit] = ["Shelf-stable", "Pantry", 1, "jar"];
+    else if (/salt|pepper|powder|cumin|paprika|dill|sage|turmeric|ginger|seed/i.test(name)) [form, storage_location, quantity, unit] = ["Shelf-stable", "Pantry", 1, "jar"];
     return { name, form, storage_location, quantity, unit, quantity_band: "", origin: "sample_pantry", notes: "" };
   }
 
@@ -50,6 +63,6 @@
 
   window.SNS_SAMPLE_PANTRIES = definitions.map(([id, label, description, extras]) => ({
     id, label, description,
-    items: [...new Set([...common, ...extras])].map(pantryItem)
+    items: [...new Set([...common, ...extras])].map(name => pantryItem(name, id))
   }));
 })();

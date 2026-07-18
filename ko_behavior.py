@@ -822,7 +822,7 @@ _add_family_method("plant_protein", casserole_method(
 for _family_code in (
     "aromatic_slow", "aromatic_fast", "sturdy_root", "tender_watery",
     "tomato", "mushroom", "quick_green", "cruciferous", "pepper",
-    "winter_squash", "cabbage", "okra", "sweet_kernel",
+    "winter_squash", "cabbage", "okra", "sweet_kernel", "leafy_sturdy",
 ):
     _add_family_method(_family_code, casserole_method(
         ("fresh", "fresh raw", "frozen", "canned"), 4, 25, 4,
@@ -1194,6 +1194,16 @@ FAMILY_LIBRARY["corn"] = BehaviorFamily(
         "Move to a cooler zone and continue turning.", "fair",
     )), ("grill-whole", "late-entry"),
 )
+
+_add_family_method("corn", casserole_method(
+    ("fresh", "frozen", "canned"), 3, 18, 3,
+    "Drain canned {name}, break up frozen clumps, or cut fresh kernels from the cob.",
+    "Bake {name} in the casserole until the kernels are hot and tender without shriveling.",
+    "Sweet, plump kernels distributed through the casserole.",
+    "The kernels are hot and tender while retaining their shape.",
+    "A long uncovered bake can dry and toughen the kernels.",
+    "Cover the dish or add the kernels later when the other ingredients need a long bake.",
+))
 
 
 def support_method(
@@ -1880,9 +1890,14 @@ def _database_revision(db_path) -> tuple:
     for path in (base, Path(f"{base}-wal")):
         try:
             stat = path.stat()
-            revisions.append((stat.st_mtime_ns, stat.st_size))
+            change_counter = b""
+            if path == base and stat.st_size >= 28:
+                with path.open("rb") as database_file:
+                    database_file.seek(24)
+                    change_counter = database_file.read(4)
+            revisions.append((stat.st_mtime_ns, stat.st_size, change_counter))
         except OSError:
-            revisions.append((0, 0))
+            revisions.append((0, 0, b""))
     return tuple(revisions)
 
 

@@ -16,12 +16,27 @@
       <button class="add-kitchen-item" type="button" data-add-household-member>+ Add household member</button>
     </div>
   </section>
+  <section class="inventory-section household-safety-section">
+    <div class="section-heading static-heading">
+      <span class="section-icon" aria-hidden="true">!</span>
+      <span class="section-title"><span>Food safety and standing limits</span><small>These apply to the whole household unless a future person-specific setting replaces them.</small></span>
+    </div>
+    <div class="section-body preference-field-grid">
+      <label><strong>Allergies</strong><span>Separate several foods with commas.</span><textarea data-preference-type="allergy" data-target-type="ingredient" data-severity="never" placeholder="Peanuts, shellfish"></textarea></label>
+      <label><strong>Never include</strong><span>Medical, religious, or household exclusions.</span><textarea data-preference-type="exclusion" data-target-type="ingredient" data-severity="never" placeholder="Pork, grapefruit"></textarea></label>
+      <label><strong>Usually avoid</strong><span>Foods that are allowed, but generally unwelcome.</span><textarea data-preference-type="dislike" data-target-type="ingredient" data-severity="dislike" placeholder="Olives, cooked spinach"></textarea></label>
+      <label><strong>Favorite directions</strong><span>Cuisines or ingredients the household enjoys.</span><textarea data-preference-type="preference" data-target-type="cuisine" data-severity="prefer" placeholder="Tex-Mex, Italian"></textarea></label>
+    </div>
+  </section>
   <div class="preference-save-row">
     <span data-save-status>Changes are stored in this browser.</span>
     <button class="btn btn-primary" type="button" data-save-household>Save Household Preferences</button>
   </div>
-  <section class="coming-soon-panel"><strong>More household preferences are coming here.</strong><p>Allergies, standing exclusions, and preferences will live beside appetites. Meal-specific attendance and exclusions will remain part of tonight’s meal flow.</p></section>
+  <section class="coming-soon-panel"><strong>Tonight can still be different.</strong><p>These are household defaults. Meal-specific attendance and one-night limits remain part of tonight’s meal flow.</p></section>
 </main>
+<script src="sns-config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script>
+<script src="sns-auth.js"></script>
 <script src="sns-flow.js"></script>
 </body>
 </html>

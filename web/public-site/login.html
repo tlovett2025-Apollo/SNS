@@ -102,6 +102,8 @@
       line-height: 1.5;
       text-align: center;
     }
+    .auth-message { margin: 14px 0 0; padding: 12px 14px; border-radius: 9px; background: #eef4ef; color: #274c3c; line-height: 1.45; }
+    .auth-message.error { background: #fff0ec; color: #8e321e; }
     @media (max-width: 860px) {
       .auth-grid { grid-template-columns: 1fr; }
       .auth-copy { display: none; }
@@ -151,7 +153,7 @@
         <div id="selected-plan" class="selected-plan"></div>
 
         <form id="auth-form">
-          <label for="email">Email address</label>
+          <label id="email-label" for="email">Email address</label>
           <input id="email" type="email" autocomplete="email" required />
 
           <label for="password">Password</label>
@@ -164,34 +166,52 @@
             Continue
           </button>
           <a id="forgot" class="forgot" href="#">Forgot password?</a>
+          <p id="auth-message" class="auth-message" hidden aria-live="polite"></p>
         </form>
 
         <p class="auth-fine">
-          First-step account shell. Real authentication, password recovery,
-          household ownership, and trial status will connect to a managed
-          authentication service before launch.
+          Your pantry and household settings are protected by your account and
+          shared across the devices where you sign in.
         </p>
       </section>
     </div>
   </main>
 
+  <script src="sns-config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script>
+  <script src="sns-auth.js"></script>
   <script>
     const params = new URLSearchParams(location.search);
     const selectedPlan = params.get("plan");
-    let mode = params.get("mode") === "signup" ? "signup" : "login";
+    let mode = ["signup", "recovery"].includes(params.get("mode")) ? params.get("mode") : "login";
 
     const byId = (id) => document.getElementById(id);
 
+    function showMessage(message, error = false) {
+      const target = byId("auth-message");
+      target.hidden = !message;
+      target.textContent = message || "";
+      target.classList.toggle("error", error);
+    }
+
     function renderMode() {
       const signingUp = mode === "signup";
-      byId("login-tab").classList.toggle("active", !signingUp);
+      const recovering = mode === "recovery";
+      byId("login-tab").classList.toggle("active", !signingUp && !recovering);
       byId("signup-tab").classList.toggle("active", signingUp);
+      byId("login-tab").hidden = recovering;
+      byId("signup-tab").hidden = recovering;
       byId("trial-box").hidden = !signingUp;
-      byId("confirm-label").hidden = !signingUp;
-      byId("confirm").hidden = !signingUp;
-      byId("confirm").required = signingUp;
-      byId("forgot").hidden = signingUp;
-      byId("auth-submit").textContent = signingUp
+      byId("confirm-label").hidden = !(signingUp || recovering);
+      byId("confirm").hidden = !(signingUp || recovering);
+      byId("confirm").required = signingUp || recovering;
+      byId("email-label").hidden = recovering;
+      byId("email").hidden = recovering;
+      byId("email").required = !recovering;
+      byId("forgot").hidden = signingUp || recovering;
+      byId("auth-submit").textContent = recovering
+        ? "Save New Password"
+        : signingUp
         ? "Create Account & Open My Kitchen"
         : "Log In to My Kitchen";
 
@@ -211,33 +231,61 @@
       renderMode();
     });
 
-    byId("auth-form").addEventListener("submit", (event) => {
+    byId("auth-form").addEventListener("submit", async (event) => {
       event.preventDefault();
+      showMessage("");
 
       if (
-        mode === "signup" &&
+        ["signup", "recovery"].includes(mode) &&
         byId("confirm").value !== byId("password").value
       ) {
-        alert("The passwords do not match.");
+        showMessage("The passwords do not match.", true);
         return;
       }
-
-      sessionStorage.setItem(
-        "snsAuthPrototype",
-        JSON.stringify({
-          mode,
-          email: byId("email").value,
-          selectedPlan,
-          trialDays: 7
-        })
-      );
-
-      location.href = "home.html";
+      if (!window.SNS_AUTH?.configured) {
+        showMessage("Account service configuration is unavailable.", true);
+        return;
+      }
+      const button = byId("auth-submit");
+      button.disabled = true;
+      try {
+        const email = byId("email").value.trim();
+        const password = byId("password").value;
+        if (mode === "recovery") {
+          const { error } = await window.SNS_AUTH.client.auth.updateUser({ password });
+          if (error) throw error;
+          showMessage("Your password is updated. Taking you to My Kitchen…");
+          setTimeout(() => { location.href = "home.html"; }, 700);
+          return;
+        }
+        const result = mode === "signup"
+          ? await window.SNS_AUTH.signUp(email, password)
+          : await window.SNS_AUTH.signIn(email, password);
+        if (result.session) {
+          location.href = "home.html";
+          return;
+        }
+        showMessage("Account created. Check your email to confirm it, then return here to log in.");
+      } catch (error) {
+        showMessage(error.message || "The account request could not be completed.", true);
+      } finally {
+        button.disabled = false;
+      }
     });
 
-    byId("forgot").addEventListener("click", (event) => {
+    byId("forgot").addEventListener("click", async (event) => {
       event.preventDefault();
-      alert("Password reset will be connected with the managed authentication service.");
+      const email = byId("email").value.trim();
+      if (!email) {
+        showMessage("Enter your email address first, then choose Forgot password.", true);
+        return;
+      }
+      try {
+        await window.SNS_AUTH.resetPassword(email);
+        showMessage("Password reset instructions are on their way. Check your email.");
+      } catch (error) {
+        showMessage(error.message || "Password reset could not be started.", true);
+      }
     });
 
     renderMode();

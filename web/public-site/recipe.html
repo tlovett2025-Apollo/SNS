@@ -45,6 +45,39 @@
         <div class="cooking-plan-list" data-steps></div>
       </section>
     </div>
+    <section class="recipe-report-card" data-recipe-report>
+      <div>
+        <h2>Something feel off?</h2>
+        <p>Send this exact recipe and its build information to Stock &amp; Stir for review.</p>
+      </div>
+      <button class="btn btn-secondary" type="button" data-open-recipe-report>Report this recipe</button>
+      <p class="form-status" data-recipe-report-status aria-live="polite"></p>
+    </section>
+    <dialog class="recipe-report-dialog" data-recipe-report-dialog>
+      <form method="dialog" data-recipe-report-form>
+        <div class="dialog-heading">
+          <div>
+            <div class="eyebrow">Recipe review</div>
+            <h2>What felt wrong?</h2>
+          </div>
+          <button class="dialog-close" type="button" data-close-recipe-report aria-label="Close">×</button>
+        </div>
+        <p>Choose anything that applies—or simply send it for a general review.</p>
+        <div class="recipe-report-options">
+          <label><input type="checkbox" name="issue" value="wrong_ingredients"> Wrong ingredients</label>
+          <label><input type="checkbox" name="issue" value="weird_instructions"> Weird or unclear instructions</label>
+          <label><input type="checkbox" name="issue" value="uncookable_combination"> Combination seems uncookable</label>
+          <label><input type="checkbox" name="issue" value="timing_or_effort"> Timing or effort seems wrong</label>
+          <label><input type="checkbox" name="issue" value="wrong_quantity"> Quantity seems wrong</label>
+        </div>
+        <label class="field-label" for="recipe-report-note">Anything else? <span>Optional</span></label>
+        <textarea id="recipe-report-note" name="note" rows="4" maxlength="2000" placeholder="Tell us what made you pause."></textarea>
+        <div class="dialog-actions">
+          <button class="btn btn-secondary" type="button" data-close-recipe-report>Cancel</button>
+          <button class="btn btn-primary" type="submit" data-submit-recipe-report>Send for review</button>
+        </div>
+      </form>
+    </dialog>
     <details class="build-provenance" data-build-provenance hidden>
       <summary data-build-summary>Build information</summary>
       <div class="build-provenance-grid">
@@ -59,6 +92,6 @@
       </div>
     </details>
   </main>
-  <script src="sns-flow.js"></script>
+<script src="sns-config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script><script src="sns-auth.js"></script><script src="sns-flow.js"></script>
 </body>
 </html>
