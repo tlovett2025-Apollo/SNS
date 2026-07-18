@@ -1454,6 +1454,8 @@ _set_portion("egg", "pieces", 2, "egg", "whole_up")
 _set_portion("bacon", "pieces", 2, "strip", "whole_up")
 for _code in ("white_rice", "brown_rice", "quinoa"):
     _set_portion(_code, "dry_cups", .25, "cup", "quarter_cup_up", True)
+_set_portion("pasta", "dry_cups", .25, "cup", "quarter_cup_up", True)
+_set_portion("bread_wrap", "pieces", 2, "slice", "whole_up", True)
 for _code in ("soft_potato", "corn_porridge"):
     _set_portion(_code, "prepared_cups", .5, "cup", "quarter_cup_up", True)
 _set_portion("legume", "cans", .25, "can", "half_can_minimum", True)
@@ -1782,6 +1784,12 @@ def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> Res
             "brief_heat", "reheat", "assemble",
         }
         casserole_methods = {"casserole", "roast", "bake", "reheat", "assemble"}
+        if role == "foundation":
+            # A casserole may legitimately require a separately hydrated
+            # foundation before assembly. The planner must preserve that
+            # prerequisite; accepting the method here is not permission to
+            # place dry pasta or grain directly in the baking dish.
+            casserole_methods.update({"boil", "simmer"})
         oven_braise_methods = {
             "oven_braise", "roast", "bake", "reheat", "assemble", "simmer",
             "saute", "saute_steam", "bloom", "wilt", "brief_heat",
@@ -1796,6 +1804,25 @@ def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> Res
             "warm", "assemble", "wilt",
         }
         method_candidates = list(primary.methods)
+        if (
+            strategy_key == "casserole"
+            and role == "protein"
+            and "large" in set(primary.physical_traits)
+        ):
+            # A whole bird or large roast can share an oven, but it cannot be
+            # arranged as one component of a shallow integrated casserole.
+            method_candidates = [
+                item for item in method_candidates if item.method == "casserole"
+            ]
+        if (
+            strategy_key == "handheld"
+            and role == "foundation"
+            and primary.code != "bread_wrap"
+        ):
+            # In the handheld structure the foundation is the wrapper. Beans,
+            # rice, and potatoes can be fillings or sides, but cannot satisfy
+            # the structural promise that the finished meal can be held.
+            method_candidates = []
         if strategy_key == "handheld":
             method_candidates.sort(key=lambda item: item.method != "assemble")
         for candidate in method_candidates:
@@ -1835,6 +1862,35 @@ def resolve_behavior(name, role, form_name="", strategy="", db_path=None) -> Res
         name, role, form_name, primary, families[1:], selected, source, reason,
         ingredient_attributes(name, form_name, db_path),
     )
+
+
+def default_form_for(name, role="ingredient", db_path=None) -> str:
+    """Return the conservative form assumed for a planned purchase.
+
+    Empty forms previously matched every method, which could turn dry noodles
+    into a ready-to-reheat casserole component. Defaults are family facts so
+    the same rule protects every current and future member of that family.
+    """
+    behavior = resolve_behavior(name, role, db_path=db_path)
+    family = behavior.primary_family
+    if not family:
+        return ""
+    traits = set(family.physical_traits)
+    if role == "protein":
+        return "Cooked" if "ready-to-eat" in traits or "cooked" in traits else "Fresh Raw"
+    if role == "vegetable":
+        return "Fresh"
+    if role == "foundation":
+        if family.portion_basis == "cans":
+            return "Canned"
+        if traits & {"dry-starch", "dry-grain", "whole-grain"}:
+            return "Dry"
+        if "assembly" in traits or "ready-to-eat" in traits:
+            return "Shelf-stable"
+        if "vegetable" in traits:
+            return "Fresh"
+        return "Cooked"
+    return "Shelf-stable"
 
 
 def iter_family_seed_rows() -> Iterable[tuple]:

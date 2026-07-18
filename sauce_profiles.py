@@ -32,7 +32,7 @@ SIMPLE_STIR_FRY_SAUCE = SauceProfile(
         SauceIngredient("Garlic", "1–2 teaspoons minced"),
         SauceIngredient("Sugar or preferred sweetener", "1 teaspoon"),
         SauceIngredient("Cornstarch", "1 tablespoon"),
-        SauceIngredient("Cold water", "1 tablespoon", pantry_optional=True),
+        SauceIngredient("Cold water", "1 tablespoon"),
     ],
     prep_instruction=(
         "Prepare the simple stir-fry sauce: whisk the soy sauce, 1/2 cup water or broth, garlic, and sweetener together. "

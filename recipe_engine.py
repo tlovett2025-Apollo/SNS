@@ -1,5 +1,5 @@
 from ingredient_profiles import get_ingredient_profile
-from ko_behavior import resolve_behavior
+from ko_behavior import default_form_for, resolve_behavior
 from config import DB_PATH
 from cooking_planner import (
     assess_time_feasibility,
@@ -14,7 +14,7 @@ from cooking_planner import (
 from culinary_opportunities import discover_opportunities, serialize_opportunities
 from sauce_profiles import SauceIngredient, get_sauce_profile
 from recipe_validation import validate_recipe
-from math import ceil
+from math import ceil, floor
 import sqlite3
 
 
@@ -104,6 +104,15 @@ def _ingredient_check(item, available, excluded, protein=""):
         ), "")
         if resolved_name:
             status = "Substitute"
+        elif (
+            name_key in {_key("Water or broth"), _key("Broth or water")}
+            and not (item.pantry_optional or item.can_omit)
+        ):
+            status = "Substitute"
+            resolved_name = "Water"
+        elif name_key == _key("Cold water") and not (item.pantry_optional or item.can_omit):
+            status = "Have"
+            resolved_name = "Cold water"
         elif (
             name_key == _key("Cooking oil or butter")
             and "fat-rendering" in set(
@@ -226,15 +235,20 @@ def _quantity_plan(
                 "shortfall": max(0, pieces - available) if available else 0,
             }
             if unit in {"piece", "pieces"} and available and available < pieces:
+                shortfall = pieces - available
                 notes.append(
-                    f"Only {available:g} {label}{'s are' if available != 1 else ' is'} recorded for {pieces} planned. Slice or divide it through the meal, or add a bean, grain, or vegetable that fits the dish."
+                    f"Only {available:g} {label}{'s are' if available != 1 else ' is'} recorded for {pieces} planned. "
+                    f"Add {shortfall:g} more {label}{'' if shortfall == 1 else 's'} before making this meal."
                 )
         elif basis == "dry_cups":
             cups = ceil(effective * amount * 4) / 4.0
             plan[key] = {"display": f"{cups:g} cup{'s' if cups != 1 else ''} dry"}
         elif basis == "prepared_cups":
             cups = ceil(effective * amount * 4) / 4.0
-            plan[key] = {"display": f"about {cups:g} cup{'s' if cups != 1 else ''}"}
+            plan[key] = {
+                "display": f"about {cups:g} cup{'s' if cups != 1 else ''}",
+                "planned": cups,
+            }
         elif basis == "whole_count":
             pieces = max(1, ceil(effective * amount))
             label = quantity_label or "piece"
@@ -263,6 +277,35 @@ def _quantity_plan(
             # and more honest than invented piece counts.
             cups = ceil(max(.5, effective * .5 / vegetable_count) * 4) / 4.0
             plan[key] = {"display": f"about {cups:g} cup{'s' if cups != 1 else ''} prepared"}
+    # Many individually sensible vegetable portions can become an implausible
+    # vessel load when selected together. Keep the whole meal to roughly
+    # 1 1/2 prepared cups per planning portion, preserving at least 1/4 cup of
+    # every vegetable the user explicitly chose.
+    vegetable_keys = [
+        key for key, role in roles.items()
+        if role == "vegetable" and float((plan.get(key) or {}).get("planned") or 0) > 0
+    ]
+    total_vegetable_cups = sum(float(plan[key]["planned"]) for key in vegetable_keys)
+    vegetable_budget = max(.25 * len(vegetable_keys), effective * 1.5)
+    if vegetable_keys and total_vegetable_cups > vegetable_budget:
+        target_quarters = max(len(vegetable_keys), floor(vegetable_budget * 4))
+        scale = vegetable_budget / total_vegetable_cups
+        exact_quarters = {
+            key: float(plan[key]["planned"]) * scale * 4 for key in vegetable_keys
+        }
+        allocated = {key: max(1, floor(value)) for key, value in exact_quarters.items()}
+        remaining = target_quarters - sum(allocated.values())
+        for key in sorted(
+            vegetable_keys,
+            key=lambda item: exact_quarters[item] - floor(exact_quarters[item]),
+            reverse=True,
+        )[:max(0, remaining)]:
+            allocated[key] += 1
+        for key in vegetable_keys:
+            cups = allocated[key] / 4.0
+            plan[key]["planned"] = cups
+            plan[key]["display"] = f"about {cups:g} cup{'s' if cups != 1 else ''}"
+
     note = " ".join(dict.fromkeys(notes))
     return effective, plan, note
 
@@ -430,10 +473,14 @@ def _method_is_eligible(method, available, foundation, equipment):
             available, physical_traits=("collagen-rich",), relationship_traits=("wet-cook",)
         )
     if method == "oven_braise":
+        if equipment_keys and not any("oven" in item for item in equipment_keys):
+            return False
         return _inventory_has_ko(
             available, physical_traits=("collagen-rich",), relationship_traits=("wet-cook",)
         )
     if method == "casserole":
+        if equipment_keys and not any("oven" in item for item in equipment_keys):
+            return False
         return bool(foundation) or _inventory_has_ko(
             available, culinary_functions=("sauce-builder", "thickens", "adds-richness")
         )
@@ -521,10 +568,11 @@ def generate_candidates(
     selected_components = _unique([*proteins, *_clean(vegetable).split(" & "), foundation])
     extras = _unique(list(selected_extras or []))
     component_forms = dict(component_forms or {})
+    for name in _clean(vegetable).split(" & "):
+        if _clean(name) and not _clean(component_forms.get(name)):
+            component_forms[name] = default_form_for(name, "vegetable", DB_PATH)
     if foundation and not _clean(component_forms.get(foundation)):
-        foundation_behavior = resolve_behavior(foundation, "foundation", db_path=DB_PATH)
-        if foundation_behavior.primary_family and foundation_behavior.primary_family.portion_basis == "cans":
-            component_forms[foundation] = "Canned"
+        component_forms[foundation] = default_form_for(foundation, "foundation", DB_PATH)
     planned_purchase_keys = {_key(item) for item in (planned_purchase_items or [])}
     available = _unique(list(available_items or []) + [
         item for item in selected_components if _key(item) not in planned_purchase_keys
@@ -626,6 +674,19 @@ def generate_candidates(
             _ingredient_check(item, available, excluded, protein)
             for item in [*method_ingredients, *requested_requirements]
         ]
+        consolidated_checks = []
+        effective_indexes = {}
+        for check in requirement_checks:
+            effective_key = _key(check.get("resolved_name") or check.get("name"))
+            if effective_key in effective_indexes:
+                existing = consolidated_checks[effective_indexes[effective_key]]
+                if not _clean(existing.get("quantity")) and _clean(check.get("quantity")):
+                    existing["quantity"] = check["quantity"]
+                existing["required"] = bool(existing.get("required") or check.get("required"))
+                continue
+            effective_indexes[effective_key] = len(consolidated_checks)
+            consolidated_checks.append(check)
+        requirement_checks = consolidated_checks
         ingredient_checks = component_checks + requirement_checks
         for check in ingredient_checks:
             check["planned_purchase"] = _key(check.get("name")) in planned_purchase_keys
@@ -793,7 +854,15 @@ def generate_candidates(
             "available_equipment": equipment,
         })
         if is_soup:
-            c["soup_liquid"] = method_ingredients[0].name
+            liquid_requirement = next((
+                item for item in requirement_checks
+                if _key(item.get("name")) == _key(method_ingredients[0].name)
+            ), {})
+            c["soup_liquid"] = _clean(
+                liquid_requirement.get("resolved_name")
+                if liquid_requirement.get("status") == "Substitute"
+                else liquid_requirement.get("name")
+            ) or method_ingredients[0].name
             c["soup_liquid_quantity"] = method_ingredients[0].quantity
 
         schedule = build_kitchen_lane_schedule(c)
@@ -812,6 +881,13 @@ def generate_candidates(
         if not c["time_feasible"]:
             c["score"] = max(0, c["score"] - c["time_shortfall_minutes"] * 5)
         c["opportunities"] = serialize_opportunities(discover_opportunities(c))
+        plan_items = generate_human_plan_items(c)
+        c["recipe_validation"] = validate_recipe(c, plan_items)
+        if c["recipe_validation"]["errors"]:
+            # Candidate generation fails closed. A meal that cannot survive the
+            # whole-recipe contract is never offered and therefore can never
+            # reach Phase 3.
+            continue
         candidates.append(c)
 
     candidates.sort(key=lambda x: (x["time_feasible"], x["score"]), reverse=True)

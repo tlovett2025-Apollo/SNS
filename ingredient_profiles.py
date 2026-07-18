@@ -31,13 +31,13 @@ def _key(value):
 def _handling_for_state(template: str, name: str, state_name: str) -> str:
     """Render handling language that agrees with the selected physical state."""
     text = (template or "").format(name=name)
-    if _key(state_name) == "frozen raw":
-        return text
+    state_key = _key(state_name)
     # KO templates describe all supported forms. Remove frozen-only clauses
     # when the selected item is already fresh rather than telling every cook to
     # thaw every protein defensively.
     patterns = (
-        rf"Thaw {re.escape(name)} when frozen[.,;]\s*",
+        rf"Thaw {re.escape(name)} when frozen\s*(?:and|[.,;])\s*",
+        rf"Thaw {re.escape(name)} completely[.,;]\s*",
         rf"Thaw {re.escape(name)} safely,\s*",
         rf"Thaw {re.escape(name)},\s*",
         r"Thaw safely,\s*",
@@ -46,7 +46,49 @@ def _handling_for_state(template: str, name: str, state_name: str) -> str:
     )
     for pattern in patterns:
         text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    if "canned" in state_key:
+        text = re.sub(
+            r"[;,]?\s*drain (?:it|them) first when canned",
+            "; drain it well",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"[;,]?\s*drain or thaw (?:it|them) when (?:its|their) form requires it",
+            "; drain it well",
+            text,
+            flags=re.IGNORECASE,
+        )
+    elif "frozen" in state_key:
+        text = re.sub(
+            r"[;,]?\s*drain or thaw (?:it|them) when (?:its|their) form requires it",
+            "; thaw it and drain excess water",
+            text,
+            flags=re.IGNORECASE,
+        )
+    else:
+        text = re.sub(
+            r"[;,]?\s*drain (?:it|them) first when canned",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"[;,]?\s*drain or thaw (?:it|them) when (?:its|their) form requires it",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        )
     text = re.sub(r"\s{2,}", " ", text).strip(" ;")
+    text = re.sub(r";\s*\.", ".", text)
+    text = re.sub(r",\s+and\b", " and", text)
+    text = re.sub(r"\s+\.", ".", text)
+    text = re.sub(
+        r"\bDo not rinse it\b",
+        f"Do not rinse {name}",
+        text,
+        flags=re.IGNORECASE,
+    )
     return re.sub(
         r"(^|[.!?]\s+)([a-z])",
         lambda match: match.group(1) + match.group(2).upper(),
@@ -199,14 +241,28 @@ def _family_activities(self, strategy="", state_name=""):
 
     activities = []
     thaw_id = ""
-    if _key(state_name) == "frozen raw" and rule.frozen_thaw_template:
+    if _key(state_name) == "frozen raw":
         thaw_id = f"thaw:{self.name}"
+        thaw_rule = rule
+        if not rule.frozen_thaw_template and resolved.primary_family:
+            thaw_rule = next((
+                method for method in resolved.primary_family.methods
+                if method.frozen_thaw_template
+            ), rule)
+        thaw_instruction = (
+            thaw_rule.frozen_thaw_template.format(name=self.name)
+            if thaw_rule.frozen_thaw_template else
+            f"Keep {self.name} in a leak-proof bag and submerge it in cold tap water. "
+            f"Allow about 30 minutes per pound, changing the water every 30 minutes; cook {self.name} immediately after thawing."
+        )
         activities.append(KitchenActivity(
             component=self.name, activity_type="thaw",
-            instruction=rule.frozen_thaw_template.format(name=self.name),
-            minutes=rule.frozen_thaw_minutes, human_busy=True,
-            attention_load=.35, stage="early", parallel_ok=False,
-            equipment=rule.frozen_thaw_equipment, activity_id=thaw_id,
+            instruction=thaw_instruction,
+            minutes=thaw_rule.frozen_thaw_minutes or 30, human_busy=True,
+            attention_load=.35 if thaw_rule.frozen_thaw_template else .1,
+            stage="early", parallel_ok=False,
+            equipment=thaw_rule.frozen_thaw_equipment if thaw_rule.frozen_thaw_template else "sink",
+            activity_id=thaw_id,
         ))
 
     prep_id = f"prep:{self.name}"

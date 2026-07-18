@@ -59,7 +59,8 @@ def test_activity_consolidation_builds_one_real_ingredient_prep_phase():
     assert "mushrooms" in instruction
     assert "asparagus" in instruction
     assert "white rice" in instruction
-    assert "simple stir-fry sauce" in instruction
+    assert "Measure 1/4 cup Soy sauce" in prep.instruction
+    assert "Measure 1 tablespoon Cornstarch" in prep.instruction
 
 
 def test_component_cooking_depends_on_consolidated_prep():
@@ -123,7 +124,8 @@ def test_frozen_raw_chicken_publishes_verify_and_longer_path():
     kinds = [a.activity_type for a in chicken]
     assert kinds == ["thaw", "prep", "cook", "verify", "rest"]
     assert sum(a.minutes or 0 for a in chicken) > 30
-    assert "thaw safely" in chicken[1].instruction.lower()
+    assert "thaw" in chicken[0].instruction.lower()
+    assert "thaw" not in chicken[1].instruction.lower()
 
 
 def test_cooked_chicken_reheats_without_raw_cooking_cycle():
@@ -509,6 +511,47 @@ def test_slowest_branch_starts_first_and_shorter_branches_converge_at_service():
     assert service.start_minute - chard.end_minute <= 3
 
 
+def test_long_post_prep_delay_explains_that_the_wait_is_intentional():
+    from cooking_planner import KitchenActivity, ScheduledActivity, _planned_wait_after_prep
+
+    prep = ScheduledActivity(
+        KitchenActivity("meal", "prep", "Prep everything.", 4, True),
+        "Counter", 0, 4, 4,
+    )
+    rice = ScheduledActivity(
+        KitchenActivity("Basmati rice", "cook", "Cook rice.", 20, False),
+        "Rice Cooker", 0, 20, 0,
+    )
+    vegetables = ScheduledActivity(
+        KitchenActivity("vegetables", "cook", "Cook vegetables.", 5, True),
+        "Burner 1", 15, 20, 5,
+    )
+
+    wait_after, note = _planned_wait_after_prep([prep, rice, vegetables])
+
+    assert wait_after is prep
+    assert "about 11 minutes" in note
+    assert "Basmati rice is still cooking" in note
+
+
+def test_small_post_prep_gap_does_not_add_waiting_chatter():
+    from cooking_planner import KitchenActivity, ScheduledActivity, _planned_wait_after_prep
+
+    prep = ScheduledActivity(
+        KitchenActivity("meal", "prep", "Prep everything.", 4, True),
+        "Counter", 0, 4, 4,
+    )
+    next_step = ScheduledActivity(
+        KitchenActivity("vegetables", "cook", "Cook vegetables.", 5, True),
+        "Burner 1", 11, 16, 5,
+    )
+
+    wait_after, note = _planned_wait_after_prep([prep, next_step])
+
+    assert wait_after is None
+    assert note == ""
+
+
 def test_three_vegetable_meal_uses_five_minute_prep_rule():
     from cooking_planner import build_activity_graph
 
@@ -601,7 +644,7 @@ def test_real_sauce_ko_flows_to_recipe_and_inventory():
     recipe = build_recipe_from_candidate(candidate)
     text = " ".join(recipe["instructions"])
 
-    assert "1/2 cup water or broth" in text
+    assert "Measure 1/2 cup Water" in text
     assert "cornstarch slurry" in text
     statuses = {item["name"]: item["status"] for item in recipe["inventory_requirements"]}
     assert statuses["Soy sauce"] == "Have"
@@ -713,4 +756,5 @@ def test_pressure_cooker_white_rice_uses_25_minutes_to_cooked_plus_ten_release()
     assert cycle.end_minute - start.end_minute == 35
     assert by_id["finish and serve:meal"].start_minute >= cycle.end_minute
     text = generate_human_instructions(candidate)
-    assert "Minutes 4–25: Ingredient Prep:" in text
+    assert "Minutes 4–9: Ingredient Prep:" in text
+    assert "After prep, you’ll have about 16 minutes before the next cooking step." in text

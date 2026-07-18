@@ -138,7 +138,7 @@ class APIServiceTests(unittest.TestCase):
         self.assertNotIn("thaw before browning", plan.lower())
         self.assertNotIn("Thaw Kielbasa", plan)
         self.assertNotIn("Plan on about", plan)
-        self.assertIn("final", plan.lower())
+        self.assertIn("off the heat", plan.lower())
         self.assertIn("Limes juice or wedges", plan)
         self.assertNotIn("distribute Kielbasa & Limes", plan)
         self.assertNotIn("Plate Limes", plan)
@@ -219,7 +219,7 @@ class APIServiceTests(unittest.TestCase):
 
         choice = get_recipe_list(request)["candidates"][0]
         recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
-        plan = " ".join(recipe["steps"])
+        plan = " ".join(recipe["instructions"])
 
         self.assertIn("Skillet Supper", choice["title"])
         self.assertNotIn("One-Pot", choice["title"])
@@ -380,6 +380,60 @@ class APIServiceTests(unittest.TestCase):
         self.assertIn("Celery — about 1 cup", recipe["ingredients"])
         self.assertIn("Onions — about 1 cup", recipe["ingredients"])
         self.assertIn("Potatoes — about 2 cups", recipe["ingredients"])
+
+    def test_kitchen_sink_casserole_has_a_complete_causal_recipe(self):
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": {
+                "inventory": [
+                    {"name": "Chicken breast", "form": "Frozen Raw", "quantity": 1, "unit": "piece"},
+                    {"name": "Kielbasa", "form": "Cooked", "quantity": 1, "unit": "piece"},
+                    {"name": "Mushrooms", "form": "Fresh"},
+                    {"name": "Tomatoes", "form": "Fresh"},
+                    {"name": "Butter", "form": "Refrigerated"},
+                ],
+                "equipment": [{"name": "Oven"}],
+            },
+            "selections": {
+                "proteins": [
+                    {"name": "Chicken breast", "state": "Frozen Raw", "role": "main"},
+                    {"name": "Kielbasa", "state": "Cooked", "role": "supporting"},
+                ],
+                "produce": [
+                    "Green bell pepper", "Mushrooms", "Okra", "Onions",
+                    "Orange bell pepper", "Tomatoes", "Yellow bell pepper",
+                ],
+                "foundation": "Egg noodles", "extras": ["Tomato sauce", "Butter"],
+                "cuisine": "Italian", "cooking_method": "casserole",
+                "meal_structure": "integrated", "serving_temperature": "hot",
+                "energy": "High", "time_minutes": 180, "servings": 4,
+            },
+        }
+
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+        plan = " ".join(recipe["instructions"])
+
+        self.assertTrue(recipe["recipe_validation"]["production_ready"])
+        self.assertIn("Add 3 more pieces before making this meal", " ".join(recipe["instructions"]))
+        self.assertIn("Egg noodles — 1 cup dry", recipe["ingredients"])
+        self.assertIn("Butter — 1 tablespoon", recipe["ingredients"])
+        self.assertLessEqual(sum(
+            float(line.rsplit("about ", 1)[1].split(" cup", 1)[0])
+            for line in recipe["ingredients"] if " — about " in line
+        ), 6.0)
+        self.assertLess(plan.index("Measure 1 1/2 cups Tomato sauce"), plan.index("Arrange Chicken breast"))
+        self.assertLess(plan.index("Boil Egg noodles"), plan.index("Arrange Chicken breast"))
+        self.assertIn("Drain it thoroughly", plan)
+        self.assertIn("Spread Mushrooms & Okra on a rimmed sheet pan", plan)
+        self.assertIn("deep 4-quart baking dish", plan)
+        self.assertNotIn("Arrange Chicken breast & Kielbasa", plan)
+        self.assertGreater(plan.index("Fold Kielbasa into the casserole"), plan.index("Arrange Chicken breast"))
+        self.assertIn("added cooked protein is steaming hot", plan)
+        self.assertNotIn("when canned", plan)
+        self.assertNotIn("Olive oil", plan)
+        self.assertNotIn("Italian seasoning", plan)
+        self.assertNotIn("Mix in Butter", plan)
 
     def test_builder_catalog_marks_current_kitchen_ownership(self):
         options = get_meal_builder_options(kitchen_payload())

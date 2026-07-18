@@ -17,7 +17,7 @@ from datetime import date
 from config import DB_PATH
 from build_provenance import collect_build_provenance
 from household_inventory import replace_household_inventory, submit_pending_items
-from ko_behavior import resolve_behavior
+from ko_behavior import default_form_for, resolve_behavior
 from recipe_engine import build_recipe_from_candidate, generate_candidates
 
 
@@ -1192,6 +1192,8 @@ def _builder_candidates(payload: dict, db_path: str | Path):
     for name in produce:
         if _key(name) not in resolved_by_name and _clean(produce_forms.get(name)):
             component_forms[name] = _clean(produce_forms.get(name))
+    if foundation and not _clean(component_forms.get(foundation)):
+        component_forms[foundation] = default_form_for(foundation, "foundation", db_path)
     engine_request.update({
         "protein_name": protein,
         "protein_names": [item["name"] for item in protein_selections],

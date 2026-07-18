@@ -67,6 +67,10 @@ def _extras_instruction(candidate: dict, strategy: str, phase: str = "finish") -
     sauce_keys = {
         _clean(item.name).lower() for item in (sauce_profile.ingredients if sauce_profile else [])
     }
+    for sauce_item in (sauce_profile.ingredients if sauce_profile else []):
+        resolved = _resolved_requirement_name(candidate, sauce_item.name)
+        if resolved:
+            sauce_keys.add(resolved.lower())
     extras = [
         _clean(item) for item in candidate.get("selected_extras") or [] if _clean(item)
         and _clean(item).lower() not in sauce_keys
@@ -202,6 +206,77 @@ def _comfort_sauce_prep(candidate: dict, fallback: str) -> str:
             f"In a small cup, stir the {thickener} with 1 tablespoon cold water until smooth."
         )
     return " ".join(instructions)
+
+
+def _resolved_sauce_prep(candidate: dict, sauce_profile) -> str:
+    """Measure only the sauce ingredients the kitchen check approved."""
+    if not sauce_profile:
+        return ""
+    measurements = []
+    for ingredient in sauce_profile.ingredients:
+        requirement = _requirement(candidate, ingredient.name)
+        if requirement and requirement.get("status") == "Omit":
+            continue
+        name = _clean(
+            requirement.get("resolved_name")
+            if requirement.get("status") == "Substitute"
+            else requirement.get("name")
+        ) if requirement else ingredient.name
+        quantity = _clean(requirement.get("quantity")) if requirement else ingredient.quantity
+        if not name or not quantity or "to taste" in quantity.lower() or "after tasting" in quantity.lower():
+            continue
+        measurements.append(f"Measure {quantity} {name}.")
+    return " ".join(measurements)
+
+
+def _resolved_braise_sauce_prep(candidate: dict, sauce_profile) -> str:
+    """Preserve useful braise mixing guidance without reviving omitted items."""
+    if not sauce_profile or sauce_profile.name != "BBQ Sauce":
+        return _resolved_sauce_prep(candidate, sauce_profile)
+
+    broth = next(iter(_resolved_requirements_by_ko(
+        candidate, family_codes=("broth_liquid",)
+    )), "") or _resolved_requirement_name(candidate, "Broth or water") or "broth or water"
+    parts = [
+        f"Measure 1 1/2 cups {broth}.",
+        f"Whisk 1/2 cup BBQ sauce with 1 cup of it; reserve the remaining 1/2 cup to adjust the liquid level during the braise.",
+    ]
+
+    approved = {}
+    for ingredient in sauce_profile.ingredients:
+        requirement = _requirement(candidate, ingredient.name)
+        if requirement and requirement.get("status") == "Omit":
+            continue
+        resolved = _clean(
+            requirement.get("resolved_name")
+            if requirement and requirement.get("status") == "Substitute"
+            else requirement.get("name") if requirement else ingredient.name
+        )
+        if resolved:
+            approved[ingredient.name.lower()] = resolved
+
+    condiments = [
+        ("worcestershire sauce", "1 tablespoon"),
+        ("mustard", "1 tablespoon"),
+        ("ketchup", "2 tablespoons"),
+    ]
+    selected_condiments = [
+        (approved[key], quantity) for key, quantity in condiments if key in approved
+    ]
+    seasonings = [
+        approved[key] for key in ("garlic powder", "onion powder", "black pepper")
+        if key in approved
+    ]
+    additions = []
+    if selected_condiments:
+        additions.append(" and ".join(
+            f"{quantity} {name}" for name, quantity in selected_condiments
+        ))
+    if seasonings:
+        additions.append(f"the measured {_join(seasonings)}")
+    if additions:
+        parts.append(f"Add {' plus '.join(additions)}.")
+    return " ".join(parts)
 
 
 def _comfort_sauce_finish(candidate: dict, fallback: str) -> str:
@@ -580,7 +655,7 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
 
         sauce_profile = get_sauce_profile(sauce)
         if sauce_profile:
-            sauce_prep = sauce_profile.prep_instruction
+            sauce_prep = _resolved_braise_sauce_prep(candidate, sauce_profile)
             selected_broth = next((
                 _clean(item) for item in candidate.get("selected_extras") or []
                 if "broth_liquid" in set(get_ingredient_profile(_clean(item), "ingredient").behavior_family_codes)
@@ -615,7 +690,9 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             candidate, family_codes=("dry_seasoning", "salt_seasoning")
         )
         sauce_text = (
-            sauce_profile.cook_instruction if sauce_profile
+            _comfort_sauce_finish(candidate, sauce_profile.cook_instruction)
+            if sauce_profile and sauce_profile.name == "simple comfort pan sauce"
+            else sauce_profile.cook_instruction if sauce_profile
             else "Add enough broth or water to come one-third to halfway up the meat and scrape up the browned bits."
         )
         build_parts = [sauce_text]
@@ -962,23 +1039,128 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         state_change_activities = [
             activity for activity in ko_activities if activity.activity_type == "thaw"
         ]
+        foundation_behavior = (
+            resolve_behavior(
+                foundation, "foundation", component_forms.get(foundation.lower(), ""),
+                "casserole", DB_PATH,
+            ) if foundation else None
+        )
+        foundation_pre_cook = [
+            activity for activity in ko_activities
+            if activity.component == foundation
+            and activity.activity_type == "cook"
+            and foundation_behavior
+            and foundation_behavior.method
+            and foundation_behavior.method.method in {"boil", "simmer"}
+            and "dry" in _clean(component_forms.get(foundation.lower(), "")).lower()
+        ]
+        # A dry foundation's cook activity owns heating its water and draining
+        # it. Publishing the KO's generic setup as meal prep would otherwise
+        # start a pot boiling before an unrelated long thaw has even begun.
         prep_activities = [
             activity for activity in ko_activities
             if activity.activity_type in {"prep", "assemble"}
+            and not (
+                foundation_pre_cook
+                and activity.component == foundation
+            )
         ]
+        if foundation_behavior and foundation_behavior.primary_family and foundation_pre_cook:
+            family_code = foundation_behavior.primary_family.code
+            for activity in foundation_pre_cook:
+                if family_code == "pasta":
+                    activity.instruction = (
+                        f"Boil {foundation} in ample water for about 2 minutes less than the package's minimum time. "
+                        "It should be flexible but still firmer than you would serve it. Drain it thoroughly; it will finish in the casserole."
+                    )
+
         activities = [activities[0], *state_change_activities, *prep_activities]
         prep_ids = [_activity_id(activity) for activity in prep_activities]
+        sauce_prep_instruction = _resolved_sauce_prep(candidate, sauce_profile)
+        sauce_prep_id = "prepare casserole sauce:meal"
+        if sauce_prep_instruction:
+            activities.append(_planner_activity(
+                "prepare casserole sauce", sauce_prep_instruction,
+                minutes=max(2, int(sauce_profile.prep_minutes or 2)),
+                human_busy=True, stage="early", depends_on=prep_ids,
+                equipment="counter",
+            ))
+            for activity in foundation_pre_cook:
+                activity.depends_on = [sauce_prep_id]
+        activities.extend(foundation_pre_cook)
+
+        moisture_sensitive = []
+        for name in vegetables:
+            traits = set(get_ingredient_profile(name, "vegetable").behavior_traits)
+            if traits & {"protect-dry-browning", "dry-or-deliberately-wet"}:
+                moisture_sensitive.append(name)
+        moisture_id = ""
+        if moisture_sensitive:
+            selected_fat = next(iter(_resolved_requirements_by_ko(
+                candidate, family_codes=("cooking_fat",)
+            )), "")
+            fat_instruction = (
+                f"Lightly coat them with part of the measured {selected_fat}. "
+                if selected_fat else ""
+            )
+            moisture_dependencies = [sauce_prep_id] if sauce_prep_instruction else prep_ids
+            activities.append(_planner_activity(
+                "reduce casserole moisture",
+                (
+                    f"Spread {_join(moisture_sensitive)} on a rimmed sheet pan. {fat_instruction}"
+                    "Roast at 425°F for about 12 minutes, until excess surface moisture has evaporated but the pieces are not fully cooked. "
+                    "Lower the oven to 375°F for the casserole."
+                ),
+                minutes=12, human_busy=False, stage="early",
+                depends_on=moisture_dependencies, equipment="oven",
+            ))
+            moisture_id = "reduce casserole moisture:meal"
+
         casserole_extras = _extras_instruction(candidate, strategy)
+        quantity_plan = candidate.get("quantity_plan") or {}
+        produce_cups = sum(
+            float((quantity_plan.get(name.lower()) or {}).get("planned") or 0)
+            for name in vegetables
+        )
+        vessel_instruction = (
+            "Use a deep 4-quart baking dish; if the ingredients would sit deeper than about 2 inches, divide them evenly between two dishes."
+            if produce_cups > 6 or len(components) >= 8 else
+            "Choose a baking dish that holds the ingredients in a layer no deeper than about 2 inches."
+        )
+        selected_fat = next(iter(_resolved_requirements_by_ko(
+            candidate, family_codes=("cooking_fat",)
+        )), "")
+        grease_instruction = (
+            f"Grease the baking dish lightly with part of the measured {selected_fat}."
+            if selected_fat else
+            "Lightly grease the baking dish unless the selected sauce already provides enough fat."
+        )
+        ready_proteins = [
+            _clean(item.get("name")) for item in protein_specs
+            if _clean(item.get("state")).lower() in {"cooked", "canned", "ready to eat"}
+        ]
+        initial_components = [
+            item for item in components if item not in ready_proteins
+        ]
+        late_ready_proteins = ready_proteins if initial_components else []
+        if not initial_components:
+            initial_components = list(components)
+        combine_dependencies = list(dict.fromkeys([
+            *([sauce_prep_id] if sauce_prep_instruction else prep_ids),
+            *[_activity_id(activity) for activity in foundation_pre_cook],
+            *([moisture_id] if moisture_id else []),
+        ]))
         activities.append(_planner_activity(
             "combine",
             " ".join(filter(None, (
-                "Lightly grease a baking dish when the selected sauce or ingredients do not already provide enough fat.",
-                f"Arrange {_join(components)} evenly in the dish and coat them with {sauce}.",
+                vessel_instruction,
+                grease_instruction,
+                f"Arrange {_join(initial_components)} evenly in the dish and coat them with the prepared {sauce}.",
                 casserole_extras,
             ))),
             minutes=5,
             stage="middle",
-            depends_on=prep_ids,
+            depends_on=combine_dependencies,
             equipment="counter",
         ))
         method_rules = []
@@ -1000,19 +1182,49 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             in method_rules
             if is_protein and rule.verification_required and rule.doneness_cue
         ]
-        activities.append(_planner_activity(
-            "bake",
-            (
-                f"Bake at 375°F for about {bake_minutes} minutes, covering the dish if the surface browns before the center is ready. "
-                "The sauce should bubble at the edges and the firmest vegetable pieces should be tender."
-            ),
-            minutes=bake_minutes,
-            human_busy=False,
-            stage="middle",
-            depends_on=["combine:meal"],
-            equipment="oven",
-        ))
-        finish_dependency = "bake:meal"
+        if late_ready_proteins:
+            first_bake_minutes = max(1, bake_minutes - 10)
+            activities.append(_planner_activity(
+                "bake casserole base",
+                (
+                    f"Bake at 375°F for about {first_bake_minutes} minutes, covering the dish if the surface browns too quickly. "
+                    "This head start cooks the raw and slower components before the already-cooked protein joins."
+                ),
+                minutes=first_bake_minutes, human_busy=False, stage="middle",
+                depends_on=["combine:meal"], equipment="oven",
+            ))
+            activities.append(_planner_activity(
+                "add cooked protein",
+                (
+                    f"Fold {_join(late_ready_proteins)} into the casserole, distributing it evenly without breaking up the other components."
+                ),
+                minutes=2, human_busy=True, stage="late",
+                depends_on=["bake casserole base:meal"], equipment="counter",
+            ))
+            activities.append(_planner_activity(
+                "finish casserole bake",
+                (
+                    "Return the casserole to the oven for about 10 minutes, until the sauce bubbles at the edges, "
+                    "the firmest vegetable pieces are tender, and the added cooked protein is steaming hot."
+                ),
+                minutes=10, human_busy=False, stage="late",
+                depends_on=["add cooked protein:meal"], equipment="oven",
+            ))
+            finish_dependency = "finish casserole bake:meal"
+        else:
+            activities.append(_planner_activity(
+                "bake",
+                (
+                    f"Bake at 375°F for about {bake_minutes} minutes, covering the dish if the surface browns before the center is ready. "
+                    "The sauce should bubble at the edges and the firmest vegetable pieces should be tender."
+                ),
+                minutes=bake_minutes,
+                human_busy=False,
+                stage="middle",
+                depends_on=["combine:meal"],
+                equipment="oven",
+            ))
+            finish_dependency = "bake:meal"
         if protein_cues:
             activities.append(_planner_activity(
                 "verify casserole",
@@ -1224,7 +1436,10 @@ def consolidate_kitchen_activities(
         if extra_instruction:
             instructions.append(extra_instruction.rstrip("."))
         calculated_minutes = sum(max(0, int(activity.minutes or 0)) for activity in selected)
-        if activity_type == "prep" and candidate:
+        if (
+            activity_type == "prep"
+            or (activity_type == "launch prep" and _strategy(candidate or {}) == "casserole")
+        ) and candidate:
             vegetables = _split_joined_items(candidate.get("vegetable"))
             protein = _clean(candidate.get("protein"))
 
@@ -1276,10 +1491,10 @@ def consolidate_kitchen_activities(
     strategy = _strategy(candidate)
     sauce_profile = get_sauce_profile(sauce)
     sauce_instruction = (
-        "" if strategy in {"soup", "braise", "oven_braise", "handheld"}
+        "" if strategy in {"soup", "braise", "oven_braise", "handheld", "casserole"}
         else _comfort_sauce_prep(candidate or {}, sauce_profile.prep_instruction)
         if sauce_profile and sauce_profile.name == "simple comfort pan sauce"
-        else sauce_profile.prep_instruction if sauce_profile
+        else _resolved_sauce_prep(candidate or {}, sauce_profile) if sauce_profile
         else (f"measure and mix {sauce}" if sauce else "")
     )
     if sauce_profile and sauce_profile.name == "BBQ Sauce":
@@ -1859,9 +2074,9 @@ def assign_available_equipment(activities: List[KitchenActivity], candidate: dic
             activity.human_busy = True
             activity.attention_load = 0.1
             activity.instruction = (
-                f"Keep the {component.lower()} in a leak-proof bag and submerge it in cold tap water. "
+                f"Keep {component} in a leak-proof bag and submerge it in cold tap water. "
                 "Allow about 30 minutes per pound, changing the water every 30 minutes; thicker packages "
-                "may need longer. Cook it immediately after thawing."
+                f"may need longer. Cook {component} immediately after thawing."
             )
 
     foundation_name = _clean(candidate.get("foundation"))
@@ -1957,6 +2172,12 @@ def _just_in_time_starts(
         activity_id for activity_id, activity in graph.items()
         if activity.activity_type == "finish and serve"
     ), None)
+    if not service_id:
+        service_id = next((
+            activity_id for activity_id, activity in reversed(list(graph.items()))
+            if activity.stage == "finish"
+            and activity.activity_type in {"serve casserole", "assemble", "plate"}
+        ), None)
     if not service_id:
         return {}
 
@@ -2142,6 +2363,10 @@ def build_kitchen_lane_schedule(
                 key=lambda item: (
                     item[0],
                     ideal_starts.get(_activity_id(item[4]), 0),
+                    not (
+                        item[4].activity_type == "thaw"
+                        and (item[4].equipment or "").lower() == "sink"
+                    ),
                     not item[3],
                     stage_order.get(item[4].stage, 1),
                     _activity_id(item[4]),
@@ -2465,10 +2690,66 @@ def _format_action_substeps(message: str) -> str:
     return "\n\n".join(substeps)
 
 
+def _planned_wait_after_prep(schedule: List[ScheduledActivity]):
+    """Explain a conspicuous just-in-time pause after visible prep.
+
+    Small gaps are normal kitchen breathing room. A gap longer than all visible
+    prep plus three minutes is noticeable enough that the cook deserves to
+    know it is deliberate rather than a missing instruction.
+    """
+    prep_items = [
+        item for item in schedule
+        if item.activity.activity_type in {"prep", "launch prep"}
+        and item.activity.human_busy
+        and item.activity.show_in_plan
+        and item.end_minute > item.start_minute
+    ]
+    if not prep_items:
+        return None, ""
+
+    last_prep = max(prep_items, key=lambda item: item.end_minute)
+    prep_end = last_prep.end_minute
+    total_prep = sum(item.end_minute - item.start_minute for item in prep_items)
+    next_action = next((
+        item for item in schedule
+        if item.start_minute >= prep_end
+        and item.activity.human_busy
+        and item.activity.show_in_plan
+        and item.activity.activity_type not in {"gather", "prep", "launch prep"}
+        and item.activity.instruction
+    ), None)
+    if not next_action:
+        return None, ""
+
+    wait_minutes = next_action.start_minute - prep_end
+    if wait_minutes <= total_prep + 3:
+        return None, ""
+
+    blocker = next((
+        item for item in schedule
+        if not item.activity.human_busy
+        and item.start_minute <= prep_end
+        and item.end_minute >= next_action.start_minute
+    ), None)
+    if blocker:
+        component = _clean(blocker.activity.component)
+        reason = (
+            f"{component} is still cooking, so starting the next component sooner would make it finish too early."
+            if component and component.lower().replace("-", " ") != "meal"
+            else "The current cooking step is still underway, so starting the next component sooner would make it finish too early."
+        )
+    else:
+        reason = "The timing is intentional so the remaining components finish closer to serving time."
+    return last_prep, (
+        f"After prep, you’ll have about {wait_minutes} minutes before the next cooking step. {reason}"
+    )
+
+
 def generate_human_plan_items(candidate: dict) -> List[dict]:
     """Render interleaved information and actions for the public cooking plan."""
 
     schedule = build_kitchen_lane_schedule(candidate)
+    wait_after_prep, wait_note = _planned_wait_after_prep(schedule)
     items = [
         {"kind": "info", "text": meal_introduction(candidate)},
     ]
@@ -2525,7 +2806,7 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
                     and other.end_minute >= next_visible_action.start_minute
                     for other in schedule
                 )
-                if hidden_appliance_window:
+                if hidden_appliance_window and item is not wait_after_prep:
                     display_end_minute = next_visible_action.start_minute
 
         if (
@@ -2563,6 +2844,8 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
             "kind": "action" if activity.human_busy else "info",
             "text": f"{time_window}: {(_format_action_substeps(message) if activity.human_busy else ' '.join(message.split()))}",
         })
+        if item is wait_after_prep and wait_note:
+            items.append({"kind": "info", "text": wait_note})
         if activity.human_busy:
             previous_action_end = max(previous_action_end or 0, display_end_minute)
         previous_activity = activity

@@ -1,11 +1,11 @@
 import sqlite3
 import unittest
 
-from api_service import get_meal_builder_options, get_recipe, get_recipe_list
+from api_service import APIContractError, get_meal_builder_options, get_recipe, get_recipe_list
 from config import DB_PATH
 from equipment_profiles import choose_braise_equipment
-from ko_behavior import resolve_behavior
-from recipe_engine import _quantity_plan, _sauce_for_cuisine
+from ko_behavior import default_form_for, resolve_behavior
+from recipe_engine import _quantity_plan, _sauce_for_cuisine, generate_candidates
 from sauce_profiles import get_sauce_profile
 
 
@@ -39,11 +39,70 @@ class CapabilityMatrixTests(unittest.TestCase):
             )
 
         self.assertGreaterEqual(covered(proteins, "protein", "Fresh Raw", "soup"), 26)
-        self.assertGreaterEqual(covered(proteins, "protein", "Fresh Raw", "casserole"), 20)
+        # Whole birds and other large roasts are deliberately excluded from
+        # the shallow integrated-casserole contract; an inflated route count
+        # is not coverage when the resulting structure cannot be cooked.
+        self.assertGreaterEqual(covered(proteins, "protein", "Fresh Raw", "casserole"), 17)
         self.assertGreaterEqual(covered(proteins, "protein", "Fresh Raw", "handheld"), 23)
         self.assertGreaterEqual(covered(produce, "vegetable", "Fresh", "soup"), 83)
         self.assertGreaterEqual(covered(produce, "vegetable", "Fresh", "casserole"), 73)
         self.assertGreaterEqual(covered(produce, "vegetable", "Fresh", "handheld"), 80)
+
+    def test_every_trained_public_component_route_survives_the_whole_recipe_contract(self):
+        methods = (
+            ("skillet", "White rice", ["Stovetop"]),
+            ("soup", "", ["Stovetop"]),
+            ("casserole", "Egg noodles", ["Oven"]),
+            ("handheld", "Bread", ["Stovetop"]),
+        )
+
+        def opens(protein, produce, foundation, method, equipment, forms):
+            return bool(generate_candidates(
+                protein, produce, foundation, "Comfort Food",
+                "Medium", "Moderate", 300, 4, 1,
+                vegetable_names=[produce] if produce else [],
+                protein_state=forms.get(protein, "Fresh Raw"),
+                requested_method=method,
+                available_equipment=equipment,
+                component_forms=forms,
+                meal_structure="integrated",
+            ))
+
+        for item in self.options["proteins"]:
+            name = item["name"]
+            form = item.get("form") or default_form_for(name, "protein", DB_PATH) or "Fresh Raw"
+            for method, foundation, equipment in methods:
+                if resolve_behavior(name, "protein", form, method, DB_PATH).method is None:
+                    continue
+                with self.subTest(role="protein", component=name, method=method):
+                    self.assertTrue(opens(
+                        name, "Tomatoes", foundation, method, equipment,
+                        {name: form, "Tomatoes": "Fresh"},
+                    ))
+
+        for item in self.options["produce"]:
+            name = item["name"]
+            form = item.get("form") or default_form_for(name, "vegetable", DB_PATH) or "Fresh"
+            for method, foundation, equipment in methods:
+                if resolve_behavior(name, "vegetable", form, method, DB_PATH).method is None:
+                    continue
+                with self.subTest(role="vegetable", component=name, method=method):
+                    self.assertTrue(opens(
+                        "Chicken breast", name, foundation, method, equipment,
+                        {"Chicken breast": "Fresh Raw", name: form},
+                    ))
+
+        for item in self.options["foundations"]:
+            name = item["name"]
+            form = item.get("form") or default_form_for(name, "foundation", DB_PATH)
+            for method, _foundation, equipment in methods:
+                if resolve_behavior(name, "foundation", form, method, DB_PATH).method is None:
+                    continue
+                with self.subTest(role="foundation", component=name, method=method):
+                    self.assertTrue(opens(
+                        "Chicken breast", "Tomatoes", name, method, equipment,
+                        {"Chicken breast": "Fresh Raw", "Tomatoes": "Fresh", name: form},
+                    ))
 
     def test_each_new_common_route_opens_as_a_production_ready_recipe(self):
         cases = (
@@ -107,6 +166,21 @@ class CapabilityMatrixTests(unittest.TestCase):
             self.assertIn(expected_text, plan)
             self.assertNotIn("for a skillet meal", plan)
             self.assertTrue(recipe["recipe_validation"]["production_ready"])
+
+    def test_oven_recipe_is_not_offered_without_an_owned_oven(self):
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": {"inventory": [], "equipment": [{"name": "Stovetop"}]},
+            "selections": {
+                "protein": "Chicken breast", "protein_state": "Fresh Raw",
+                "produce": ["Tomatoes"], "foundation": "Egg noodles",
+                "extras": [], "cuisine": "Italian", "cooking_method": "casserole",
+                "meal_structure": "integrated", "serving_temperature": "hot",
+                "time_minutes": 120, "servings": 4,
+            },
+        }
+        with self.assertRaises(APIContractError):
+            get_recipe_list(request)
 
     def test_quantity_exceptions_keep_citrus_and_aromatics_practical(self):
         _, plan, _ = _quantity_plan(
