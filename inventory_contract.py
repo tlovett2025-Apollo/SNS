@@ -8,6 +8,7 @@ second catalog in JavaScript.
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -249,7 +250,10 @@ def inventory_profile(
     *,
     db_path: str | Path = DB_PATH,
 ) -> InventoryProfile:
-    with sqlite3.connect(db_path) as con:
+    # sqlite3.Connection's context manager controls the transaction but does
+    # not close the handle.  Explicit closing matters on Windows, where a
+    # lingering handle prevents temporary databases from being removed.
+    with closing(sqlite3.connect(db_path)) as con:
         con.row_factory = sqlite3.Row
         row = con.execute(
             "SELECT ingredient_id,name,category,default_storage FROM ingredients WHERE active=1 AND lower(name)=lower(?)",
@@ -364,7 +368,7 @@ def _catalog_version(db_path: str | Path) -> tuple[str, int]:
 
 @lru_cache(maxsize=4)
 def _inventory_catalog(path: str, _mtime_ns: int) -> tuple[dict, ...]:
-    with sqlite3.connect(path) as con:
+    with closing(sqlite3.connect(path)) as con:
         names = [row[0] for row in con.execute(
             "SELECT name FROM ingredients WHERE active=1 ORDER BY display_order,name"
         )]
