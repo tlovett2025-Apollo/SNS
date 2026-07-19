@@ -293,15 +293,25 @@ class APIHTTPTests(unittest.TestCase):
         )
 
     def test_default_cors_preflight_allows_tester_site(self):
+        origin = "https://getstockandstir.co"
         response = self.client.options(
             "/api/GetRecipeList",
             headers={
-                "Origin": "https://getstockandstir.co",
+                "Origin": origin,
                 "Access-Control-Request-Method": "POST",
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.headers["access-control-allow-origin"], "*")
+        # Local development defaults to the wildcard. Render supplies the
+        # explicit production allowlist, in which case Starlette echoes the
+        # requesting allowed origin. Both are valid configurations; the test
+        # must not require the less restrictive local default in production.
+        configured_origins = _cors_origins()
+        expected_origin = "*" if "*" in configured_origins else origin
+        self.assertIn(origin, configured_origins)
+        self.assertEqual(
+            response.headers["access-control-allow-origin"], expected_origin
+        )
 
     def test_cors_preflight_allows_the_user_authorization_header(self):
         response = self.client.options(
