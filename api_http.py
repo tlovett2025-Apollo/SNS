@@ -34,6 +34,7 @@ from supabase_gateway import (
     SupabaseGateway,
     SupabaseGatewayError,
     apply_durable_kitchen,
+    coalesce_inventory_rows,
 )
 
 
@@ -140,13 +141,18 @@ def _canonical_sync_payload(payload: dict) -> dict:
     resolved, _pending = resolve_inventory(
         normalized, DB_PATH, strict_contract=True
     )
-    canonical = {
-        str(item.source.get("_requested_name") or item.source.get("name") or "").strip().lower(): item
-        for item in resolved
-    }
+    canonical = {}
+    for resolved_item in resolved:
+        requested = str(
+            resolved_item.source.get("_requested_name")
+            or resolved_item.source.get("name")
+            or ""
+        ).strip().lower()
+        canonical.setdefault(requested, []).append(resolved_item)
     inventory = []
     for item in normalized["inventory_lots"]:
-        resolved_item = canonical.get(str(item.get("name") or "").strip().lower())
+        matches = canonical.get(str(item.get("name") or "").strip().lower()) or []
+        resolved_item = matches.pop(0) if matches else None
         source = resolved_item.source if resolved_item else item
         inventory.append({
             "name": resolved_item.name if resolved_item else item.get("name"),
@@ -161,7 +167,7 @@ def _canonical_sync_payload(payload: dict) -> dict:
             "expiration_date": source.get("expiration_date"),
         })
     canonical_payload = dict(payload)
-    canonical_payload["inventory"] = inventory
+    canonical_payload["inventory"] = coalesce_inventory_rows(inventory)
     return canonical_payload
 
 

@@ -3,7 +3,7 @@ services:
     name: sns-api
     runtime: python
     plan: starter
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && python tools/run_release_gates.py --output /tmp/sns-release-gate-report.json
     startCommand: uvicorn api_http:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     autoDeployTrigger: commit

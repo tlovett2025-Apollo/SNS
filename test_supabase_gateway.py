@@ -8,6 +8,7 @@ from supabase_gateway import (
     SupabaseGateway,
     SupabaseGatewayError,
     apply_durable_kitchen,
+    coalesce_inventory_rows,
 )
 
 
@@ -107,6 +108,37 @@ class SupabaseGatewayTests(unittest.TestCase):
         self.assertEqual(merged["meal_preferences"]["excluded_items"], ["Peanuts"])
         self.assertEqual(merged["meal_preferences"]["recent_meals"], [{"title": "Soup"}])
 
+    def test_canonical_duplicate_rows_are_coalesced_with_a_stable_client_id(self):
+        rows = [
+            {
+                "name": "Vegetable oil", "form": "Shelf-stable",
+                "storage": "Pantry", "quantity": 1, "unit": "bottle",
+            },
+            {
+                "name": "Vegetable oil", "form": "Shelf-stable",
+                "storage": "Pantry", "quantity": 2, "unit": "bottle",
+            },
+        ]
+
+        first = coalesce_inventory_rows(rows)
+        second = coalesce_inventory_rows(list(reversed(rows)))
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(first[0]["quantity"], 3)
+        self.assertEqual(first[0]["client_item_id"], second[0]["client_item_id"])
+        self.assertRegex(first[0]["client_item_id"], r"^[0-9a-f]{32}$")
+
+    def test_different_units_remain_distinct_inventory_states(self):
+        rows = [
+            {"name": "Chicken breast", "form": "Fresh Raw", "storage": "Fridge", "quantity": 1, "unit": "lb"},
+            {"name": "Chicken breast", "form": "Fresh Raw", "storage": "Fridge", "quantity": 2, "unit": "piece"},
+        ]
+
+        result = coalesce_inventory_rows(rows)
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(len({item["client_item_id"] for item in result}), 2)
+
     def test_migrations_enable_rls_and_keep_privileged_helpers_private(self):
         migration_dir = Path(__file__).parent / "supabase" / "migrations"
         sql = "\n".join(
@@ -126,6 +158,8 @@ class SupabaseGatewayTests(unittest.TestCase):
         self.assertIn("recipe_reports_issue_categories_check", sql)
         self.assertIn("recipe_reports_outcome_check", sql)
         self.assertIn("p_report_outcome text", sql)
+        self.assertIn("client_item_id", sql)
+        self.assertIn("group by", sql)
 
 
 if __name__ == "__main__":

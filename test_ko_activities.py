@@ -1,6 +1,7 @@
 import re
 
 from cooking_planner import build_cooking_activities, summarize_cooking_activities
+from ingredient_profiles import get_ingredient_profile
 from recipe_engine import build_recipe_from_candidate, generate_candidates
 
 
@@ -116,6 +117,15 @@ def test_fresh_raw_chicken_publishes_cook_rest_and_slice():
     activities = build_cooking_activities(state_candidate("Fresh Raw"))
     kinds = [a.activity_type for a in activities if a.component == "Chicken breast"]
     assert kinds == ["prep", "cook", "verify", "rest"]
+
+
+def test_fresh_grill_proteins_never_publish_conditional_thaw_chatter():
+    for name in ("Italian sausage", "Turkey sausage", "Kielbasa", "Shrimp"):
+        activities = get_ingredient_profile(name, "protein").publish_activities(
+            "grill", "Fresh Raw"
+        )
+        prep = next(item for item in activities if item.activity_type == "prep")
+        assert "thaw" not in prep.instruction.lower(), (name, prep.instruction)
 
 
 def test_frozen_raw_chicken_publishes_verify_and_longer_path():

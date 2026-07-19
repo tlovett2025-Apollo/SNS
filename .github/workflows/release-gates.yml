@@ -1,0 +1,24 @@
+name: Production release gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  release-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python tools/run_release_gates.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sns-release-gate-report
+          path: test-results/release-gate-report.json
+

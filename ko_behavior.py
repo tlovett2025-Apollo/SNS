@@ -7,6 +7,7 @@ name.
 """
 
 from dataclasses import dataclass, field, replace
+from contextlib import closing
 from functools import lru_cache
 from pathlib import Path
 import sqlite3
@@ -1634,18 +1635,17 @@ def _db_family_codes(name, form_name, db_path) -> list[str]:
     if not db_path:
         return []
     try:
-        con = sqlite3.connect(db_path)
-        rows = con.execute(
-            """SELECT f.family_code
-                 FROM ingredient_behavior_memberships m
-                 JOIN ingredients i USING (ingredient_id)
-                 JOIN ko_behavior_families f USING (family_id)
-                WHERE lower(i.name)=lower(?) AND m.verified=1
-                  AND (m.form_name='' OR lower(m.form_name)=lower(?))
-                ORDER BY m.is_primary DESC,m.priority,m.membership_id""",
-            (name, form_name or ""),
-        ).fetchall()
-        con.close()
+        with closing(sqlite3.connect(db_path)) as con:
+            rows = con.execute(
+                """SELECT f.family_code
+                     FROM ingredient_behavior_memberships m
+                     JOIN ingredients i USING (ingredient_id)
+                     JOIN ko_behavior_families f USING (family_id)
+                    WHERE lower(i.name)=lower(?) AND m.verified=1
+                      AND (m.form_name='' OR lower(m.form_name)=lower(?))
+                    ORDER BY m.is_primary DESC,m.priority,m.membership_id""",
+                (name, form_name or ""),
+            ).fetchall()
         return [row[0] for row in rows]
     except sqlite3.Error:
         return []
@@ -1664,22 +1664,20 @@ def _db_family(family_code, db_path):
     if not db_path:
         return None
     try:
-        con = sqlite3.connect(db_path)
-        con.row_factory = sqlite3.Row
-        family = con.execute(
-            "SELECT * FROM ko_behavior_families WHERE family_code=? AND verified=1",
-            (family_code,),
-        ).fetchone()
-        if not family:
-            con.close()
-            return None
-        rows = con.execute(
-            """SELECT * FROM ko_family_methods
-               WHERE family_id=? AND verified=1
-               ORDER BY family_method_id""",
-            (family["family_id"],),
-        ).fetchall()
-        con.close()
+        with closing(sqlite3.connect(db_path)) as con:
+            con.row_factory = sqlite3.Row
+            family = con.execute(
+                "SELECT * FROM ko_behavior_families WHERE family_code=? AND verified=1",
+                (family_code,),
+            ).fetchone()
+            if not family:
+                return None
+            rows = con.execute(
+                """SELECT * FROM ko_family_methods
+                   WHERE family_id=? AND verified=1
+                   ORDER BY family_method_id""",
+                (family["family_id"],),
+            ).fetchall()
         methods = tuple(MethodRule(
             _key(row["method_name"]), (_key(row["form_name"]),) if row["form_name"] else (),
             row["cooking_environment"], row["creates_environment"] or "",
@@ -1721,18 +1719,17 @@ def _apply_db_exceptions(rule, name, form_name, db_path):
     if not rule or not db_path:
         return rule
     try:
-        con = sqlite3.connect(db_path)
-        rows = con.execute(
-            """SELECT e.field_name, e.override_value
-                 FROM ko_ingredient_exceptions e
-                 JOIN ingredients i USING (ingredient_id)
-                WHERE lower(i.name)=lower(?) AND e.verified=1
-                  AND (e.form_name='' OR lower(e.form_name)=lower(?))
-                  AND (e.method_name='' OR lower(e.method_name)=lower(?))
-                ORDER BY e.exception_id""",
-            (name, form_name or "", rule.method),
-        ).fetchall()
-        con.close()
+        with closing(sqlite3.connect(db_path)) as con:
+            rows = con.execute(
+                """SELECT e.field_name, e.override_value
+                     FROM ko_ingredient_exceptions e
+                     JOIN ingredients i USING (ingredient_id)
+                    WHERE lower(i.name)=lower(?) AND e.verified=1
+                      AND (e.form_name='' OR lower(e.form_name)=lower(?))
+                      AND (e.method_name='' OR lower(e.method_name)=lower(?))
+                    ORDER BY e.exception_id""",
+                (name, form_name or "", rule.method),
+            ).fetchall()
     except sqlite3.Error:
         return rule
     allowed = set(MethodRule.__dataclass_fields__)
@@ -1754,17 +1751,16 @@ def ingredient_attributes(name, form_name="", db_path=None) -> dict[str, str]:
     if not db_path:
         return {}
     try:
-        con = sqlite3.connect(db_path)
-        rows = con.execute(
-            """SELECT a.attribute_name,a.attribute_value,a.form_name
-                 FROM ko_ingredient_attributes a
-                 JOIN ingredients i USING (ingredient_id)
-                WHERE lower(i.name)=lower(?) AND a.verified=1
-                  AND (a.form_name='' OR lower(a.form_name)=lower(?))
-                ORDER BY CASE WHEN a.form_name='' THEN 0 ELSE 1 END""",
-            (name, form_name or ""),
-        ).fetchall()
-        con.close()
+        with closing(sqlite3.connect(db_path)) as con:
+            rows = con.execute(
+                """SELECT a.attribute_name,a.attribute_value,a.form_name
+                     FROM ko_ingredient_attributes a
+                     JOIN ingredients i USING (ingredient_id)
+                    WHERE lower(i.name)=lower(?) AND a.verified=1
+                      AND (a.form_name='' OR lower(a.form_name)=lower(?))
+                    ORDER BY CASE WHEN a.form_name='' THEN 0 ELSE 1 END""",
+                (name, form_name or ""),
+            ).fetchall()
         return {str(key): str(value) for key, value, _ in rows}
     except sqlite3.Error:
         return {}

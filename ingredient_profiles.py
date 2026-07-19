@@ -40,6 +40,8 @@ def _handling_for_state(template: str, name: str, state_name: str) -> str:
         rf"Thaw {re.escape(name)} completely[.,;]\s*",
         rf"Thaw {re.escape(name)} safely,\s*",
         rf"Thaw {re.escape(name)},\s*",
+        rf"Thaw {re.escape(name)}\s*[.;]\s*",
+        r"Thaw,\s*",
         r"Thaw safely,\s*",
         r";\s*thaw before browning",
         r"\.\s*Thaw first when frozen\.",

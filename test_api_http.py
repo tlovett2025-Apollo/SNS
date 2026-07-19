@@ -95,6 +95,32 @@ class APIHTTPTests(unittest.TestCase):
         self.assertEqual(saved["name"], "Ribeye steak")
         self.assertEqual(saved["unit"], "piece")
 
+    def test_shared_kitchen_save_coalesces_aliases_before_supabase(self):
+        with patch("api_http._SUPABASE") as gateway:
+            gateway.token_from_authorization.return_value = "user-token"
+            gateway.sync_kitchen.return_value = {"household_id": "house-1"}
+            response = self.client.post(
+                "/api/SaveMyKitchen",
+                json={"inventory": [
+                    {
+                        "name": "ribeye", "form": "Refrigerated",
+                        "quantity": 1, "unit": "items", "storage": "Fridge",
+                    },
+                    {
+                        "name": "Ribeye steak", "form": "Refrigerated",
+                        "quantity": 2, "unit": "piece", "storage": "Fridge",
+                    },
+                ]},
+                headers={"Authorization": "Bearer user-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        saved = gateway.sync_kitchen.call_args.args[1]["inventory"]
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0]["name"], "Ribeye steak")
+        self.assertEqual(saved[0]["quantity"], 3)
+        self.assertRegex(saved[0]["client_item_id"], r"^[0-9a-f]{32}$")
+
     def test_shared_kitchen_save_rejects_an_impossible_unit(self):
         with patch("api_http._SUPABASE") as gateway:
             gateway.token_from_authorization.return_value = "user-token"

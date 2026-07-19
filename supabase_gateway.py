@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import json
+import hashlib
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -22,6 +23,54 @@ DEFAULT_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_nlQsaKbHb5TyJGqjB0vbrg_MoePw2
 
 class SupabaseGatewayError(RuntimeError):
     """Raised when identity or durable kitchen access fails."""
+
+
+def _inventory_identity(item: dict[str, Any]) -> tuple[str, ...]:
+    """Return the durable identity for one editable kitchen row."""
+    return tuple(
+        str(value if value is not None else "").strip().lower()
+        for value in (
+            item.get("name"),
+            item.get("storage", item.get("storage_location")),
+            item.get("form", item.get("form_name")),
+            item.get("unit"),
+            item.get("expiration_date"),
+            item.get("opened_at"),
+            item.get("refrigerated_after_opening"),
+            item.get("package_weight_oz"),
+        )
+    )
+
+
+def coalesce_inventory_rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Combine canonical duplicate rows and assign stable client identities.
+
+    Alias resolution can turn two browser rows into the same canonical food.
+    My Kitchen currently stores ingredient state rather than a package-lot
+    ledger, so equal states are one row whose quantities are combined.
+    """
+    merged: dict[tuple[str, ...], dict[str, Any]] = {}
+    for raw in items:
+        item = dict(raw)
+        key = _inventory_identity(item)
+        if not key[0]:
+            continue
+        try:
+            quantity = float(item.get("quantity") or 0)
+        except (TypeError, ValueError):
+            quantity = 0
+        if quantity <= 0:
+            continue
+        if key in merged:
+            total = float(merged[key].get("quantity") or 0) + quantity
+            merged[key]["quantity"] = int(total) if total.is_integer() else total
+            continue
+        item["quantity"] = int(quantity) if quantity.is_integer() else quantity
+        item["client_item_id"] = hashlib.sha256(
+            "|".join(key).encode("utf-8")
+        ).hexdigest()[:32]
+        merged[key] = item
+    return list(merged.values())
 
 
 @dataclass(frozen=True)
