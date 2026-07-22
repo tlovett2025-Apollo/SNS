@@ -605,3 +605,33 @@ Impact:
 - Side cards and manual ingredient choices use the same downstream contracts.
 - New side archetypes expand the chooser without adding meal-specific planner
   branches.
+
+
+Decision #0015
+
+Title:
+Round 1 trains ingredient jobs and true multi-side components in a batch
+
+Date:
+2026-07-22
+
+Decision:
+Build My Meal carries selected sides as a list of canonical component IDs. The
+server reconstructs each selection from its trained suggestion rather than
+trusting client-authored cooking instructions. Two foundation-based sides may
+coexist because neither is forced to impersonate the meal's single legacy
+foundation field.
+
+The first batch defines fifteen declarative side archetypes and a shared
+ingredient-job vocabulary. Component compilers consume archetype methods,
+equipment, outcomes, holding behavior, and activity templates. Ingredient jobs
+come from KO families with verified item-level exceptions.
+
+Impact:
+
+- “Choose up to two” is true in both the interface and API contract.
+- A meal may contain a main, multiple hot sides, and later fresh finishes.
+- Citrus, aromatics, heat, sauce ingredients, and garnishes need not become
+  full vegetable portions merely because they were selected as produce.
+- Batch matrix tests verify every archetype's executable knowledge contract.
+- Additional side training is primarily data entry, not planner rewiring.

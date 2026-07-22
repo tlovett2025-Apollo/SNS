@@ -1754,6 +1754,11 @@ SEED_INGREDIENT_ATTRIBUTES = {
         "quantity_label": "biscuit",
     },
     "salsa": {"cuisine_affinity": "Mexican"},
+    "jalapenos": {"component_job": "heat"},
+    "serranos": {"component_job": "heat"},
+    "cayenne pepper": {"component_job": "heat"},
+    "red pepper flakes": {"component_job": "heat"},
+    "hot sauce": {"component_job": "heat"},
 }
 
 

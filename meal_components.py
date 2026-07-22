@@ -9,6 +9,9 @@ from dataclasses import asdict, dataclass, field
 from typing import Iterable
 
 from ingredient_profiles import get_ingredient_profile
+from config import DB_PATH
+from ko_behavior import resolve_behavior
+from side_archetypes import side_archetype
 
 
 def _clean(value) -> str:
@@ -65,6 +68,27 @@ def _first_with_family(names: Iterable[str], family_code: str) -> str:
     return next((name for name in names if _has_family(name, family_code)), "")
 
 
+def ingredient_job(name: str, default: str = "side_base") -> str:
+    """Assign a reusable culinary job from KO capabilities."""
+    trained_job = _clean(
+        resolve_behavior(name, "ingredient", db_path=DB_PATH).attributes.get("component_job")
+    )
+    if trained_job:
+        return trained_job
+    codes = set(get_ingredient_profile(name, "ingredient").behavior_family_codes)
+    for code, job in (
+        ("citrus_finish", "acid"), ("acid_condiment", "acid"),
+        ("aromatic_slow", "aromatic"), ("aromatic_fast", "aromatic"),
+        ("dry_seasoning", "seasoning"), ("salt_seasoning", "seasoning"),
+        ("melting_cheese", "cheese"), ("milk_cream", "sauce_liquid"),
+        ("broth_liquid", "sauce_liquid"), ("cooking_fat", "fat"),
+        ("fresh_herb", "garnish"),
+    ):
+        if code in codes:
+            return job
+    return default
+
+
 def recognize_meal_components(candidate: dict) -> MealComponentPlan:
     """Recognize producible components from selected food and pantry capabilities."""
     available = list(dict.fromkeys([
@@ -77,6 +101,12 @@ def recognize_meal_components(candidate: dict) -> MealComponentPlan:
         _clean(item) for item in _clean(candidate.get("vegetable")).split(" & ")
         if _clean(item)
     ]
+    selected_sides = list(candidate.get("selected_side_components") or [])
+    consumed = {
+        _key(name)
+        for side in selected_sides if isinstance(side, dict)
+        for name in side.get("ingredients") or []
+    }
     components = []
 
     if protein:
@@ -99,16 +129,17 @@ def recognize_meal_components(candidate: dict) -> MealComponentPlan:
             knowledge_source="ingredient_ko",
         ))
 
-    if vegetables:
+    remaining_vegetables = [name for name in vegetables if _key(name) not in consumed]
+    if remaining_vegetables:
         components.append(ComponentPlan(
-            "vegetables", "vegetable_component", " & ".join(vegetables), "vegetable",
+            "vegetables", "vegetable_component", " & ".join(remaining_vegetables), "vegetable",
             "method_selected_by_relationships",
-            tuple(ComponentIngredient(name, "vegetable") for name in vegetables),
+            tuple(ComponentIngredient(name, ingredient_job(name, "vegetable")) for name in remaining_vegetables),
             outcome="Vegetables cooked to compatible, observable doneness.",
             knowledge_source="ingredient_relationships",
         ))
 
-    if foundation:
+    if foundation and _key(foundation) not in consumed:
         cheese = _first_with_family(available, "melting_cheese")
         milk = _first_with_family(available, "milk_cream")
         butter = _first_with_family(available, "cooking_fat")
@@ -147,6 +178,34 @@ def recognize_meal_components(candidate: dict) -> MealComponentPlan:
                 outcome="Prepared side ready to serve with the main component.",
                 knowledge_source="ingredient_ko",
             ))
+
+    for selected in selected_sides:
+        if not isinstance(selected, dict):
+            continue
+        archetype_code = _clean(selected.get("archetype"))
+        trained = side_archetype(archetype_code)
+        if not trained:
+            continue
+        selection = selected.get("selection") or {}
+        foundation_name = _clean(selection.get("foundation"))
+        produce_names = [_clean(item) for item in selection.get("produce") or [] if _clean(item)]
+        extra_names = [_clean(item) for item in selection.get("extras") or [] if _clean(item)]
+        uses = []
+        if foundation_name:
+            uses.append(ComponentIngredient(
+                foundation_name,
+                "pasta" if archetype_code == "macaroni_and_cheese" else "side_base",
+            ))
+        uses.extend(ComponentIngredient(name, "vegetable") for name in produce_names)
+        uses.extend(ComponentIngredient(
+            name, ingredient_job(name), "pantry_helper"
+        ) for name in extra_names)
+        components.append(ComponentPlan(
+            _clean(selected.get("side_id")) or f"side-{archetype_code}",
+            archetype_code, _clean(selected.get("name")) or trained.name, "side",
+            trained.method, tuple(uses), trained.equipment, trained.outcome,
+            trained.source,
+        ))
 
     return MealComponentPlan(
         _clean(candidate.get("meal_structure")) or "integrated",
@@ -220,7 +279,7 @@ def suggest_known_sides(
     if steamable:
         chosen = steamable[:2]
         add(
-            "known-steamed-vegetables", "steamed_vegetable_side",
+            "known-steamed-vegetables", "steamed_vegetables",
             "Steamed " + " and ".join(chosen), chosen, {"produce": chosen},
             "steam", ["stovetop", "covered pot", "steamer basket preferred"],
             "Steam compatible vegetables together and stop at crisp-tender.",
@@ -238,19 +297,57 @@ def suggest_known_sides(
             "Warm the bread separately and serve it alongside the main.",
         )
 
+    onions = next((item for item in produce if _has_family(item, "aromatic_slow")), "")
+    peppers = [item for item in produce if _has_family(item, "pepper")][:2]
+    if onions and peppers:
+        chosen = [onions, *peppers]
+        add(
+            "known-pepper-onion-medley", "pepper_onion_medley", "Pepper and onion medley",
+            chosen, {"produce": chosen}, "saute", ["stovetop", "12-inch skillet"],
+            "Sauté compatible onions and peppers together until sweet and lightly browned.",
+        )
+
+    bean = next((
+        item for item in foundations
+        if _has_family(item, "legume", "foundation")
+        or _has_family(item, "prepared_legume", "foundation")
+    ), "")
+    if bean:
+        add(
+            "known-seasoned-beans", "seasoned_beans", f"Seasoned {bean}", [bean],
+            {"foundation": bean}, "simmer", ["stovetop", "1- to 2-quart saucepan"],
+            "Warm the beans separately with compatible seasoning until creamy-tender.",
+        )
+
+    corn = next((item for item in produce if _has_family(item, "corn")), "")
+    if corn:
+        add(
+            "known-seasoned-corn", "corn_side", "Seasoned corn", [corn],
+            {"produce": [corn]}, "brief_heat", ["stovetop", "small saucepan or skillet"],
+            "Heat the corn briefly and season it without cooking away its sweetness.",
+        )
+
     plain_foundations = [
         item for item in foundations
-        if item not in {pasta, bread}
+        if item not in {pasta, bread, bean}
         and not _has_family(item, "bread_wrap", "foundation")
     ]
     for item in plain_foundations:
         behavior = get_ingredient_profile(item, "foundation")
-        family = next(iter(sorted(behavior.behavior_family_codes)), "prepared_side")
-        label = f"{item} side"
+        codes = set(behavior.behavior_family_codes)
+        if codes & {"white_rice", "brown_rice", "quinoa"}:
+            archetype = "rice_side"
+        elif "soft_potato" in codes:
+            archetype = "mashed_potatoes"
+        elif "crisp_potato" in codes:
+            archetype = "roasted_potatoes"
+        else:
+            continue
+        trained = side_archetype(archetype)
         add(
-            f"known-{_key(item).replace(' ', '-')}", f"prepared_{family}_side", label,
-            [item], {"foundation": item}, "ingredient_ko_method", ["method-appropriate vessel"],
-            f"Prepare {item} by its trained package or ingredient method and serve it alongside.",
+            f"known-{_key(item).replace(' ', '-')}", archetype, f"{item} side",
+            [item], {"foundation": item}, trained.method, list(trained.equipment),
+            f"Prepare {item} by its trained side method and serve it alongside.",
         )
         if len(suggestions) >= limit:
             break

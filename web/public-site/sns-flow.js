@@ -1937,11 +1937,6 @@ const SNS = (() => {
         sideSuggestionStatus.textContent = "Choose no more than two sides.";
         return;
       }
-      if (event.target.checked && event.target.dataset.foundation) {
-        checked.filter(input => input !== event.target && input.dataset.foundation).forEach(input => {
-          input.checked = false;
-        });
-      }
       applyKnownSideSelections();
     });
 
@@ -2122,6 +2117,9 @@ const SNS = (() => {
           item.value, item.closest("[data-produce-choice]")?.querySelector("[data-produce-form]")?.value || ""
         ])),
         extras: [...form.querySelectorAll('input[name="extras"]:checked')].map(item => item.value),
+        side_components: [...form.querySelectorAll('input[name="known-side"]:checked')].map(item => ({
+          side_id: item.value
+        })),
         foundation: form.querySelector("[data-builder-foundation]").value,
         cuisine: form.querySelector("[data-builder-cuisine]").value,
         cooking_method: form.querySelector('input[name="cooking-method"]:checked')?.value,

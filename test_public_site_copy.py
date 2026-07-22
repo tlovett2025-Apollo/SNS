@@ -233,6 +233,7 @@ def test_builder_offers_known_sides_after_the_main_is_chosen():
     assert "data-side-suggestion-options" in builder_page
     assert "/api/GetKnownSideSuggestions" in flow
     assert "Choose no more than two sides" in flow
+    assert 'side_components: [...form.querySelectorAll(\'input[name="known-side"]:checked\')]' in flow
 
 
 def test_quantity_and_form_controls_cover_packages_cans_appetites_and_garlic():

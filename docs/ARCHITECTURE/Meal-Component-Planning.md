@@ -80,10 +80,10 @@ producible with owned ingredients and equipment.
 
 Each suggestion is an explicit selection recipe. It names the component
 archetype and the exact foundation, produce, and pantry-helper selections that
-will reproduce it. The interface allows up to two sides but only one
-foundation-based side; a second side may be a vegetable component. The chosen
-cards are then passed through the same component recognizer and activity
-compiler as manually selected ingredients.
+will reproduce it. The interface and API carry up to two independently prepared
+side components. They are not collapsed into the legacy singleton foundation
+field. The chosen cards are passed through the same component recognizer and
+activity compiler as manually selected ingredients.
 
 The first suggestion families are:
 
@@ -96,3 +96,33 @@ The first suggestion families are:
 Allergy and never-include categories are expanded before suggestions are made.
 The service returns fewer than five cards when fewer trained sides are fully
 supported; it does not fill the row with speculative recipes.
+
+## Round 1 batch
+
+Round 1 establishes a declarative library of fifteen common side archetypes:
+
+1. macaroni and cheese;
+2. seasoned beans;
+3. steamed vegetables;
+4. pepper and onion medley;
+5. mashed potatoes;
+6. boxed scalloped potatoes;
+7. rice;
+8. fried rice;
+9. green bean casserole;
+10. simple salad;
+11. fresh tomato relish;
+12. warmed bread;
+13. roasted potatoes;
+14. seasoned corn; and
+15. au gratin potatoes.
+
+Every archetype declares its method, equipment, required ingredient jobs,
+observable outcome, holding behavior, and activity template. Availability in
+the chooser remains evidence-based: a trained archetype is offered only when
+the current inventory can satisfy its required jobs.
+
+Ingredient jobs are a separate vocabulary shared across archetypes: main,
+side base, vegetable, aromatic, acid, heat, sauce liquid, fat, binder, cheese,
+seasoning, and garnish. Family knowledge assigns most jobs; verified item
+attributes handle exceptions such as serranos and jalapeños acting as heat.

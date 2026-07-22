@@ -1,11 +1,15 @@
 """Golden contracts for reusable meal-component recognition."""
 
+import pytest
+
 from meal_components import (
     component_by_archetype,
+    ingredient_job,
     recognize_meal_components,
     suggest_known_sides,
 )
 from recipe_engine import build_recipe_from_candidate, generate_candidates
+from side_archetypes import INGREDIENT_JOBS, SIDE_ACTIVITY_TEMPLATES, SIDE_ARCHETYPES
 
 
 def component_candidate(foundation, available):
@@ -90,5 +94,31 @@ def test_known_side_suggestions_are_selection_recipes_not_generated_meals():
     assert macaroni["selection"]["foundation"] == "Macaroni"
     assert set(macaroni["selection"]["extras"]) == {"Cheddar cheese", "Milk"}
     assert macaroni["uses_only_kitchen_items"] is True
-    assert by_archetype["steamed_vegetable_side"]["selection"] == {"produce": ["Broccoli"]}
+    assert by_archetype["steamed_vegetables"]["selection"] == {"produce": ["Broccoli"]}
     assert by_archetype["warmed_bread_side"]["selection"]["foundation"] == "Bread"
+
+
+def test_round_one_trains_fifteen_side_archetypes_as_data():
+    assert len(SIDE_ARCHETYPES) == 15
+    assert set(SIDE_ARCHETYPES) == set(SIDE_ACTIVITY_TEMPLATES)
+    assert all(item.required_jobs for item in SIDE_ARCHETYPES.values())
+    assert {"side_base", "vegetable", "aromatic", "acid", "heat"} <= set(INGREDIENT_JOBS)
+
+
+def test_ingredient_jobs_come_from_family_and_trained_item_knowledge():
+    assert ingredient_job("Limes") == "acid"
+    assert ingredient_job("Onions") == "aromatic"
+    assert ingredient_job("Serranos") == "heat"
+    assert ingredient_job("Cheddar cheese") == "cheese"
+
+
+@pytest.mark.parametrize("archetype", sorted(SIDE_ARCHETYPES))
+def test_round_one_side_training_matrix_has_executable_knowledge(archetype):
+    trained = SIDE_ARCHETYPES[archetype]
+    template = SIDE_ACTIVITY_TEMPLATES[archetype]
+
+    assert trained.method
+    assert trained.equipment
+    assert trained.outcome.endswith(".")
+    assert trained.holdability in {"poor", "fair", "good", "excellent"}
+    assert "{" in template and "}" in template

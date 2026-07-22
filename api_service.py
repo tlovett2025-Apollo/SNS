@@ -858,6 +858,7 @@ _GENERATOR_REQUEST_FIELDS = {
     "requested_method", "selected_extras", "component_forms", "meal_structure",
     "inventory_lots", "eater_profiles", "use_all_cans", "cooking_for_kids",
     "kid_theme", "component_methods",
+    "selected_side_components",
 }
 
 
@@ -1284,6 +1285,34 @@ def _builder_candidates(payload: dict, db_path: str | Path):
     if isinstance(extras, str):
         extras = [extras]
     extras = [_clean(item) for item in extras if _clean(item)]
+    requested_side_ids = [
+        _clean(item.get("side_id") if isinstance(item, dict) else item)
+        for item in selections.get("side_components") or []
+        if _clean(item.get("side_id") if isinstance(item, dict) else item)
+    ]
+    if len(requested_side_ids) > 2:
+        raise APIContractError("Choose no more than two side components.")
+    available_side_suggestions = {
+        item["side_id"]: item
+        for item in get_known_side_suggestions({
+            "kitchen": kitchen,
+            "selections": {"proteins": protein_selections},
+        }, db_path)["suggestions"]
+    } if protein and requested_side_ids else {}
+    unknown_side_ids = [item for item in requested_side_ids if item not in available_side_suggestions]
+    if unknown_side_ids:
+        raise APIContractError("A selected side is no longer available from My Kitchen.")
+    selected_side_components = [available_side_suggestions[item] for item in requested_side_ids]
+    for component in selected_side_components:
+        selection = component.get("selection") or {}
+        for name in selection.get("produce") or []:
+            if name not in produce:
+                produce.append(name)
+        for name in selection.get("extras") or []:
+            if name not in extras:
+                extras.append(name)
+        if not foundation and _clean(selection.get("foundation")):
+            foundation = _clean(selection.get("foundation"))
     method = _clean(selections.get("cooking_method"))
     meal_structure = _clean(selections.get("meal_structure")) or "integrated"
     if not protein:
@@ -1404,6 +1433,7 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         "selected_extras": extras,
         "component_forms": component_forms,
         "component_methods": dict(selections.get("component_methods") or {}),
+        "selected_side_components": selected_side_components,
         "meal_structure": meal_structure,
     })
     engine_request["available_items"] = list(dict.fromkeys([

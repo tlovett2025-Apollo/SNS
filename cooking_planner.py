@@ -20,6 +20,7 @@ from equipment_profiles import (
     choose_rice_equipment,
 )
 from meal_components import component_by_archetype
+from side_archetypes import side_activity_instruction
 from sauce_profiles import get_sauce_profile
 from planner_voice import (
     activity_message,
@@ -2155,6 +2156,53 @@ def apply_component_plan_activities(
     activities: List[KitchenActivity], candidate: dict,
 ) -> List[KitchenActivity]:
     """Compile recognized component archetypes into executable activities."""
+    for component_plan in (candidate.get("component_plan") or {}).get("components") or []:
+        if (
+            component_plan.get("role") != "side"
+            or component_plan.get("archetype") == "macaroni_and_cheese"
+            or component_plan.get("knowledge_source") != "round_1_side_batch"
+        ):
+            continue
+        names = [_clean(item.get("name")) for item in component_plan.get("ingredients") or [] if _clean(item.get("name"))]
+        related = [
+            activity for activity in activities
+            if activity.component in names
+            and activity.activity_type in {"cook", "saute", "warm", "reheat", "steam vegetable side"}
+        ]
+        instruction = side_activity_instruction(component_plan.get("archetype"), names)
+        minutes = {
+            "cold_assemble": 5, "warm": 4, "brief_heat": 6, "saute": 9,
+            "steam": 8, "simmer": 8, "absorption_or_appliance": 25,
+            "roast": 30, "bake": 35, "package_method": 30,
+        }.get(component_plan.get("method"), 10)
+        dependencies = list(dict.fromkeys(
+            dependency for activity in related for dependency in activity.depends_on
+        ))
+        side_activity = _planner_activity(
+            "prepare side", instruction, minutes=minutes,
+            human_busy=component_plan.get("method") not in {"bake", "roast", "absorption_or_appliance"},
+            stage="middle", depends_on=dependencies or (["prep:meal"] if any(
+                _activity_id(item) == "prep:meal" for item in activities
+            ) else []),
+            equipment="oven" if component_plan.get("method") in {"bake", "roast", "package_method"} else "burner",
+        )
+        side_activity.component = component_plan.get("name") or "Side"
+        side_activity.activity_id = f"prepare side:{component_plan.get('archetype')}"
+        replaced_ids = {_activity_id(item) for item in related}
+        activities = [item for item in activities if item not in related]
+        for activity in activities:
+            activity.depends_on = list(dict.fromkeys(
+                side_activity.activity_id if dependency in replaced_ids else dependency
+                for dependency in activity.depends_on
+            ))
+            if activity.activity_type == "finish and serve":
+                if side_activity.activity_id not in activity.depends_on:
+                    activity.depends_on.append(side_activity.activity_id)
+                activity.instruction = (
+                    f"{activity.instruction.rstrip()} Serve {component_plan.get('name')} alongside."
+                )
+        activities.append(side_activity)
+
     component = component_by_archetype(candidate, "macaroni_and_cheese")
     if not component:
         return activities

@@ -105,6 +105,38 @@ def cooked_bean_soup_payload(energy="Low", equipment=None):
 
 
 class APIServiceTests(unittest.TestCase):
+    def test_builder_preserves_two_selected_side_components(self):
+        kitchen = {
+            "inventory": [
+                {"name": "Chicken breast", "form": "Fresh Raw", "amount": "plenty"},
+                {"name": "Macaroni", "form": "Dry", "amount": "plenty"},
+                {"name": "Cheddar cheese", "form": "Refrigerated", "amount": "plenty"},
+                {"name": "Butter", "form": "Refrigerated", "amount": "plenty"},
+                {"name": "Bread", "form": "Shelf-stable", "amount": "plenty"},
+            ],
+            "equipment": [{"name": "Stovetop"}, {"name": "Oven"}],
+        }
+        request = {
+            "mode": "build_your_meal", "kitchen": kitchen,
+            "selections": {
+                "proteins": [{"name": "Chicken breast", "state": "Fresh Raw", "role": "main"}],
+                "side_components": ["known-macaroni-and-cheese", "known-warmed-bread"],
+                "cuisine": "Comfort Food", "cooking_method": "skillet",
+                "meal_structure": "composed_plate", "energy": "Medium",
+                "time_minutes": 60, "servings": 2,
+            },
+        }
+        choice = get_recipe_list(request)["candidates"][0]
+        recipe = get_recipe({"candidate_id": choice["candidate_id"], "kitchen": request})
+        side_codes = {
+            item["archetype"] for item in recipe["component_plan"]["components"]
+            if item["role"] == "side"
+        }
+
+        assert {"macaroni_and_cheese", "warmed_bread_side"} <= side_codes
+        assert "large saucepan or pot" in recipe["equipment"]
+        assert "small sheet pan or warming vessel" in recipe["equipment"]
+
     def test_known_side_suggestions_use_only_current_kitchen_and_explicit_selections(self):
         kitchen = {
             "inventory": [

@@ -559,6 +559,7 @@ def generate_candidates(
     protein_states=None,
     protein_roles=None,
     component_methods=None,
+    selected_side_components=None,
 ):
     proteins = _unique(list(protein_names or []) or [_clean(protein_name)])
     protein = proteins[0] if proteins else ""
@@ -574,7 +575,18 @@ def generate_candidates(
     foundation = _clean(foundation_name)
     cuisine = _clean(cuisine_name) or "Comfort Food"
     sauce = _sauce_for_cuisine(cuisine)
-    selected_components = _unique([*proteins, *_clean(vegetable).split(" & "), foundation])
+    selected_side_components = [
+        dict(item) for item in (selected_side_components or []) if isinstance(item, dict)
+    ]
+    side_ingredient_names = [
+        _clean(name)
+        for component in selected_side_components
+        for name in component.get("ingredients") or []
+        if _clean(name)
+    ]
+    selected_components = _unique([
+        *proteins, *_clean(vegetable).split(" & "), foundation, *side_ingredient_names,
+    ])
     extras = _unique(list(selected_extras or []))
     component_forms = dict(component_forms or {})
     for name in _clean(vegetable).split(" & "):
@@ -862,20 +874,25 @@ def generate_candidates(
             "inventory_requirements": ingredient_checks,
             "available_equipment": equipment,
             "component_methods": dict(component_methods or {}),
+            "selected_side_components": selected_side_components,
         })
         component_plan = recognize_meal_components(c)
         c["component_plan"] = component_plan.to_dict()
         known_checks = {_key(item.get("name")) for item in ingredient_checks}
         for component in component_plan.components:
             for use in component.ingredients:
-                if use.source != "pantry_helper" or _key(use.name) in known_checks:
+                is_selected_side_use = component.knowledge_source == "round_1_side_batch"
+                if (
+                    (use.source != "pantry_helper" and not is_selected_side_use)
+                    or _key(use.name) in known_checks
+                ):
                     continue
                 helper_check = _component_check(use.name, available, excluded)
                 helper_check.update(
                     quantity=use.quantity,
                     component_id=component.component_id,
                     component_job=use.job,
-                    pantry_helper=True,
+                    pantry_helper=use.source == "pantry_helper",
                 )
                 ingredient_checks.append(helper_check)
                 known_checks.add(_key(use.name))
