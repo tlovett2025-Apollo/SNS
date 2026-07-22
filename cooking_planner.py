@@ -2943,6 +2943,22 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
             "text": f"Before you begin, gather the ingredients and equipment for {components}.",
         })
 
+    frozen_proteins = [
+        _clean(item.get("name")) for item in candidate.get("proteins") or []
+        if isinstance(item, dict) and _clean(item.get("state")).lower().replace("-", " ") == "frozen raw"
+    ]
+    if not frozen_proteins and _clean(candidate.get("protein_state")).lower().replace("-", " ") == "frozen raw":
+        frozen_proteins = [_clean(candidate.get("protein"))]
+    frozen_proteins = [name for name in frozen_proteins if name]
+    if frozen_proteins:
+        items.append({
+            "kind": "info",
+            "text": (
+                f"Before Step 1, fully thaw {_join(frozen_proteins)}. "
+                "The timed cooking plan assumes it is thawed and ready to cook."
+            ),
+        })
+
     previous_activity = None
     middle_cooking_end = max(
         (item.end_minute for item in schedule if item.activity.stage == "middle"),

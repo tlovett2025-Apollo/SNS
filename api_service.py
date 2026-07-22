@@ -1260,6 +1260,13 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         owned_item = resolved_by_name.get(_key(item["name"]))
         protein_states[item["name"]] = _protein_state(owned_item) if owned_item else (item["state"] or "Fresh Raw")
         protein_roles[item["name"]] = item["role"]
+    if (
+        any(_key(state) == "frozen raw" for state in protein_states.values())
+        and selections.get("thaw_readiness_confirmed") is not True
+    ):
+        raise APIContractError(
+            "Confirm that frozen protein will be fully thawed before Step 1, or choose another protein."
+        )
     # A pantry can describe raw meat as "Refrigerated" because that is where
     # it lives. The cooking engine needs the derived culinary state instead.
     component_forms = {

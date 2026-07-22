@@ -43,11 +43,13 @@ def validate_recipe(candidate: dict, plan_items: list[dict]) -> dict:
             action_text, re.IGNORECASE,
         ):
             errors.append(f"Fresh {name} received a frozen-only thawing instruction.")
-        if state == "frozen raw" and not re.search(
-            rf"\bthaw\w*\b[^.]*\b{escaped_name}\b|\b{escaped_name}\b[^.]*\bthaw\w*\b|\bdefrost\w*\b[^.]*\b{escaped_name}\b|\b{escaped_name}\b[^.]*\bdefrost\w*\b",
-            action_text, re.IGNORECASE,
-        ):
-            errors.append(f"Frozen {name} has no explicit thawing step before cooking.")
+        if state == "frozen raw":
+            thaw_pattern = rf"\bthaw\w*\b[^.]*\b{escaped_name}\b|\b{escaped_name}\b[^.]*\bthaw\w*\b|\bdefrost\w*\b[^.]*\b{escaped_name}\b|\b{escaped_name}\b[^.]*\bdefrost\w*\b"
+            if re.search(thaw_pattern, action_text, re.IGNORECASE):
+                errors.append(f"Frozen {name} thawing appeared inside the timed cooking plan.")
+            readiness_pattern = rf"before step 1[^.]*\b(?:thaw\w*|defrost\w*)\b[^.]*\b{escaped_name}\b|before step 1[^.]*\b{escaped_name}\b[^.]*\b(?:thaw\w*|defrost\w*)\b"
+            if not re.search(readiness_pattern, all_text, re.IGNORECASE):
+                errors.append(f"Frozen {name} has no pre-cook thaw-readiness statement.")
 
         role = _key(spec.get("role"))
         if role in {"supporting", "accent"}:

@@ -48,7 +48,7 @@ class RecipeValidationTests(unittest.TestCase):
         self.assertIn("Instructions use Olive oil after the kitchen check substituted Butter.", result["errors"])
         self.assertIn("Instructions use omitted ingredient Cornstarch.", result["errors"])
 
-    def test_frozen_raw_component_requires_an_explicit_thaw_or_defrost_step(self):
+    def test_frozen_raw_component_requires_readiness_outside_the_timed_plan(self):
         candidate = {
             "cooking_method": "skillet",
             "proteins": [{"name": "Chicken breast", "state": "Frozen Raw", "role": "main"}],
@@ -60,7 +60,19 @@ class RecipeValidationTests(unittest.TestCase):
         result = validate_recipe(candidate, plan)
 
         self.assertFalse(result["production_ready"])
-        self.assertIn("Frozen Chicken breast has no explicit thawing step before cooking.", result["errors"])
+        self.assertIn("Frozen Chicken breast has no pre-cook thaw-readiness statement.", result["errors"])
+
+        plan.insert(0, {
+            "kind": "info",
+            "text": "Before Step 1, fully thaw Chicken breast. The timed cooking plan assumes it is ready to cook.",
+        })
+        self.assertTrue(validate_recipe(candidate, plan)["production_ready"])
+
+        plan.append({"kind": "action", "text": "Defrost Chicken breast in the microwave."})
+        self.assertIn(
+            "Frozen Chicken breast thawing appeared inside the timed cooking plan.",
+            validate_recipe(candidate, plan)["errors"],
+        )
 
 
 if __name__ == "__main__":

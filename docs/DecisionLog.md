@@ -427,4 +427,33 @@ CKB Studio
 June 28, 2026 - Dump WFD and create the modular SNS
 
 
+Decision #0009
+
+Title:
+Separate frozen-protein readiness from the timed cooking plan
+
+Date:
+2026-07-22
+
+Decision:
+SNS timed cooking plans begin with raw meat, poultry, and seafood fully thawed
+unless a future ingredient and equipment combination has a specifically trained
+and verified cook-from-frozen method.
+
+`Frozen Raw` remains an inventory form. Build My Meal reminds the cook that the
+protein must be fully thawed before Step 1 and offers refrigerator, cold-water,
+and microwave help outside the recipe timeline.
+
+Reason:
+Generic thaw estimates are unreliable because package weight, thickness,
+wrapping, appliance power, and starting temperature vary. Putting thawing in the
+recipe distorted total time and complicated orchestration.
+
+Impact:
+
+- Generic thaw activities are removed from timed plans.
+- Frozen and fresh raw forms share ready-to-cook timing.
+- Recipes carry a pre-Step-1 informational readiness note.
+- Deliberately verified cook-from-frozen profiles can be added later.
+
 

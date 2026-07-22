@@ -395,6 +395,7 @@ class APIServiceTests(unittest.TestCase):
                 "equipment": [{"name": "Oven"}],
             },
             "selections": {
+                "thaw_readiness_confirmed": True,
                 "proteins": [
                     {"name": "Chicken breast", "state": "Frozen Raw", "role": "main"},
                     {"name": "Kielbasa", "state": "Cooked", "role": "supporting"},
@@ -503,6 +504,7 @@ class APIServiceTests(unittest.TestCase):
             "selections": {
                 "protein": "Chicken breast",
                 "protein_state": "Frozen Raw",
+                "thaw_readiness_confirmed": True,
                 "produce": ["Mushrooms", "Onions"],
                 "foundation": "White rice",
                 "extras": ["Mayonnaise", "Salsa"],
@@ -531,12 +533,27 @@ class APIServiceTests(unittest.TestCase):
         self.assertIn("Onions", recipe["missing_items"])
         self.assertTrue(any("Mayonnaise" in step and "Salsa" in step for step in recipe["steps"]))
 
+    def test_builder_requires_frozen_protein_readiness_confirmation(self):
+        request = {
+            "mode": "build_your_meal",
+            "kitchen": kitchen_payload(),
+            "selections": {
+                "protein": "Chicken breast", "protein_state": "Frozen Raw",
+                "produce": ["Mushrooms"], "foundation": "",
+                "cooking_method": "skillet", "serving_temperature": "hot",
+            },
+        }
+
+        with self.assertRaisesRegex(APIContractError, "fully thawed before Step 1"):
+            get_recipe_list(request)
+
     def test_builder_multiple_proteins_keep_main_and_accent_roles(self):
         kitchen = kitchen_payload()
         request = {
             "mode": "build_your_meal",
             "kitchen": kitchen,
             "selections": {
+                "thaw_readiness_confirmed": True,
                 "proteins": [
                     {"name": "Chicken breast", "state": "Frozen Raw", "role": "main"},
                     {"name": "Bacon", "state": "Fresh Raw", "role": "accent"},
@@ -597,6 +614,7 @@ class APIServiceTests(unittest.TestCase):
             "selections": {
                 "protein": "Chicken breast",
                 "protein_state": "Frozen Raw",
+                "thaw_readiness_confirmed": True,
                 "produce": ["Tomatoes"],
                 "foundation": "White rice",
                 "cooking_method": "skillet",
@@ -719,6 +737,7 @@ class APIServiceTests(unittest.TestCase):
         kitchen = kitchen_payload()
         base = {
             "protein": "Chicken breast", "protein_state": "Frozen Raw",
+            "thaw_readiness_confirmed": True,
             "produce": ["Mushrooms"], "foundation": "White rice",
             "cooking_method": "skillet", "serving_temperature": "hot",
         }
@@ -745,6 +764,7 @@ class APIServiceTests(unittest.TestCase):
             "kitchen": kitchen,
             "selections": {
                 "protein": "Chicken breast",
+                "thaw_readiness_confirmed": True,
                 "produce": ["Onions"],
                 "cooking_method": "skillet",
                 "serving_temperature": "hot",
@@ -994,8 +1014,8 @@ class APIServiceTests(unittest.TestCase):
         self.assertIn("Tonight we are making", all_statements)
         self.assertNotIn("Plan on about", all_statements)
         self.assertIn("gather the ingredients", all_statements)
-        self.assertIn("microwave defrost setting", plan)
-        self.assertIn("microwave defrost setting", plan)
+        self.assertIn("Before Step 1, fully thaw Ground beef", all_statements)
+        self.assertNotIn("defrost", plan.lower())
         self.assertIn("160°F", plan)
         self.assertIn("Color alone is not the safety test", plan)
         self.assertNotIn("food thermometer", plan)
@@ -1006,10 +1026,9 @@ class APIServiceTests(unittest.TestCase):
         self.assertNotIn("ingredient prep is handled", plan.lower())
         self.assertFalse(any("Prep is complete" in step for step in recipe["steps"]))
         self.assertFalse(any("Now the cooking begins" in step for step in recipe["steps"]))
-        self.assertLess(plan.index("microwave defrost setting"), plan.index("Heat the skillet"))
 
         kinds = [item["kind"] for item in recipe["plan_items"]]
-        self.assertEqual(kinds[:3], ["info", "info", "action"])
+        self.assertEqual(kinds[:3], ["info", "info", "info"])
         self.assertFalse(any(
             "come to pressure" in item["text"]
             or "natural release" in item["text"]
@@ -1019,10 +1038,8 @@ class APIServiceTests(unittest.TestCase):
         self.assertFalse(any(
             "come to pressure" in step for step in recipe["steps"]
         ))
-        thaw_step = next(step for step in recipe["steps"] if "microwave defrost setting" in step)
         prep_step = next(step for step in recipe["steps"] if "Ingredient Prep:" in step)
-        self.assertTrue(thaw_step.startswith("Minutes 16–23:"))
-        self.assertTrue(prep_step.startswith("Minutes 4–16:"))
+        self.assertTrue(prep_step.startswith("Minutes 4–9:"))
         self.assertIn("\n\n", prep_step)
         self.assertEqual(recipe["missing_items"], [])
         adjustments = {item["name"]: item for item in recipe["ingredient_adjustments"]}

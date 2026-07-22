@@ -1679,10 +1679,36 @@ const SNS = (() => {
         role.textContent = `${inferred} · ${role.textContent.replace(/^(Main protein|Stretch protein|Flavor accent|Supporting protein) · /, "")}`;
       });
     };
-    proteinHolder.addEventListener("change", syncProteinRoles);
+    const thawDialog = document.querySelector("[data-thaw-readiness]");
+    const selectedFrozenProteins = () => [...proteinHolder.querySelectorAll('input[name="protein"]:checked')]
+      .filter(input => input.closest("[data-protein-choice]")?.querySelector("[data-protein-state]")?.value === "Frozen Raw");
+    const showThawReadiness = () => {
+      const frozen = selectedFrozenProteins();
+      if (!frozen.length) return false;
+      const names = thawDialog?.querySelector("[data-thaw-protein-names]");
+      if (names) names.textContent = frozen.map(input => input.value).join(" and ");
+      thawDialog?.showModal();
+      return true;
+    };
+    proteinHolder.addEventListener("change", event => {
+      syncProteinRoles();
+      form.dataset.thawReadinessConfirmed = "false";
+      if (event.target.matches('input[name="protein"], [data-protein-state]')) showThawReadiness();
+    });
+    thawDialog?.querySelector("[data-confirm-thaw-readiness]")?.addEventListener("click", () => {
+      form.dataset.thawReadinessConfirmed = "true";
+      thawDialog.close();
+    });
+    thawDialog?.querySelector("[data-change-frozen-protein]")?.addEventListener("click", () => {
+      selectedFrozenProteins().forEach(input => { input.checked = false; });
+      form.dataset.thawReadinessConfirmed = "false";
+      syncProteinRoles();
+      thawDialog.close();
+      proteinHolder.querySelector('input[name="protein"]')?.focus();
+    });
 
     const foundation = form.querySelector("[data-builder-foundation]");
-    foundation.innerHTML = `<option value="">No foundation</option>` + (options.foundations || []).map(item =>
+    foundation.innerHTML = `<option value="">No side</option>` + (options.foundations || []).map(item =>
       `<option value="${escapeHtml(item.name)}" data-owned="${Boolean(item.owned ?? owned.has(String(item.name).toLowerCase()))}"${item.owned ?? owned.has(String(item.name).toLowerCase()) ? "" : " hidden"}>${escapeHtml(item.name)}${item.owned ?? owned.has(String(item.name).toLowerCase()) ? " · In My Kitchen" : " · Grocery item"}</option>`
     ).join("");
 
@@ -1722,7 +1748,7 @@ const SNS = (() => {
       } else if (structure === "composed_plate") {
         guidance.textContent = "Each component will be prepared independently and timed to meet on the plate.";
       } else if (structure === "layered_bowl") {
-        guidance.textContent = "The foundation goes into the bowl first, with the other components arranged over it.";
+        guidance.textContent = "The selected side or base goes into the bowl first, with the other components arranged over it.";
       } else {
         guidance.textContent = "Compatible ingredients can join the same vessel as the cooking environment changes.";
       }
@@ -1770,7 +1796,7 @@ const SNS = (() => {
     const catalogItems = [
       ...(options.proteins || []).map(item => ({ ...item, catalogKind: "protein", catalogLabel: "Protein" })),
       ...(options.produce || []).map(item => ({ ...item, catalogKind: "produce", catalogLabel: item.kind === "fruit" ? "Fruit" : "Produce" })),
-      ...(options.foundations || []).map(item => ({ ...item, catalogKind: "foundation", catalogLabel: "Foundation" })),
+      ...(options.foundations || []).map(item => ({ ...item, catalogKind: "foundation", catalogLabel: "Side" })),
       ...(options.extras || []).map(item => ({ ...item, catalogKind: "extra", catalogLabel: "Pantry & fridge" })),
     ].filter(item => !(item.owned ?? owned.has(String(item.name).toLowerCase())));
 
@@ -1908,6 +1934,16 @@ const SNS = (() => {
       big: Number(form.querySelector("[data-eaters-big]")?.value || 0)
     };
     const people = eaterProfiles.light + eaterProfiles.standard + eaterProfiles.big;
+    const frozenProteins = [...form.querySelectorAll('input[name="protein"]:checked')].filter(input =>
+      input.closest("[data-protein-choice]")?.querySelector("[data-protein-state]")?.value === "Frozen Raw"
+    );
+    if (frozenProteins.length && form.dataset.thawReadinessConfirmed !== "true") {
+      const dialog = document.querySelector("[data-thaw-readiness]");
+      const names = dialog?.querySelector("[data-thaw-protein-names]");
+      if (names) names.textContent = frozenProteins.map(input => input.value).join(" and ");
+      dialog?.showModal();
+      return;
+    }
     const payload = {
       mode: "build_your_meal",
       kitchen,
@@ -1936,6 +1972,7 @@ const SNS = (() => {
         servings: people,
         eater_profiles: eaterProfiles,
         use_all_cans: Boolean(form.querySelector("[data-use-all-cans]")?.checked)
+        ,thaw_readiness_confirmed: frozenProteins.length > 0
       }
     };
     if (!payload.selections.proteins.length) {

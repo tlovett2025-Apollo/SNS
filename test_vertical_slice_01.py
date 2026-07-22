@@ -1,6 +1,6 @@
 """Acceptance coverage for SNS Culinary Knowledge Vertical Slice 01."""
 
-from cooking_planner import build_activity_graph, build_kitchen_lane_schedule
+from cooking_planner import build_activity_graph, build_kitchen_lane_schedule, generate_human_plan_items
 from ingredient_profiles import get_ingredient_profile
 from ko_contract import audit_behavior
 from recipe_engine import build_recipe_from_candidate, generate_candidates
@@ -64,16 +64,20 @@ def test_chicken_mushroom_asparagus_rice_uses_each_component_rule():
     assert not any(item.lane.startswith("Burner ") for item in rice)
 
 
-def test_frozen_chicken_cannot_reach_skillet_before_thaw_gate():
+def test_frozen_chicken_uses_a_pre_recipe_readiness_boundary():
     value = candidate(
         "Chicken breast", ["Onions"], protein_state="Frozen Raw",
         available_equipment=["Microwave"],
     )
     graph = build_activity_graph(value)
-    assert "thaw:Chicken breast" in graph
-    assert graph["prep:Chicken breast"].depends_on == ["thaw:Chicken breast"]
-    assert "thaw:Chicken breast" not in graph["cook:Chicken breast"].depends_on
-    assert "prep:Chicken breast" in graph["cook:Chicken breast"].depends_on
+    assert "thaw:Chicken breast" not in graph
+    assert "prep:meal" in graph
+    assert "prep:meal" in graph["cook:Chicken breast"].depends_on
+    plan_items = generate_human_plan_items(value)
+    info = " ".join(item["text"] for item in plan_items if item["kind"] == "info")
+    actions = " ".join(item["text"] for item in plan_items if item["kind"] == "action")
+    assert "Before Step 1, fully thaw Chicken breast" in info
+    assert "thaw" not in actions.lower()
 
 
 def test_pasta_and_cream_sauce_publish_specific_execution_and_cues():

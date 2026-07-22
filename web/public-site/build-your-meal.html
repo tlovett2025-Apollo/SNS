@@ -44,7 +44,7 @@
           <button class="builder-browse-link" type="button" data-browse-catalog="protein">+ Browse proteins to buy</button>
         </div>
         <div class="builder-two-column">
-          <div class="builder-field-group"><label class="builder-field"><span>Foundation <em>Optional</em></span><select data-builder-foundation></select></label><button class="builder-browse-link" type="button" data-browse-catalog="foundation">+ Browse foundations</button></div>
+          <div class="builder-field-group"><label class="builder-field"><span>Side <em>Optional</em></span><select data-builder-foundation></select></label><button class="builder-browse-link" type="button" data-browse-catalog="foundation">+ Browse sides</button></div>
           <label class="builder-field"><span>Cuisine direction</span><select data-builder-cuisine></select></label>
         </div>
         <div class="produce-picker">
@@ -110,12 +110,30 @@
       <button type="button" class="active" data-catalog-filter="all">All</button>
       <button type="button" data-catalog-filter="protein">Proteins</button>
       <button type="button" data-catalog-filter="produce">Produce</button>
-      <button type="button" data-catalog-filter="foundation">Foundations</button>
+      <button type="button" data-catalog-filter="foundation">Sides</button>
       <button type="button" data-catalog-filter="extra">Pantry &amp; fridge</button>
     </div>
     <div class="ingredient-catalog-options" data-catalog-options></div>
     <p class="catalog-empty" data-catalog-empty hidden>No known ingredients match that search.</p>
     <footer><button class="btn btn-primary" type="submit" value="done">Done adding ingredients</button></footer>
+  </form>
+</dialog>
+<dialog class="ingredient-catalog-dialog thaw-readiness-dialog" data-thaw-readiness>
+  <form method="dialog" class="ingredient-catalog-form">
+    <header>
+      <div><div class="eyebrow">Frozen protein selected</div><h2>Before you cook</h2></div>
+      <button type="submit" value="close" class="catalog-close" aria-label="Close thawing reminder">×</button>
+    </header>
+    <p>This cooking plan assumes <strong data-thaw-protein-names>the selected protein</strong> is fully thawed before Step 1.</p>
+    <div class="thaw-help">
+      <p><strong>Refrigerator:</strong> Plan ahead. A small package commonly needs about a day.</p>
+      <p><strong>Cold water:</strong> Keep it in a leak-proof bag in cold water, changing the water every 30 minutes. A small one-pound package may thaw in an hour or less. Cook it immediately.</p>
+      <p><strong>Microwave:</strong> Use the defrost setting and follow your appliance instructions. Cook it immediately.</p>
+    </div>
+    <footer>
+      <button class="btn btn-secondary" type="button" data-change-frozen-protein>Choose another protein</button>
+      <button class="btn btn-primary" type="button" data-confirm-thaw-readiness>It will be thawed</button>
+    </footer>
   </form>
 </dialog>
 <script src="sns-config.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script><script src="sns-auth.js"></script><script src="sns-flow.js"></script>

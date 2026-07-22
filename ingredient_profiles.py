@@ -222,7 +222,10 @@ def _family_activities(self, strategy="", state_name=""):
             source="ko_gate", activity_id=f"method_conflict:{self.name}",
         )]
 
-    handling = _handling_for_state(rule.handling_template, self.name, state_name)
+    # Frozen raw proteins cross a readiness boundary before the timed recipe.
+    # Once cooking begins, their handling and timing are the same as fresh raw.
+    execution_state = "Fresh Raw" if _key(state_name) == "frozen raw" else state_name
+    handling = _handling_for_state(rule.handling_template, self.name, execution_state)
     operation = rule.instruction_template.format(name=self.name)
     outcome = rule.desired_outcome.strip()
     if outcome and outcome.lower() not in operation.lower():
@@ -242,30 +245,6 @@ def _family_activities(self, strategy="", state_name=""):
         )]
 
     activities = []
-    thaw_id = ""
-    if _key(state_name) == "frozen raw":
-        thaw_id = f"thaw:{self.name}"
-        thaw_rule = rule
-        if not rule.frozen_thaw_template and resolved.primary_family:
-            thaw_rule = next((
-                method for method in resolved.primary_family.methods
-                if method.frozen_thaw_template
-            ), rule)
-        thaw_instruction = (
-            thaw_rule.frozen_thaw_template.format(name=self.name)
-            if thaw_rule.frozen_thaw_template else
-            f"Keep {self.name} in a leak-proof bag and submerge it in cold tap water. "
-            f"Allow about 30 minutes per pound, changing the water every 30 minutes; cook {self.name} immediately after thawing."
-        )
-        activities.append(KitchenActivity(
-            component=self.name, activity_type="thaw",
-            instruction=thaw_instruction,
-            minutes=thaw_rule.frozen_thaw_minutes or 30, human_busy=True,
-            attention_load=.35 if thaw_rule.frozen_thaw_template else .1,
-            stage="early", parallel_ok=False,
-            equipment=thaw_rule.frozen_thaw_equipment if thaw_rule.frozen_thaw_template else "sink",
-            activity_id=thaw_id,
-        ))
 
     prep_id = f"prep:{self.name}"
     activities.append(KitchenActivity(
@@ -273,7 +252,7 @@ def _family_activities(self, strategy="", state_name=""):
         minutes=rule.prep_minutes, human_busy=True, attention_load=1,
         stage="early" if rule.stage == "early" else "middle",
         parallel_ok=True, equipment="counter",
-        depends_on=[thaw_id] if thaw_id else [], activity_id=prep_id,
+        depends_on=[], activity_id=prep_id,
     ))
 
     activity_type = "reheat" if rule.method == "reheat" else "cook"

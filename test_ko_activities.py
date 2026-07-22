@@ -128,14 +128,12 @@ def test_fresh_grill_proteins_never_publish_conditional_thaw_chatter():
         assert "thaw" not in prep.instruction.lower(), (name, prep.instruction)
 
 
-def test_frozen_raw_chicken_publishes_verify_and_longer_path():
+def test_frozen_raw_chicken_starts_timed_plan_ready_to_cook():
     activities = build_cooking_activities(state_candidate("Frozen Raw"))
     chicken = [a for a in activities if a.component == "Chicken breast"]
     kinds = [a.activity_type for a in chicken]
-    assert kinds == ["thaw", "prep", "cook", "verify", "rest"]
-    assert sum(a.minutes or 0 for a in chicken) > 30
-    assert "thaw" in chicken[0].instruction.lower()
-    assert "thaw" not in chicken[1].instruction.lower()
+    assert kinds == ["prep", "cook", "verify", "rest"]
+    assert all("thaw" not in activity.instruction.lower() for activity in chicken)
 
 
 def test_cooked_chicken_reheats_without_raw_cooking_cycle():
@@ -218,11 +216,11 @@ def test_state_changes_lane_schedule_duration():
     fresh_end = max(item.end_minute for item in fresh)
     frozen_end = max(item.end_minute for item in frozen)
     cooked_end = max(item.end_minute for item in cooked)
-    assert frozen_end > fresh_end > cooked_end
+    assert frozen_end == fresh_end > cooked_end
 
 
-def test_microwave_thaw_launches_first_and_prep_overlaps_it():
-    from cooking_planner import build_kitchen_lane_schedule
+def test_frozen_protein_thawing_is_outside_the_timed_schedule():
+    from cooking_planner import build_kitchen_lane_schedule, generate_human_plan_items
 
     candidate = generate_candidates(
         "Chicken breast", "Onions & Carrots", "", "Comfort Food",
@@ -235,13 +233,10 @@ def test_microwave_thaw_launches_first_and_prep_overlaps_it():
     schedule = build_kitchen_lane_schedule(candidate)
     by_id = {item.activity.activity_id: item for item in schedule}
 
-    thaw = by_id["thaw:Chicken breast"]
-    general_prep = by_id["prep:meal"]
-    chicken_prep = by_id["prep:Chicken breast"]
-    assert thaw.lane == "Sink"
-    assert thaw.end_minute - thaw.start_minute == 30
-    assert general_prep.start_minute < thaw.end_minute
-    assert chicken_prep.start_minute >= thaw.end_minute
+    assert "thaw:Chicken breast" not in by_id
+    assert all(item.activity.activity_type != "thaw" for item in schedule)
+    info = " ".join(item["text"] for item in generate_human_plan_items(candidate) if item["kind"] == "info")
+    assert "Before Step 1, fully thaw Chicken breast" in info
 
 
 def test_skillet_vegetables_share_one_pan_after_chicken_is_verified():
@@ -278,13 +273,12 @@ def test_frozen_ground_beef_uses_one_pan_and_a_feasible_doneness_check():
     )[0]
     graph = build_activity_graph(candidate)
 
-    assert graph["thaw:Ground beef"].minutes == 7
-    assert graph["thaw:Ground beef"].equipment == "microwave"
-    assert graph["prep:Ground beef"].depends_on == ["thaw:Ground beef"]
+    assert "thaw:Ground beef" not in graph
+    assert "prep:meal" in graph
     assert "cook:Ground beef" not in graph
     assert "verify:Ground beef" not in graph
     skillet = graph["cook skillet:meal"]
-    assert "prep:Ground beef" in skillet.depends_on
+    assert "prep:meal" in skillet.depends_on
     assert "same skillet" in skillet.instruction
     assert "160°F" in skillet.instruction
     assert "Color alone is not the safety test" in skillet.instruction
@@ -513,7 +507,7 @@ def test_slowest_branch_starts_first_and_shorter_branches_converge_at_service():
     schedule = build_kitchen_lane_schedule(candidate)
     by_id = {item.activity.activity_id: item for item in schedule}
 
-    assert min(by_id["prep:launch"].start_minute, by_id["thaw:Chicken breast"].start_minute) == 0
+    assert by_id["prep:launch"].start_minute == 0
     rice_ready = by_id["pressure cycle:Basmati rice"].end_minute
     service = by_id["finish and serve:meal"]
     chard = by_id["cook vegetables:meal"]
