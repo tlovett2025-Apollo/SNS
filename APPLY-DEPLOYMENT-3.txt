@@ -1,0 +1,36 @@
+STOCK & STIR · DEPLOYMENT 3
+Reviewed barcode and pantry-photo capture
+
+This is a Deployment-3-only patch. It expects Deployments 1 and 2 to already
+be present. Do not use git am.
+
+1. Put SNS-Deployment-3.patch in your SNS\backups folder.
+
+2. From C:\Users\tlove\OneDrive\Desktop\SNS run:
+
+   git status --short
+   git apply --check backups\SNS-Deployment-3.patch
+   git apply backups\SNS-Deployment-3.patch
+
+   If --check prints an error, STOP and send the output. Do not force it.
+
+3. Review and commit:
+
+   git status --short
+   git add api_http.py inventory_capture.py render.yaml docs\DEPLOYMENT-3-INVENTORY-CAPTURE.md test_inventory_capture.py test_api_http.py test_public_site_copy.py web\public-site\my-kitchen.html web\public-site\sns-flow.css web\public-site\sns-flow.js
+   git commit -m "Add reviewed barcode and photo pantry capture"
+   git push origin main
+
+4. The API will deploy safely even before photo recognition is configured.
+   Barcode lookup and manual pantry entry will work. To enable pantry photos,
+   add OPENAI_API_KEY as a secret environment variable on the Render sns-api
+   service. Never put the key in Git or in sns-config.js.
+
+5. After Render finishes, follow the smoke test in:
+
+   docs\DEPLOYMENT-3-INVENTORY-CAPTURE.md
+
+Automated release result:
+216 tests passed, 730 subtests passed, 1 pre-existing non-failing warning.
+Supabase security advisor: zero findings.
+Supabase migration for Deployment 3: none.

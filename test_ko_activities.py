@@ -286,8 +286,8 @@ def test_frozen_ground_beef_uses_one_pan_and_a_feasible_doneness_check():
     skillet = graph["cook skillet:meal"]
     assert "prep:Ground beef" in skillet.depends_on
     assert "same skillet" in skillet.instruction
-    assert "no pink ground meat remains" in skillet.instruction
-    assert "30 seconds after the last pink disappears" in skillet.instruction
+    assert "160°F" in skillet.instruction
+    assert "Color alone is not the safety test" in skillet.instruction
 
 
 def test_ground_beef_skilletting_and_sauce_stay_on_one_burner_lane():

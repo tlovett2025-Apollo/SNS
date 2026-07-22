@@ -32,7 +32,7 @@ candidate = candidates[0]
 assert "opportunities" in candidate
 assert candidate["opportunities"]
 assert any(
-    opportunity.get("opportunity_id") == "fond_mushroom_browning"
+    opportunity.get("opportunity_id") == "ko_dry_browning"
     for opportunity in candidate["opportunities"]
 ), candidate["opportunities"]
 

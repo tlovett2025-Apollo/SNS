@@ -1,0 +1,47 @@
+Stock & Stir — shared kitchen/authentication fix
+
+Preferred installation (from C:\Users\tlove\OneDrive\Desktop\SNS):
+
+1. Confirm tracked files are clean:
+   git status --short
+
+2. Copy 0001-Make-Supabase-kitchen-authoritative-across-devices.patch
+   into the repository's backups folder, then check it:
+   git apply --check backups\0001-Make-Supabase-kitchen-authoritative-across-devices.patch
+
+3. If the check succeeds:
+   git apply backups\0001-Make-Supabase-kitchen-authoritative-across-devices.patch
+
+4. Run the tests:
+   py -m unittest discover -v
+
+5. Commit and deploy:
+   git add api_http.py test_api_http.py test_public_site_copy.py web\public-site\login.html web\public-site\sns-auth.js web\public-site\sns-flow.js
+   git commit -m "Make Supabase kitchen authoritative across devices"
+   git push origin main
+
+Fallback if git apply --check fails:
+
+- Open SNS-shared-kitchen-fix-changed-files.zip.
+- Copy its six files over the matching paths in the SNS repository.
+- Then run steps 4 and 5 above.
+
+What this deployment changes:
+
+- Supabase becomes the only writable kitchen for a signed-in user.
+- Browser storage becomes a user-specific cache/draft, not a second kitchen.
+- A failed shared-kitchen load is visible and saving is disabled.
+- Anonymous API requests can no longer overwrite the legacy tester kitchen.
+- Authentication changes are observed, and a different signed-in user reloads
+  the correct kitchen.
+- Login errors explain the difference between login, signup, and password-reset
+  email rate limiting.
+
+First production check after both Render services are live:
+
+1. Log in on desktop.
+2. Open My Kitchen and confirm it says "Shared kitchen loaded."
+3. Change one harmless quantity and save.
+4. Log in on the phone with the same account and reload My Kitchen.
+5. Confirm the same quantity appears.
+

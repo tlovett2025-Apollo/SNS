@@ -297,6 +297,11 @@ def _comfort_sauce_finish(candidate: dict, fallback: str) -> str:
             "Bring it to a gentle simmer, then reduce the heat to low.",
             f"Stir in {milk} gradually without letting the sauce boil; gentle heat helps it stay smooth around the tomatoes.",
         ]
+    elif milk:
+        parts = [
+            f"Add {liquids or 'the prepared liquid'} to the skillet and scrape up the browned flavor.",
+            "Bring it to a gentle simmer, then reduce the heat; do not boil after the milk is added.",
+        ]
     else:
         parts = [
             f"Add {liquids or 'the prepared liquid'} to the skillet and scrape up the browned flavor.",
@@ -1636,7 +1641,6 @@ def consolidate_skillet_vegetables(
                 if dependency not in old_ids and dependency not in dependencies:
                     dependencies.append(dependency)
 
-        vegetable_names = _join([activity.component for activity in vegetable_activities])
         vegetable_keys = {activity.component.lower() for activity in vegetable_activities}
         seasoning_names = [
             name for name in _resolved_requirements_by_ko(
@@ -1651,29 +1655,74 @@ def consolidate_skillet_vegetables(
             activity.component: get_ingredient_profile(activity.component, "vegetable")
             for activity in vegetable_activities
         }
-        has_sturdy_vegetable = any(
-            profile.cook_minutes >= 8 or "long-lead-vegetable" in set(profile.behavior_traits)
-            for profile in vegetable_profiles.values()
-        )
-        vegetable_minutes = "8–10" if has_sturdy_vegetable else "5–7"
+        trait_sets = {
+            name: set(profile.behavior_traits) | set(profile.physical_traits)
+            for name, profile in vegetable_profiles.items()
+        }
+        sturdy = [
+            name for name, profile in vegetable_profiles.items()
+            if profile.cook_minutes >= 10
+            or "long-lead-vegetable" in trait_sets[name]
+            or "slow-softening" in trait_sets[name]
+        ]
+        aromatics = [
+            name for name in vegetable_profiles
+            if name not in sturdy
+            and ({"early-entry", "joins-sauce-base"} & trait_sets[name])
+        ]
+        later = [
+            name for name in vegetable_profiles
+            if name not in sturdy and name not in aromatics
+        ]
         texture_targets = [
             f"{name} reaches this outcome: {profile.desired_outcome.rstrip('.')}"
             for name, profile in vegetable_profiles.items()
         ]
         texture_text = "; and ".join(texture_targets) or "the vegetables are tender"
+        protein_rule = resolve_behavior(
+            protein, "protein", _clean(candidate.get("protein_state")), "skillet", DB_PATH
+        ).method
+        protein_endpoint = (
+            protein_rule.doneness_cue.rstrip(".")
+            if protein_rule and protein_rule.doneness_cue
+            else "the center of the thickest clump reaches its verified safe temperature"
+        )
+        if sturdy:
+            vegetable_opening = (
+                f"Add {_join([*sturdy, *aromatics])} to the skillet with 2 tablespoons water. "
+                "Cover and steam-soften for about 4 minutes, then uncover and let the water evaporate. "
+            )
+            beef_opening = (
+                f"Add {protein} to the same skillet and break it into small crumbles. "
+                "Cook for about 8 minutes, allowing brief contact with the pan for browning. "
+            )
+            later_text = (
+                f"Add {_join(later)} during the final 5–7 minutes so it does not overcook. "
+                if later else ""
+            )
+            total_cook_minutes = 16 + (2 if later else 0)
+        else:
+            vegetable_opening = (
+                f"Heat the skillet, add {protein}, and break it into small crumbles. Cook for about 4 minutes. "
+            )
+            beef_opening = ""
+            later_text = (
+                f"Add {_join(later or aromatics)} to the same skillet and cook for about 5–7 minutes. "
+            )
+            total_cook_minutes = 11
         shared = _planner_activity(
             "cook skillet",
             (
-                f"Heat the skillet, add {protein}, and break it into small crumbles. Cook for about 4 minutes. "
+                vegetable_opening
+                + beef_opening
                 + bloom_instruction
-                + f"Add {vegetable_names} to the same skillet and cook for about {vegetable_minutes} minutes, "
-                "stirring often enough to cook evenly but allowing brief contact with the pan for flavor. "
-                f"Continue until {texture_text}, no pink "
-                "ground meat remains, and every crumble is steaming hot. Keep stirring for about 30 seconds after "
-                "the last pink disappears. If there is more than about 1 tablespoon of fat, drain only the excess "
+                + later_text
+                + f"Continue until {texture_text}. Verify {protein}: {protein_endpoint}. "
+                "Color alone is not the safety test. Break apart any large clumps and continue cooking if the "
+                "center has not reached that endpoint. If there is more than about 1 tablespoon of fat, drain only the excess "
                 "and leave a light coating in the skillet for the sauce."
             ),
-            minutes=max(14 if has_sturdy_vegetable else 11, int(protein_cook.minutes or 0)),
+            minutes=max(total_cook_minutes, int(protein_cook.minutes or 0)),
             human_busy=True,
             stage="middle",
             depends_on=dependencies,

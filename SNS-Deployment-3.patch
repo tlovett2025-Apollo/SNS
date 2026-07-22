@@ -1,0 +1,1147 @@
+diff --git a/api_http.py b/api_http.py
+index ec27bb2..e173496 100644
+--- a/api_http.py
++++ b/api_http.py
+@@ -29,6 +29,11 @@ from household_inventory import (
+     InventoryError,
+     bootstrap_local_household,
+ )
++from inventory_capture import (
++    InventoryCaptureError,
++    recognize_pantry_photo,
++    resolve_barcode,
++)
+ from recipe_reports import RecipeReportError, normalize_recipe_report
+ from supabase_gateway import (
+     SupabaseGateway,
+@@ -81,7 +86,7 @@ def _domain_error(exc: Exception) -> HTTPException:
+         return HTTPException(status_code=403, detail=str(exc))
+     if isinstance(exc, SupabaseGatewayError):
+         return HTTPException(status_code=401, detail=str(exc))
+-    if isinstance(exc, (APIContractError, InventoryError, RecipeReportError)):
++    if isinstance(exc, (APIContractError, InventoryError, InventoryCaptureError, RecipeReportError)):
+         return HTTPException(status_code=400, detail=str(exc))
+     return HTTPException(status_code=500, detail="The Stock & Stir API could not complete the request.")
+ 
+@@ -204,6 +209,53 @@ def save_kitchen_endpoint(
+         raise _domain_error(exc) from exc
+ 
+ 
++def _signed_in_kitchen(authorization: str | None) -> dict:
++    """Validate the user JWT and return only that user's RLS-protected kitchen."""
++    token = _access_token(authorization)
++    if not token:
++        raise SupabaseGatewayError("Log in to scan items into your shared kitchen.")
++    return _SUPABASE.kitchen_snapshot(token)
++
++
++def _snapshot_inventory(snapshot: dict) -> list[dict]:
++    values = snapshot.get("inventory") or snapshot.get("foods") or []
++    return values if isinstance(values, list) else []
++
++
++@app.post("/api/ResolveBarcode")
++def resolve_barcode_endpoint(
++    payload: dict,
++    authorization: str | None = Header(default=None),
++) -> dict:
++    """Return a canonical review draft for a UPC/EAN; never save it."""
++    try:
++        snapshot = _signed_in_kitchen(authorization)
++        return resolve_barcode(
++            payload.get("barcode"),
++            db_path=DB_PATH,
++            existing_inventory=_snapshot_inventory(snapshot),
++        )
++    except Exception as exc:
++        raise _domain_error(exc) from exc
++
++
++@app.post("/api/RecognizePantryPhoto")
++def recognize_pantry_photo_endpoint(
++    payload: dict,
++    authorization: str | None = Header(default=None),
++) -> dict:
++    """Return a transient pantry-photo review draft; never store image bytes."""
++    try:
++        snapshot = _signed_in_kitchen(authorization)
++        return recognize_pantry_photo(
++            payload.get("image_data_url"),
++            db_path=DB_PATH,
++            existing_inventory=_snapshot_inventory(snapshot),
++        )
++    except Exception as exc:
++        raise _domain_error(exc) from exc
++
++
+ @app.post("/api/GetRecipeList")
+ def recipe_list_endpoint(
+     payload: dict,
+diff --git a/docs/DEPLOYMENT-3-INVENTORY-CAPTURE.md b/docs/DEPLOYMENT-3-INVENTORY-CAPTURE.md
+new file mode 100644
+index 0000000..ab07d9d
+--- /dev/null
++++ b/docs/DEPLOYMENT-3-INVENTORY-CAPTURE.md
+@@ -0,0 +1,49 @@
++# Deployment 3 · Reviewed inventory capture
++
++This release adds phone-first barcode and pantry-photo entry to My Kitchen.
++Both routes create an editable draft. Nothing enters the signed-in household's
++Supabase kitchen until the cook checks the rows and selects **Add selected to
++My Kitchen**.
++
++## Render setting
++
++Add `OPENAI_API_KEY` as a secret environment variable on `sns-api`. The
++Blueprint declares the variable with `sync: false`, so the secret is never
++committed to Git. `SNS_PANTRY_VISION_MODEL` defaults to `gpt-5-mini` and may be
++changed without a code release.
++
++The API still starts safely when the key is absent. Barcode entry continues to
++work, and photo entry gives a friendly configuration message instead of
++changing the pantry.
++
++## Data boundaries
++
++- Barcode and photo endpoints require a signed-in Supabase session.
++- The user JWT reads only that household's current kitchen through RLS.
++- Photos are resized in the browser, sent with OpenAI response storage
++  disabled, and are not written to Supabase or the SNS filesystem.
++- Recognition results are matched against the versioned SNS ingredient and
++  alias catalog, deduplicated, and returned as review rows.
++- Only confirmed rows use the existing `sync_my_kitchen` RPC.
++- No Supabase migration is required for this deployment.
++
++## Smoke test after Render finishes
++
++1. Sign in on a phone and open **My Kitchen**.
++2. Scan a grocery barcode, review the draft, and add it.
++3. Refresh on another signed-in device and confirm the item appears once.
++4. Photograph a small pantry shelf, edit one draft row, leave one unchecked,
++   and add the selected rows.
++5. Refresh and confirm only the selected rows were saved.
++6. Deny camera permission once and confirm manual barcode entry remains usable.
++
++## Automated verification
++
++Run from the repository root:
++
++```text
++python -m pytest -q test_*.py
++```
++
++Expected result for this release: 216 tests and 730 subtests passed. The single
++Starlette/httpx compatibility warning is pre-existing and non-failing.
+diff --git a/inventory_capture.py b/inventory_capture.py
+new file mode 100644
+index 0000000..0031f20
+--- /dev/null
++++ b/inventory_capture.py
+@@ -0,0 +1,409 @@
++"""Review-first barcode and pantry-photo inventory capture.
++
++External recognition is deliberately separated from persistence.  Every
++result from this module is a draft: callers must show it to the cook and the
++existing authenticated kitchen save path remains the only way to persist it.
++"""
++
++from __future__ import annotations
++
++import base64
++import binascii
++import json
++import os
++import re
++import sqlite3
++from contextlib import closing
++from difflib import SequenceMatcher
++from functools import lru_cache
++from pathlib import Path
++from typing import Any
++from urllib.error import HTTPError, URLError
++from urllib.parse import quote
++from urllib.request import Request, urlopen
++
++from config import DB_PATH
++
++
++MAX_PHOTO_BYTES = 6 * 1024 * 1024
++MAX_CAPTURE_ITEMS = 50
++ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
++BARCODE_PATTERN = re.compile(r"^[0-9]{8,14}$")
++DATA_URL_PATTERN = re.compile(
++    r"^data:(image/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=\r\n]+)$",
++    re.IGNORECASE,
++)
++OPEN_FOOD_FACTS_URL = "https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
++OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
++CAPTURE_NAME_ALIASES = {
++    "chicken breasts": "Chicken breast",
++    "cooking oil": "Vegetable oil",
++    "corn starch": "Cornstarch",
++    "rib eye": "Ribeye steak",
++    "ribeye": "Ribeye steak",
++}
++
++
++class InventoryCaptureError(ValueError):
++    """Raised when capture input or a recognition service cannot be used."""
++
++
++def _clean(value: Any) -> str:
++    return " ".join(str(value or "").strip().split())
++
++
++def _key(value: Any) -> str:
++    return re.sub(r"[^a-z0-9]+", " ", _clean(value).lower()).strip()
++
++
++def _float(value: Any, default: float = 1.0) -> float:
++    try:
++        number = float(value)
++    except (TypeError, ValueError):
++        return default
++    return number if number > 0 else default
++
++
++def _catalog_version(db_path: str | Path) -> tuple[str, int]:
++    path = Path(db_path)
++    return str(path), path.stat().st_mtime_ns
++
++
++@lru_cache(maxsize=4)
++def _catalog(path: str, _mtime_ns: int) -> tuple[dict[str, dict], tuple[tuple[str, dict], ...]]:
++    exact: dict[str, dict] = {}
++    phrases: list[tuple[str, dict]] = []
++    with closing(sqlite3.connect(path)) as con:
++        con.row_factory = sqlite3.Row
++        ingredients = con.execute(
++            "SELECT ingredient_id,name,category,default_storage FROM ingredients WHERE active=1"
++        ).fetchall()
++        aliases = con.execute(
++            "SELECT ingredient_id,alias_name FROM ingredient_aliases"
++        ).fetchall()
++    by_id = {
++        int(row["ingredient_id"]): {
++            "name": str(row["name"]),
++            "category": str(row["category"] or ""),
++            "default_storage": str(row["default_storage"] or ""),
++        }
++        for row in ingredients
++    }
++    for item in by_id.values():
++        exact[_key(item["name"])] = item
++    for row in aliases:
++        item = by_id.get(int(row["ingredient_id"]))
++        if item:
++            exact[_key(row["alias_name"])] = item
++    for name_key, item in exact.items():
++        if len(name_key) >= 4:
++            phrases.append((name_key, item))
++    phrases.sort(key=lambda pair: len(pair[0]), reverse=True)
++    return exact, tuple(phrases)
++
++
++def _match_name(names: list[str], db_path: str | Path) -> tuple[dict | None, str, float]:
++    exact, phrases = _catalog(*_catalog_version(db_path))
++    keys = [
++        _key(CAPTURE_NAME_ALIASES.get(_key(name), name))
++        for name in names if _key(name)
++    ]
++    for name_key in keys:
++        if name_key in exact:
++            return exact[name_key], "matched", 1.0
++    for name_key in keys:
++        padded = f" {name_key} "
++        for phrase, item in phrases:
++            if f" {phrase} " in padded:
++                return item, "matched", 0.94
++
++    best: tuple[float, dict | None] = (0.0, None)
++    for name_key in keys:
++        for candidate, item in exact.items():
++            score = SequenceMatcher(None, name_key, candidate).ratio()
++            if score > best[0]:
++                best = (score, item)
++    if best[1] is not None and best[0] >= 0.78:
++        return best[1], "needs_review", round(best[0], 2)
++    return None, "unrecognized", 0.0
++
++
++def _form_and_storage(candidate: dict, matched: dict | None) -> tuple[str, str]:
++    raw_form = _clean(candidate.get("form"))
++    raw_storage = _clean(candidate.get("storage") or candidate.get("storage_location"))
++    evidence = _key(" ".join([
++        raw_form,
++        _clean(candidate.get("name")),
++        _clean(candidate.get("category")),
++        _clean(candidate.get("packaging")),
++    ]))
++    if raw_form:
++        form = raw_form
++    elif "frozen" in evidence:
++        form = "Frozen"
++    elif any(word in evidence for word in ("canned", "can", "tinned")):
++        form = "Canned"
++    elif any(word in evidence for word in ("dry", "dried", "pasta", "rice", "flour")):
++        form = "Dry"
++    else:
++        form = "Fresh" if raw_storage in {"Fresh", "Fridge"} else "Shelf-stable"
++
++    storage_names = {"pantry": "Pantry", "fridge": "Fridge", "freezer": "Freezer", "fresh": "Fresh"}
++    if _key(raw_storage) in storage_names:
++        storage = storage_names[_key(raw_storage)]
++    elif "frozen" in _key(form):
++        storage = "Freezer"
++    elif "canned" in _key(form) or "shelf stable" in _key(form) or "dry" in _key(form):
++        storage = "Pantry"
++    else:
++        default = storage_names.get(_key((matched or {}).get("default_storage")))
++        storage = default or "Fresh"
++    return form, storage
++
++
++def _unit(value: Any, form: str) -> str:
++    key = _key(value)
++    aliases = {
++        "items": "item", "cans": "can", "jars": "jar", "boxes": "box",
++        "bags": "bag", "packages": "package", "pieces": "piece",
++        "pounds": "lb", "pound": "lb", "lbs": "lb", "ounces": "oz",
++        "ounce": "oz", "cups": "cup", "cartons": "carton",
++        "bottles": "bottle", "bunches": "bunch", "loaves": "loaf",
++    }
++    allowed = {
++        "item", "can", "jar", "box", "bag", "package", "egg", "piece",
++        "lb", "oz", "cup", "carton", "bottle", "bunch", "loaf", "portion", "meal",
++    }
++    normalized = aliases.get(key, key)
++    if normalized in allowed:
++        return normalized
++    if "canned" in _key(form):
++        return "can"
++    return "package"
++
++
++def normalize_capture_candidates(
++    candidates: list[dict],
++    *,
++    db_path: str | Path = DB_PATH,
++    existing_inventory: list[dict] | None = None,
++) -> list[dict]:
++    """Turn uncertain recognition into canonical, deduplicated review rows."""
++    if not isinstance(candidates, list):
++        raise InventoryCaptureError("The recognition result was not an item list.")
++    if len(candidates) > MAX_CAPTURE_ITEMS:
++        raise InventoryCaptureError(f"Review no more than {MAX_CAPTURE_ITEMS} items at once.")
++
++    existing: dict[tuple[str, str], dict] = {}
++    for raw in existing_inventory or []:
++        names = [_clean(raw.get("name"))]
++        matched, _status, _confidence = _match_name(names, db_path)
++        name = (matched or {}).get("name") or names[0]
++        form, storage = _form_and_storage(raw, matched)
++        existing[(_key(name), storage)] = {
++            "quantity": _float(raw.get("quantity"), 0.0),
++            "unit": _unit(raw.get("unit"), form),
++        }
++
++    drafts: dict[tuple[str, str], dict] = {}
++    for raw in candidates:
++        if not isinstance(raw, dict):
++            continue
++        source_name = _clean(raw.get("name") or raw.get("product_name"))
++        if not source_name:
++            continue
++        alternates = [
++            source_name,
++            _clean(raw.get("generic_name")),
++            *([_clean(value) for value in raw.get("candidate_names", [])]
++              if isinstance(raw.get("candidate_names"), list) else []),
++        ]
++        matched, status, match_confidence = _match_name(alternates, db_path)
++        canonical_name = (matched or {}).get("name") or source_name
++        form, storage = _form_and_storage(raw, matched)
++        confidence = min(1.0, max(0.0, _float(raw.get("confidence"), match_confidence)))
++        unit = _unit(raw.get("unit"), form)
++        quantity = _float(raw.get("quantity"), 1.0)
++        key = (_key(canonical_name), storage)
++        prior = drafts.get(key)
++        if prior and prior["unit"] == unit:
++            prior["quantity"] = round(prior["quantity"] + quantity, 2)
++            prior["source_name"] = f'{prior["source_name"]}; {source_name}'
++            prior["confidence"] = min(prior["confidence"], confidence)
++            continue
++        current = existing.get(key)
++        drafts[key] = {
++            "source_name": source_name,
++            "name": canonical_name,
++            "form": form,
++            "storage_location": storage,
++            "quantity": quantity,
++            "unit": unit,
++            "confidence": round(confidence, 2),
++            "status": status,
++            "already_on_hand": bool(current),
++            "existing_quantity": current["quantity"] if current else 0,
++            "existing_unit": current["unit"] if current else None,
++            "barcode": _clean(raw.get("barcode")) or None,
++        }
++    return list(drafts.values())
++
++
++def _json_request(url: str, *, headers: dict[str, str], body: bytes | None = None, timeout: float = 15.0) -> dict:
++    request = Request(url, data=body, headers=headers, method="POST" if body is not None else "GET")
++    try:
++        with urlopen(request, timeout=timeout) as response:
++            return json.loads(response.read().decode("utf-8"))
++    except HTTPError as exc:
++        raise InventoryCaptureError(
++            f"The recognition service is temporarily unavailable ({exc.code}). Try again or enter the item manually."
++        ) from exc
++    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
++        raise InventoryCaptureError("The recognition service could not be reached. Try again or enter the item manually.") from exc
++
++
++def resolve_barcode(
++    barcode: str,
++    *,
++    db_path: str | Path = DB_PATH,
++    existing_inventory: list[dict] | None = None,
++) -> dict:
++    clean_barcode = re.sub(r"\D", "", _clean(barcode))
++    if not BARCODE_PATTERN.fullmatch(clean_barcode):
++        raise InventoryCaptureError("Enter an 8- to 14-digit UPC or EAN barcode.")
++    template = os.getenv("SNS_BARCODE_LOOKUP_URL", OPEN_FOOD_FACTS_URL)
++    url = template.format(barcode=quote(clean_barcode))
++    separator = "&" if "?" in url else "?"
++    url += separator + "fields=code,product_name,product_name_en,generic_name,categories,quantity,packaging"
++    payload = _json_request(url, headers={
++        "Accept": "application/json",
++        "User-Agent": os.getenv("SNS_BARCODE_USER_AGENT", "StockAndStir/1.0 (pantry capture)"),
++    })
++    product = payload.get("product") if isinstance(payload, dict) else None
++    if payload.get("status") != 1 or not isinstance(product, dict):
++        raise InventoryCaptureError("That barcode was not found. Enter the item manually instead.")
++    name = _clean(product.get("product_name_en") or product.get("product_name") or product.get("generic_name"))
++    if not name:
++        raise InventoryCaptureError("That barcode has no usable product name. Enter the item manually instead.")
++    category_names = [part.strip() for part in _clean(product.get("categories")).split(",") if part.strip()]
++    draft = normalize_capture_candidates([{
++        "name": name,
++        "generic_name": product.get("generic_name"),
++        "candidate_names": category_names,
++        "category": product.get("categories"),
++        "packaging": product.get("packaging"),
++        "quantity": 1,
++        "unit": "package",
++        "confidence": 0.98,
++        "barcode": clean_barcode,
++    }], db_path=db_path, existing_inventory=existing_inventory)
++    if not draft:
++        raise InventoryCaptureError("That product could not be turned into a pantry item.")
++    return {"source": "barcode", "barcode": clean_barcode, "items": draft}
++
++
++PHOTO_SCHEMA = {
++    "type": "object",
++    "properties": {
++        "items": {
++            "type": "array",
++            "maxItems": MAX_CAPTURE_ITEMS,
++            "items": {
++                "type": "object",
++                "properties": {
++                    "name": {"type": "string", "maxLength": 120},
++                    "form": {"type": "string", "maxLength": 60},
++                    "storage": {"type": "string", "enum": ["Pantry", "Fridge", "Freezer", "Fresh"]},
++                    "quantity": {"type": "number"},
++                    "unit": {"type": "string", "maxLength": 30},
++                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
++                },
++                "required": ["name", "form", "storage", "quantity", "unit", "confidence"],
++                "additionalProperties": False,
++            },
++        }
++    },
++    "required": ["items"],
++    "additionalProperties": False,
++}
++
++
++def _validated_image_data_url(value: Any) -> str:
++    data_url = _clean(value)
++    if len(data_url) > (MAX_PHOTO_BYTES * 4 // 3) + 256:
++        raise InventoryCaptureError("Choose a pantry photo smaller than 6 MB.")
++    match = DATA_URL_PATTERN.fullmatch(data_url)
++    if not match or match.group(1).lower() not in ALLOWED_IMAGE_TYPES:
++        raise InventoryCaptureError("Choose a JPEG, PNG, or WebP pantry photo.")
++    try:
++        binary = base64.b64decode(match.group(2), validate=True)
++    except (binascii.Error, ValueError) as exc:
++        raise InventoryCaptureError("The pantry photo could not be read.") from exc
++    if not binary or len(binary) > MAX_PHOTO_BYTES:
++        raise InventoryCaptureError("Choose a pantry photo smaller than 6 MB.")
++    return data_url
++
++
++def _response_output_text(payload: dict) -> str:
++    if isinstance(payload.get("output_text"), str):
++        return payload["output_text"]
++    for output in payload.get("output") or []:
++        for content in output.get("content") or []:
++            if content.get("type") == "output_text" and isinstance(content.get("text"), str):
++                return content["text"]
++    raise InventoryCaptureError("The photo service returned no item list. Try a clearer photo.")
++
++
++def recognize_pantry_photo(
++    image_data_url: str,
++    *,
++    db_path: str | Path = DB_PATH,
++    existing_inventory: list[dict] | None = None,
++) -> dict:
++    image_data_url = _validated_image_data_url(image_data_url)
++    api_key = _clean(os.getenv("OPENAI_API_KEY"))
++    if not api_key:
++        raise InventoryCaptureError("Pantry photo recognition is not configured yet. Add the item manually for now.")
++    request_body = {
++        "model": os.getenv("SNS_PANTRY_VISION_MODEL", "gpt-5-mini"),
++        "store": False,
++        "max_output_tokens": 2500,
++        "input": [{
++            "role": "user",
++            "content": [
++                {
++                    "type": "input_text",
++                    "text": (
++                        "Identify only grocery or pantry items visibly present. Do not infer hidden items. "
++                        "Use common ingredient names rather than marketing copy. Count visible packages when possible. "
++                        "Mark uncertain readings with lower confidence. This is an inventory draft a cook will review."
++                    ),
++                },
++                {"type": "input_image", "image_url": image_data_url, "detail": "low"},
++            ],
++        }],
++        "text": {
++            "format": {
++                "type": "json_schema",
++                "name": "pantry_photo_inventory",
++                "strict": True,
++                "schema": PHOTO_SCHEMA,
++            }
++        },
++    }
++    payload = _json_request(
++        os.getenv("SNS_OPENAI_RESPONSES_URL", OPENAI_RESPONSES_URL),
++        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
++        body=json.dumps(request_body).encode("utf-8"),
++        timeout=float(os.getenv("SNS_PANTRY_VISION_TIMEOUT", "35")),
++    )
++    try:
++        raw_items = json.loads(_response_output_text(payload)).get("items")
++    except (json.JSONDecodeError, AttributeError) as exc:
++        raise InventoryCaptureError("The photo result could not be reviewed safely. Try a clearer photo.") from exc
++    items = normalize_capture_candidates(
++        raw_items, db_path=db_path, existing_inventory=existing_inventory
++    )
++    if not items:
++        raise InventoryCaptureError("No pantry items were clear enough to review in that photo.")
++    return {"source": "photo", "items": items, "photo_stored": False}
+diff --git a/render.yaml b/render.yaml
+index f75f4ee..c250b4d 100644
+--- a/render.yaml
++++ b/render.yaml
+@@ -10,3 +10,7 @@ services:
+     envVars:
+       - key: SNS_CORS_ORIGINS
+         value: "https://sns-web-um3d.onrender.com,https://stockandstir.co,https://www.stockandstir.co,https://getstockandstir.co,https://www.getstockandstir.co"
++      - key: OPENAI_API_KEY
++        sync: false
++      - key: SNS_PANTRY_VISION_MODEL
++        value: gpt-5-mini
+diff --git a/test_api_http.py b/test_api_http.py
+index 2b40ceb..ec98bf4 100644
+--- a/test_api_http.py
++++ b/test_api_http.py
+@@ -151,6 +151,37 @@ class APIHTTPTests(unittest.TestCase):
+         self.assertEqual(response.status_code, 401)
+         self.assertIn("Log in", response.json()["detail"])
+ 
++    def test_anonymous_inventory_capture_is_rejected_before_external_lookup(self):
++        barcode = self.client.post("/api/ResolveBarcode", json={"barcode": "000240001628"})
++        photo = self.client.post(
++            "/api/RecognizePantryPhoto",
++            json={"image_data_url": "data:image/jpeg;base64,c21hbGw="},
++        )
++
++        self.assertEqual(barcode.status_code, 401)
++        self.assertEqual(photo.status_code, 401)
++        self.assertIn("Log in", barcode.json()["detail"])
++
++    def test_signed_in_barcode_capture_uses_rls_kitchen_and_returns_only_a_draft(self):
++        with patch("api_http._SUPABASE") as gateway, patch("api_http.resolve_barcode") as resolver:
++            gateway.token_from_authorization.return_value = "user-token"
++            gateway.kitchen_snapshot.return_value = {
++                "inventory": [{"name": "Green beans", "quantity": 1, "unit": "can"}]
++            }
++            resolver.return_value = {"source": "barcode", "items": [{"name": "Green beans"}]}
++            response = self.client.post(
++                "/api/ResolveBarcode",
++                json={"barcode": "000240001628"},
++                headers={"Authorization": "Bearer user-token"},
++            )
++
++        self.assertEqual(response.status_code, 200)
++        self.assertNotIn("saved", response.json())
++        gateway.kitchen_snapshot.assert_called_once_with("user-token")
++        self.assertEqual(
++            resolver.call_args.kwargs["existing_inventory"][0]["name"], "Green beans"
++        )
++
+     def test_default_cors_preflight_allows_tester_site(self):
+         response = self.client.options(
+             "/api/GetRecipeList",
+diff --git a/test_inventory_capture.py b/test_inventory_capture.py
+new file mode 100644
+index 0000000..3b7598b
+--- /dev/null
++++ b/test_inventory_capture.py
+@@ -0,0 +1,113 @@
++import base64
++import json
++import unittest
++from unittest.mock import patch
++
++from config import DB_PATH
++from inventory_capture import (
++    InventoryCaptureError,
++    normalize_capture_candidates,
++    recognize_pantry_photo,
++    resolve_barcode,
++)
++
++
++class _JSONResponse:
++    def __init__(self, payload):
++        self.payload = payload
++
++    def __enter__(self):
++        return self
++
++    def __exit__(self, *_args):
++        return False
++
++    def read(self):
++        return json.dumps(self.payload).encode("utf-8")
++
++
++class InventoryCaptureTests(unittest.TestCase):
++    def test_capture_aliases_are_canonical_and_duplicate_rows_are_combined(self):
++        items = normalize_capture_candidates([
++            {"name": "corn starch", "form": "Shelf-stable", "storage": "Pantry", "quantity": 1, "unit": "box"},
++            {"name": "Cornstarch", "form": "Shelf-stable", "storage": "Pantry", "quantity": 2, "unit": "box"},
++        ], db_path=DB_PATH)
++
++        self.assertEqual(len(items), 1)
++        self.assertEqual(items[0]["name"], "Cornstarch")
++        self.assertEqual(items[0]["quantity"], 3)
++        self.assertEqual(items[0]["status"], "matched")
++
++    def test_existing_canonical_item_is_flagged_without_creating_a_second_identity(self):
++        items = normalize_capture_candidates(
++            [{"name": "ribeye", "form": "Fresh Raw", "storage": "Fridge", "quantity": 2, "unit": "piece"}],
++            db_path=DB_PATH,
++            existing_inventory=[{"name": "Ribeye steak", "form": "Fresh Raw", "storage": "Fridge", "quantity": 1, "unit": "piece"}],
++        )
++
++        self.assertEqual(items[0]["name"], "Ribeye steak")
++        self.assertTrue(items[0]["already_on_hand"])
++        self.assertEqual(items[0]["existing_quantity"], 1)
++
++    @patch("inventory_capture.urlopen")
++    def test_barcode_lookup_uses_product_evidence_and_returns_review_draft(self, mocked_open):
++        mocked_open.return_value = _JSONResponse({
++            "status": 1,
++            "product": {
++                "product_name": "Del Monte Cut Green Beans",
++                "generic_name": "Green beans",
++                "categories": "Green beans, Canned vegetables",
++                "packaging": "Can",
++            },
++        })
++
++        result = resolve_barcode("000240001628", db_path=DB_PATH)
++
++        self.assertEqual(result["source"], "barcode")
++        self.assertEqual(result["items"][0]["name"], "Green beans")
++        self.assertEqual(result["items"][0]["form"], "Canned")
++        self.assertEqual(result["items"][0]["storage_location"], "Pantry")
++        self.assertNotIn("saved", result)
++
++    def test_barcode_validation_rejects_non_gtin_input_before_lookup(self):
++        with self.assertRaisesRegex(InventoryCaptureError, "8- to 14-digit"):
++            resolve_barcode("not-a-barcode", db_path=DB_PATH)
++
++    @patch("inventory_capture.urlopen")
++    def test_photo_recognition_is_structured_transient_and_never_stores_the_photo(self, mocked_open):
++        mocked_open.return_value = _JSONResponse({
++            "output_text": json.dumps({
++                "items": [{
++                    "name": "Canned tuna", "form": "Canned", "storage": "Pantry",
++                    "quantity": 2, "unit": "can", "confidence": 0.96,
++                }]
++            })
++        })
++        image = "data:image/jpeg;base64," + base64.b64encode(b"small-test-image").decode("ascii")
++
++        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key", "SNS_PANTRY_VISION_MODEL": "test-vision"}):
++            result = recognize_pantry_photo(image, db_path=DB_PATH)
++
++        request = mocked_open.call_args.args[0]
++        request_json = json.loads(request.data)
++        self.assertFalse(request_json["store"])
++        self.assertEqual(request_json["model"], "test-vision")
++        self.assertEqual(request_json["text"]["format"]["type"], "json_schema")
++        self.assertIn("input_image", {item["type"] for item in request_json["input"][0]["content"]})
++        self.assertEqual(result["items"][0]["name"], "Canned tuna")
++        self.assertFalse(result["photo_stored"])
++        self.assertNotIn("image_data_url", result)
++
++    def test_photo_requires_server_side_api_configuration(self):
++        image = "data:image/png;base64," + base64.b64encode(b"small-test-image").decode("ascii")
++        with patch.dict("os.environ", {}, clear=True):
++            with self.assertRaisesRegex(InventoryCaptureError, "not configured"):
++                recognize_pantry_photo(image, db_path=DB_PATH)
++
++    def test_photo_size_and_type_are_bounded(self):
++        with self.assertRaisesRegex(InventoryCaptureError, "JPEG, PNG, or WebP"):
++            recognize_pantry_photo("data:image/gif;base64,R0lGODlh", db_path=DB_PATH)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/test_public_site_copy.py b/test_public_site_copy.py
+index b345e10..e3dae07 100644
+--- a/test_public_site_copy.py
++++ b/test_public_site_copy.py
+@@ -99,6 +99,31 @@ def test_my_kitchen_can_preview_merge_replace_and_undo_sample_or_csv_imports():
+     assert "max-height:96dvh" in css
+ 
+ 
++def test_my_kitchen_capture_is_phone_first_reviewed_and_never_auto_saves_photos():
++    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
++    kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
++    css = (PUBLIC_FLOW.parent / "sns-flow.css").read_text(encoding="utf-8")
++    blueprint = (PUBLIC_FLOW.parents[2] / "render.yaml").read_text(encoding="utf-8")
++
++    assert 'data-open-inventory-capture="barcode"' in kitchen_page
++    assert 'data-open-inventory-capture="photo"' in kitchen_page
++    assert 'capture="environment"' in kitchen_page
++    assert "Nothing is added automatically" in kitchen_page
++    assert "Stock &amp; Stir does not save the photo" in kitchen_page
++    assert 'resolveBarcode: endpoint("/api/ResolveBarcode")' in flow
++    assert 'recognizePantryPhoto: endpoint("/api/RecognizePantryPhoto")' in flow
++    assert "function pantryPhotoDataUrl(file)" in flow
++    assert "function bindInventoryCapture()" in flow
++    assert "@undecaf/barcode-detector-polyfill@0.9.23" in flow
++    assert 'applyImportedPantry(items, "merge")' in flow
++    assert ".inventory-capture-dialog" in css
++    assert ".capture-item-fields" in css
++    assert "max-height:96dvh" in css
++    assert "OPENAI_API_KEY" in blueprint
++    assert "sync: false" in blueprint
++    assert "SNS_PANTRY_VISION_MODEL" in blueprint
++
++
+ def test_recipe_page_exposes_inventory_resolutions_and_preserves_substep_breaks():
+     flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+     recipe_page = (PUBLIC_FLOW.parent / "recipe.html").read_text(encoding="utf-8")
+diff --git a/web/public-site/my-kitchen.html b/web/public-site/my-kitchen.html
+index ece2397..f6d1ed7 100644
+--- a/web/public-site/my-kitchen.html
++++ b/web/public-site/my-kitchen.html
+@@ -48,9 +48,13 @@
+   <section class="pantry-import-callout" aria-label="Pantry setup tools">
+     <div>
+       <strong>Need a faster start?</strong>
+-      <span>Try a regional sample pantry or import your own CSV, then adjust anything that does not match your kitchen.</span>
++      <span>Scan one package, photograph a pantry shelf, or load a testing pantry. You review every item before it is saved.</span>
++    </div>
++    <div class="pantry-quick-actions">
++      <button class="btn btn-secondary" type="button" data-open-inventory-capture="barcode">Scan barcode</button>
++      <button class="btn btn-secondary" type="button" data-open-inventory-capture="photo">Add from photo</button>
++      <button class="btn btn-secondary" type="button" data-open-pantry-import>Sample or CSV</button>
+     </div>
+-    <button class="btn btn-secondary" type="button" data-open-pantry-import>Load sample or CSV</button>
+   </section>
+   <section class="pantry-import-undo" data-pantry-import-undo hidden aria-live="polite">
+     <span data-pantry-import-undo-message>Your previous pantry can be restored.</span>
+@@ -212,6 +216,57 @@
+   <p class="empty-search" data-empty-search hidden>No kitchen items match that search.</p>
+   <details class="dev-panel"><summary>Developer view · My Kitchen payload</summary><pre data-payload></pre></details>
+ </main>
++<dialog class="inventory-capture-dialog" data-inventory-capture-dialog>
++  <form class="inventory-capture-form" method="dialog" data-inventory-capture-form>
++    <header>
++      <div>
++        <div class="eyebrow">Add to My Kitchen</div>
++        <h2 data-capture-title>Scan a barcode</h2>
++        <p>Nothing is added automatically. Check the names, amounts, and storage locations first.</p>
++      </div>
++      <button class="catalog-close" type="button" data-close-inventory-capture aria-label="Close">×</button>
++    </header>
++
++    <section class="capture-source" data-capture-barcode>
++      <label>
++        <span>UPC or EAN barcode</span>
++        <span class="capture-barcode-entry"><input type="text" inputmode="numeric" autocomplete="off" maxlength="14" placeholder="Scan or type the numbers" data-capture-barcode-input><button class="btn btn-primary" type="button" data-lookup-barcode>Look it up</button></span>
++      </label>
++      <button class="btn btn-secondary capture-camera-button" type="button" data-start-barcode-camera>Use phone camera</button>
++      <div class="barcode-camera" data-barcode-camera hidden>
++        <video playsinline muted data-barcode-video></video>
++        <p>Hold the barcode inside the camera view. You can type the number instead at any time.</p>
++      </div>
++      <p class="field-note" data-barcode-support>Camera scanning works in supported mobile browsers over HTTPS. Manual entry always works.</p>
++    </section>
++
++    <section class="capture-source" data-capture-photo hidden>
++      <label class="capture-photo-picker">
++        <span>Photograph one shelf or a small group of groceries</span>
++        <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" data-pantry-photo>
++      </label>
++      <p class="field-note">For the cleanest list, keep labels visible and use more than one photo for a crowded pantry. Stock &amp; Stir does not save the photo.</p>
++      <button class="btn btn-primary" type="button" data-recognize-pantry-photo disabled>Review this photo</button>
++    </section>
++
++    <div class="capture-progress" data-capture-progress hidden role="status">Reading the items…</div>
++    <div class="pantry-import-error" data-capture-error hidden role="alert"></div>
++
++    <section class="capture-review" data-capture-review hidden>
++      <div class="capture-review-heading">
++        <div><strong>Check before adding</strong><p data-capture-review-summary></p></div>
++        <button type="button" data-select-all-capture>Select all</button>
++      </div>
++      <div class="capture-review-items" data-capture-review-items></div>
++      <p class="field-note">Yellow rows need a closer look. Edit anything the scanner misunderstood or leave it unchecked.</p>
++    </section>
++
++    <footer>
++      <button class="btn btn-secondary" type="button" data-close-inventory-capture>Cancel</button>
++      <button class="btn btn-primary" type="button" data-apply-captured-items disabled>Add selected to My Kitchen</button>
++    </footer>
++  </form>
++</dialog>
+ <dialog class="pantry-import-dialog" data-pantry-import-dialog>
+   <form class="pantry-import-form" data-pantry-import-form method="dialog">
+     <header>
+diff --git a/web/public-site/sns-flow.css b/web/public-site/sns-flow.css
+index 5d97352..9391c04 100644
+--- a/web/public-site/sns-flow.css
++++ b/web/public-site/sns-flow.css
+@@ -184,7 +184,7 @@ h2 { margin: 0 0 8px; font-size: 1.35rem; }
+ .inventory-summary{min-width:190px;background:var(--sage);color:#fff;border-radius:16px;padding:15px 18px;box-shadow:0 8px 22px rgba(23,33,27,.12);display:grid;grid-template-columns:auto 1fr;column-gap:9px;align-items:baseline}
+ .summary-number{font-size:2.35rem;line-height:1;font-weight:900}.summary-label{font-size:.93rem;font-weight:800}.summary-detail{grid-column:1/-1;margin-top:7px;font-size:.76rem;line-height:1.35;color:#e7f0e9}
+ .kitchen-tools{position:sticky;top:68px;z-index:15;display:flex;gap:10px;align-items:center;margin:0 0 12px;padding:8px;background:rgba(251,250,246,.97);border:1px solid rgba(217,222,217,.72);border-radius:16px;backdrop-filter:blur(10px)}
+-.pantry-import-callout{display:flex;align-items:center;justify-content:space-between;gap:18px;margin:0 0 12px;border:1px solid #bfd0c3;border-radius:14px;padding:12px 14px;background:var(--sage-2)}.pantry-import-callout>div{display:grid;gap:2px}.pantry-import-callout strong{color:var(--sage)}.pantry-import-callout span{color:var(--muted);font-size:.82rem;line-height:1.4}.pantry-import-callout .btn{flex:0 0 auto;padding:10px 14px}.pantry-import-undo{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 0 12px;border-left:4px solid var(--gold);border-radius:10px;padding:10px 13px;background:#fff5df;color:var(--muted);font-size:.86rem}.pantry-import-undo button{border:0;background:transparent;color:var(--sage);font-weight:850;cursor:pointer;white-space:nowrap}
++.pantry-import-callout{display:flex;align-items:center;justify-content:space-between;gap:18px;margin:0 0 12px;border:1px solid #bfd0c3;border-radius:14px;padding:12px 14px;background:var(--sage-2)}.pantry-import-callout>div{display:grid;gap:2px}.pantry-import-callout strong{color:var(--sage)}.pantry-import-callout span{color:var(--muted);font-size:.82rem;line-height:1.4}.pantry-import-callout .btn{flex:0 0 auto;padding:10px 14px}.pantry-quick-actions{display:flex!important;grid-auto-flow:column;gap:7px!important}.pantry-quick-actions .btn{white-space:nowrap}.pantry-import-undo{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 0 12px;border-left:4px solid var(--gold);border-radius:10px;padding:10px 13px;background:#fff5df;color:var(--muted);font-size:.86rem}.pantry-import-undo button{border:0;background:transparent;color:var(--sage);font-weight:850;cursor:pointer;white-space:nowrap}
+ .inventory-search{flex:1;min-height:48px;display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:0 12px;box-shadow:0 4px 14px rgba(23,33,27,.05)}
+ .inventory-search input{width:100%;border:0;outline:0;background:transparent;font-size:1rem}.inventory-search button{border:0;background:transparent;font-size:1.5rem;color:var(--muted);cursor:pointer}
+ .view-toggle{display:flex;padding:4px;background:#e8ede9;border-radius:12px}.view-toggle button{border:0;background:transparent;border-radius:9px;padding:9px 12px;font-weight:800;color:var(--muted);cursor:pointer}.view-toggle button.active{background:#fff;color:var(--sage);box-shadow:0 2px 8px rgba(23,33,27,.1)}
+@@ -202,10 +202,11 @@ h2 { margin: 0 0 8px; font-size: 1.35rem; }
+ .inventory-row-actions{display:flex;justify-content:flex-end}.remove-kitchen-item{min-height:38px;border:0;background:transparent;color:var(--rust);font-weight:750;cursor:pointer;padding:5px 4px;font-size:.72rem}.add-kitchen-item{margin-top:10px;border:1px dashed #9eb6a5;border-radius:10px;background:#f7faf7;color:var(--sage);font-weight:850;cursor:pointer;padding:10px 14px;width:100%}
+ .kitchen-dialog{width:min(520px,calc(100% - 24px));border:0;border-radius:18px;padding:0;box-shadow:0 24px 70px rgba(23,33,27,.28);color:var(--ink)}.kitchen-dialog::backdrop{background:rgba(20,32,25,.56);backdrop-filter:blur(3px)}.kitchen-dialog-form{display:grid;gap:18px;padding:24px}.kitchen-dialog-form h2{margin-top:5px}.kitchen-dialog-form label{display:grid;gap:7px;font-weight:800}.kitchen-dialog-form input,.kitchen-dialog-form select{width:100%;min-height:48px;border:1px solid var(--line);border-radius:12px;background:#fff;padding:10px 12px;color:var(--ink)}.dialog-quantity{display:grid;grid-template-columns:.75fr 1.25fr;gap:10px}.dialog-actions{display:grid;grid-template-columns:1fr 1.35fr;gap:10px;margin-top:4px}
+ .pantry-import-dialog{width:min(780px,calc(100% - 22px));max-height:min(820px,calc(100dvh - 22px));border:0;border-radius:20px;padding:0;color:var(--ink);box-shadow:0 24px 70px rgba(23,33,27,.3)}.pantry-import-dialog::backdrop{background:rgba(20,32,25,.58);backdrop-filter:blur(3px)}.pantry-import-form{display:grid;gap:14px;max-height:min(820px,calc(100dvh - 22px));padding:22px;overflow:auto}.pantry-import-form>header{display:flex;align-items:start;justify-content:space-between;gap:18px}.pantry-import-form h2{margin:5px 0 4px}.pantry-import-form header p{margin:0;color:var(--muted);font-size:.86rem}.pantry-import-sources{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:end}.pantry-import-sources label{display:grid;gap:6px;font-weight:800}.pantry-import-sources select,.pantry-import-sources input{width:100%;min-height:46px;border:1px solid var(--line);border-radius:11px;background:#fff;padding:8px 10px;color:var(--ink)}.pantry-import-or{align-self:center;color:var(--muted);font-size:.78rem;font-weight:800;text-transform:uppercase}.pantry-import-error{white-space:pre-line;border:1px solid #d79c8b;border-radius:10px;padding:10px 12px;background:#fff0eb;color:#75321d;font-size:.84rem}.pantry-import-preview{display:grid;gap:13px}.pantry-import-summary{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding-top:13px}.pantry-import-summary span{color:var(--muted);font-size:.82rem}.pantry-import-items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:7px;background:#f8faf8}.pantry-import-item{display:flex;justify-content:space-between;align-items:center;gap:10px;min-width:0;border-radius:8px;padding:7px 9px;background:#fff}.pantry-import-item span{display:grid;min-width:0}.pantry-import-item strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.84rem}.pantry-import-item small{color:var(--muted);font-size:.68rem}.pantry-import-item b{flex:0 0 auto;color:var(--sage);font-size:.72rem}.pantry-import-item.unresolved{background:#fff5df}.pantry-import-unresolved{display:grid;gap:7px;border:1px solid #e5c477;border-radius:12px;padding:12px;background:#fffaf0}.pantry-import-unresolved p{margin:0;color:var(--muted);font-size:.8rem;line-height:1.4}.pantry-import-unresolved>div{display:flex;flex-wrap:wrap;gap:6px}.pantry-import-unresolved>div span{border-radius:999px;background:#fff;padding:5px 8px;font-size:.76rem}.confirm-custom-items{display:flex!important;grid-template-columns:auto 1fr;align-items:start;gap:8px;font-size:.8rem!important}.confirm-custom-items input{width:auto!important;min-height:0!important;margin-top:3px}.pantry-import-mode{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;border:0;padding:0;margin:0}.pantry-import-mode legend{grid-column:1/-1;margin-bottom:7px;font-weight:850}.pantry-import-mode label{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start;border:1px solid var(--line);border-radius:11px;padding:10px;cursor:pointer}.pantry-import-mode label:has(input:checked){border-color:var(--sage);background:var(--sage-2)}.pantry-import-mode input{margin-top:3px;accent-color:var(--sage)}.pantry-import-mode span{display:grid;gap:3px}.pantry-import-mode small{color:var(--muted);font-size:.73rem;line-height:1.35}.pantry-import-form>footer{position:sticky;bottom:-22px;display:flex;justify-content:flex-end;gap:9px;border-top:1px solid var(--line);padding:13px 0 0;background:#fff}.pantry-import-form>footer .btn:disabled{opacity:.5;cursor:not-allowed}
++.inventory-capture-dialog{width:min(860px,calc(100% - 22px));max-height:min(880px,calc(100dvh - 22px));border:0;border-radius:20px;padding:0;color:var(--ink);box-shadow:0 24px 70px rgba(23,33,27,.3)}.inventory-capture-dialog::backdrop{background:rgba(20,32,25,.58);backdrop-filter:blur(3px)}.inventory-capture-form{display:grid;gap:14px;max-height:min(880px,calc(100dvh - 22px));padding:22px;overflow:auto}.inventory-capture-form>header{display:flex;align-items:start;justify-content:space-between;gap:18px}.inventory-capture-form h2{margin:5px 0 4px}.inventory-capture-form header p{margin:0;color:var(--muted);font-size:.86rem}.capture-source{display:grid;gap:10px;border:1px solid var(--line);border-radius:13px;padding:13px;background:#f8faf8}.capture-source>label{display:grid;gap:6px;font-weight:800}.capture-barcode-entry{display:grid;grid-template-columns:1fr auto;gap:8px}.capture-barcode-entry input,.capture-photo-picker input{width:100%;min-height:46px;border:1px solid var(--line);border-radius:11px;background:#fff;padding:8px 10px;color:var(--ink)}.capture-camera-button{justify-self:start}.barcode-camera{display:grid;gap:7px}.barcode-camera video{width:100%;max-height:300px;border-radius:12px;background:#13221a;object-fit:cover}.barcode-camera p{margin:0;color:var(--muted);font-size:.8rem}.capture-progress{border-radius:10px;padding:11px 13px;background:var(--sage-2);color:var(--sage);font-weight:800}.capture-review{display:grid;gap:10px}.capture-review-heading{display:flex;align-items:start;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding-top:13px}.capture-review-heading p{margin:3px 0 0;color:var(--muted);font-size:.8rem}.capture-review-heading button{border:0;background:transparent;color:var(--sage);font-weight:850;cursor:pointer}.capture-review-items{display:grid;gap:8px}.capture-review-item{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 11px;border:1px solid #bfd0c3;border-radius:12px;padding:11px;background:#fff}.capture-review-item.needs-review{border-color:#e5c477;background:#fffaf0}.capture-include{grid-row:1/3;padding-top:24px}.capture-include input{width:20px;height:20px;accent-color:var(--sage)}.capture-item-fields{display:grid;grid-template-columns:minmax(150px,1.4fr) repeat(4,minmax(90px,1fr));gap:7px}.capture-item-fields label{display:grid;gap:4px;min-width:0}.capture-item-fields label>span{color:var(--muted);font-size:.67rem;font-weight:800;text-transform:uppercase}.capture-item-fields input,.capture-item-fields select{width:100%;min-width:0;min-height:42px;border:1px solid var(--line);border-radius:9px;background:#fff;padding:7px 8px;color:var(--ink)}.capture-item-note{grid-column:2;display:flex;flex-wrap:wrap;gap:6px;color:var(--muted);font-size:.72rem}.capture-item-note>span:first-child{font-weight:800}.capture-existing{border-radius:999px;padding:2px 7px;background:var(--sage-2);color:var(--sage)}.inventory-capture-form>footer{position:sticky;bottom:-22px;display:flex;justify-content:flex-end;gap:9px;border-top:1px solid var(--line);padding:13px 0 0;background:#fff}.inventory-capture-form>footer .btn:disabled{opacity:.5;cursor:not-allowed}
+ .inventory-suggestions{display:flex;flex-wrap:wrap;gap:6px}.inventory-suggestions button{border:1px solid #9eb6a5;border-radius:999px;background:var(--sage-2);color:var(--sage);padding:6px 10px;font-weight:750;cursor:pointer}
+ .empty-search{text-align:center;padding:40px;color:var(--muted)}
+ .kitchen-page .action-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:max(12px,env(safe-area-inset-bottom));width:min(1148px,calc(100% - 24px));margin:0;align-items:center}.save-status{margin-right:auto;color:var(--muted);font-size:.85rem}
+-@media(max-width:760px){main{width:min(100% - 16px,1180px);padding-top:18px}.site-header{padding:12px 14px}.header-nav{gap:12px}.kitchen-hero{grid-template-columns:1fr auto;gap:10px;margin-bottom:12px}.kitchen-hero .eyebrow,.kitchen-hero .lede{display:none}.kitchen-hero h1{font-size:1.8rem;margin:0}.inventory-summary{min-width:0;display:flex;align-items:baseline;gap:5px;padding:9px 11px;border-radius:12px}.summary-number{font-size:1.45rem}.summary-label{font-size:.72rem}.summary-detail{display:none}.kitchen-tools{top:58px;margin-left:-1px;margin-right:-1px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;padding:7px}.inventory-search{grid-column:1/-1;min-height:44px}.view-toggle{width:auto}.view-toggle button{padding:9px 10px}.effort-picker{min-width:106px}.effort-picker select{width:100%}.pantry-import-callout{align-items:stretch;padding:10px}.pantry-import-callout>div span{display:none}.pantry-import-callout .btn{min-height:44px}.pantry-import-undo{align-items:start}.section-heading{grid-template-columns:34px minmax(0,1fr) auto 16px;padding:11px 10px;gap:7px}.section-icon{width:34px;height:34px;border-radius:10px}.section-title small{display:none}.section-title>span{font-size:1.05rem}.section-count strong{font-size:1.05rem}.section-body{padding:0 10px 11px}.item-list{gap:10px}.food-row{grid-template-columns:minmax(0,1fr) auto!important;gap:5px 8px!important;padding:8px 2px!important}.food-row>div:first-child{grid-column:1;grid-row:1}.amount.quantity-editor{grid-column:1/-1;grid-row:2;grid-template-columns:minmax(72px,.7fr) minmax(130px,1.3fr);gap:7px}.inventory-row-actions{grid-column:2;grid-row:1}.remove-kitchen-item{min-height:30px}.quantity-editor input,.quantity-editor select{min-height:44px;font-size:.92rem}.inventory-detail summary{min-height:32px;display:flex;align-items:center}.inventory-detail-fields{grid-template-columns:1fr}.inventory-detail-fields .wide{grid-column:auto}.equipment-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.equipment-item{min-height:44px}.add-kitchen-item{min-height:44px}.pantry-import-dialog{width:100%;max-width:none;max-height:96dvh;margin:auto 0 0;border-radius:18px 18px 0 0}.pantry-import-form{max-height:96dvh;padding:16px 12px}.pantry-import-sources,.pantry-import-mode{grid-template-columns:1fr}.pantry-import-or{display:none}.pantry-import-items{grid-template-columns:1fr;max-height:230px}.pantry-import-form>footer{bottom:-16px}.pantry-import-form>footer .btn{flex:1;padding:12px 8px}.kitchen-page .action-bar{display:grid;grid-template-columns:1fr 1.25fr;padding:10px}.kitchen-page .action-bar .btn{width:100%;padding:13px 8px}.save-status{display:none}.dev-panel{margin-bottom:16px}}
++@media(max-width:760px){main{width:min(100% - 16px,1180px);padding-top:18px}.site-header{padding:12px 14px}.header-nav{gap:12px}.kitchen-hero{grid-template-columns:1fr auto;gap:10px;margin-bottom:12px}.kitchen-hero .eyebrow,.kitchen-hero .lede{display:none}.kitchen-hero h1{font-size:1.8rem;margin:0}.inventory-summary{min-width:0;display:flex;align-items:baseline;gap:5px;padding:9px 11px;border-radius:12px}.summary-number{font-size:1.45rem}.summary-label{font-size:.72rem}.summary-detail{display:none}.kitchen-tools{top:58px;margin-left:-1px;margin-right:-1px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;padding:7px}.inventory-search{grid-column:1/-1;min-height:44px}.view-toggle{width:auto}.view-toggle button{padding:9px 10px}.effort-picker{min-width:106px}.effort-picker select{width:100%}.pantry-import-callout{display:grid;align-items:stretch;padding:10px}.pantry-import-callout>div span{display:none}.pantry-import-callout .btn{min-height:44px}.pantry-quick-actions{display:grid!important;grid-template-columns:1fr 1fr;grid-auto-flow:row}.pantry-quick-actions .btn:last-child{grid-column:1/-1}.pantry-import-undo{align-items:start}.section-heading{grid-template-columns:34px minmax(0,1fr) auto 16px;padding:11px 10px;gap:7px}.section-icon{width:34px;height:34px;border-radius:10px}.section-title small{display:none}.section-title>span{font-size:1.05rem}.section-count strong{font-size:1.05rem}.section-body{padding:0 10px 11px}.item-list{gap:10px}.food-row{grid-template-columns:minmax(0,1fr) auto!important;gap:5px 8px!important;padding:8px 2px!important}.food-row>div:first-child{grid-column:1;grid-row:1}.amount.quantity-editor{grid-column:1/-1;grid-row:2;grid-template-columns:minmax(72px,.7fr) minmax(130px,1.3fr);gap:7px}.inventory-row-actions{grid-column:2;grid-row:1}.remove-kitchen-item{min-height:30px}.quantity-editor input,.quantity-editor select{min-height:44px;font-size:.92rem}.inventory-detail summary{min-height:32px;display:flex;align-items:center}.inventory-detail-fields{grid-template-columns:1fr}.inventory-detail-fields .wide{grid-column:auto}.equipment-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.equipment-item{min-height:44px}.add-kitchen-item{min-height:44px}.pantry-import-dialog,.inventory-capture-dialog{width:100%;max-width:none;max-height:96dvh;margin:auto 0 0;border-radius:18px 18px 0 0}.pantry-import-form,.inventory-capture-form{max-height:96dvh;padding:16px 12px}.pantry-import-sources,.pantry-import-mode{grid-template-columns:1fr}.pantry-import-or{display:none}.pantry-import-items{grid-template-columns:1fr;max-height:230px}.pantry-import-form>footer,.inventory-capture-form>footer{bottom:-16px}.pantry-import-form>footer .btn,.inventory-capture-form>footer .btn{flex:1;padding:12px 8px}.capture-barcode-entry{grid-template-columns:1fr}.capture-camera-button{width:100%}.capture-item-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.capture-item-fields .capture-name{grid-column:1/-1}.capture-review-item{padding:9px 7px}.capture-include{padding-top:26px}.capture-item-note{display:grid}.kitchen-page .action-bar{display:grid;grid-template-columns:1fr 1.25fr;padding:10px}.kitchen-page .action-bar .btn{width:100%;padding:13px 8px}.save-status{display:none}.dev-panel{margin-bottom:16px}}
+ @media(max-width:390px){.header-link[href="login.html"]{display:none}.section-count{font-size:.7rem}.section-count strong{font-size:1.05rem}}
+ 
+ /* Build Your Meal */
+diff --git a/web/public-site/sns-flow.js b/web/public-site/sns-flow.js
+index 90c754b..1d694fe 100644
+--- a/web/public-site/sns-flow.js
++++ b/web/public-site/sns-flow.js
+@@ -5,6 +5,8 @@ const SNS = (() => {
+   const API = {
+     myKitchen: endpoint("/api/MyKitchen"),
+     saveKitchen: endpoint("/api/SaveMyKitchen"),
++    resolveBarcode: endpoint("/api/ResolveBarcode"),
++    recognizePantryPhoto: endpoint("/api/RecognizePantryPhoto"),
+     getMealBuilderOptions: endpoint("/api/GetMealBuilderOptions"),
+     getRecipeList: endpoint("/api/GetRecipeList"),
+     getRecipe: endpoint("/api/GetRecipe"),
+@@ -798,6 +800,263 @@ const SNS = (() => {
+     });
+   }
+ 
++  function captureUnitOptions(selected = "package") {
++    const known = inventoryUnits.some(([value]) => value === selected) ? selected : "package";
++    return inventoryUnits.map(([value, label]) =>
++      `<option value="${value}"${value === known ? " selected" : ""}>${label}</option>`
++    ).join("");
++  }
++
++  async function pantryPhotoDataUrl(file) {
++    if (!file || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
++      throw new Error("Choose a JPEG, PNG, or WebP photo.");
++    }
++    if (file.size > 15 * 1024 * 1024) throw new Error("Choose a photo smaller than 15 MB.");
++    const objectUrl = URL.createObjectURL(file);
++    try {
++      const image = new Image();
++      image.decoding = "async";
++      image.src = objectUrl;
++      await image.decode();
++      const longest = Math.max(image.naturalWidth, image.naturalHeight);
++      const scale = Math.min(1, 1600 / longest);
++      const canvas = document.createElement("canvas");
++      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
++      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
++      canvas.getContext("2d", { alpha: false }).drawImage(image, 0, 0, canvas.width, canvas.height);
++      return canvas.toDataURL("image/jpeg", .78);
++    } finally {
++      URL.revokeObjectURL(objectUrl);
++    }
++  }
++
++  function bindInventoryCapture() {
++    const dialog = document.querySelector("[data-inventory-capture-dialog]");
++    if (!dialog) return;
++    const barcodePanel = dialog.querySelector("[data-capture-barcode]");
++    const photoPanel = dialog.querySelector("[data-capture-photo]");
++    const barcodeInput = dialog.querySelector("[data-capture-barcode-input]");
++    const lookupButton = dialog.querySelector("[data-lookup-barcode]");
++    const cameraButton = dialog.querySelector("[data-start-barcode-camera]");
++    const cameraHolder = dialog.querySelector("[data-barcode-camera]");
++    const video = dialog.querySelector("[data-barcode-video]");
++    const photoInput = dialog.querySelector("[data-pantry-photo]");
++    const photoButton = dialog.querySelector("[data-recognize-pantry-photo]");
++    const progress = dialog.querySelector("[data-capture-progress]");
++    const error = dialog.querySelector("[data-capture-error]");
++    const review = dialog.querySelector("[data-capture-review]");
++    const reviewItems = dialog.querySelector("[data-capture-review-items]");
++    const applyButton = dialog.querySelector("[data-apply-captured-items]");
++    let stream = null;
++    let scanning = false;
++
++    async function barcodeDetectorClass() {
++      if ("BarcodeDetector" in window) return window.BarcodeDetector;
++      try {
++        const module = await import("https://cdn.jsdelivr.net/npm/@undecaf/barcode-detector-polyfill@0.9.23/dist/main.js");
++        window.BarcodeDetector = module.BarcodeDetectorPolyfill;
++        return window.BarcodeDetector;
++      } catch {
++        return null;
++      }
++    }
++
++    function setError(message = "") {
++      error.hidden = !message;
++      error.textContent = message;
++    }
++
++    function setBusy(busy, message = "Reading the items…") {
++      progress.hidden = !busy;
++      progress.textContent = message;
++      lookupButton.disabled = busy;
++      photoButton.disabled = busy || !photoInput.files?.[0];
++    }
++
++    function selectedItems() {
++      return [...reviewItems.querySelectorAll("[data-capture-item]")]
++        .filter(row => row.querySelector("[data-capture-include]").checked)
++        .map(row => ({
++          name: row.querySelector("[data-capture-name]").value.trim(),
++          form: row.querySelector("[data-capture-form]").value.trim(),
++          storage_location: row.querySelector("[data-capture-storage]").value,
++          quantity: Number(row.querySelector("[data-capture-quantity]").value || 1),
++          unit: row.querySelector("[data-capture-unit]").value,
++          unresolved: row.dataset.status !== "matched"
++        })).filter(item => item.name && item.quantity > 0);
++    }
++
++    function refreshApply() {
++      applyButton.disabled = selectedItems().length === 0;
++    }
++
++    function showReview(payload) {
++      const items = Array.isArray(payload?.items) ? payload.items : [];
++      if (!items.length) throw new Error("No items were clear enough to review.");
++      review.hidden = false;
++      dialog.querySelector("[data-capture-review-summary]").textContent =
++        `${items.length} ${items.length === 1 ? "item" : "items"} found. Confirm only what is really there.`;
++      reviewItems.innerHTML = items.map((item, index) => {
++        const needsReview = item.status !== "matched" || Number(item.confidence) < .75;
++        const existing = item.already_on_hand
++          ? `<span class="capture-existing">Already in My Kitchen: ${escapeHtml(item.existing_quantity)} ${escapeHtml(item.existing_unit || "")}</span>` : "";
++        return `<article class="capture-review-item${needsReview ? " needs-review" : ""}" data-capture-item data-status="${escapeHtml(item.status)}">
++          <label class="capture-include"><input type="checkbox" data-capture-include${needsReview ? "" : " checked"}><span class="sr-only">Include item ${index + 1}</span></label>
++          <div class="capture-item-fields">
++            <label class="capture-name"><span>Item</span><input data-capture-name value="${escapeHtml(item.name)}" autocomplete="off"></label>
++            <label><span>Form</span><input data-capture-form value="${escapeHtml(item.form)}" placeholder="Canned, fresh, frozen…"></label>
++            <label><span>Stored in</span><select data-capture-storage>${["Pantry", "Fridge", "Freezer", "Fresh"].map(value => `<option${value === item.storage_location ? " selected" : ""}>${value}</option>`).join("")}</select></label>
++            <label><span>Amount</span><input data-capture-quantity type="number" inputmode="decimal" min="0.25" step="0.25" value="${escapeHtml(item.quantity || 1)}"></label>
++            <label><span>Unit</span><select data-capture-unit>${captureUnitOptions(item.unit)}</select></label>
++          </div>
++          <div class="capture-item-note"><span>${needsReview ? "Please check this match" : "Strong catalog match"}</span>${existing}</div>
++        </article>`;
++      }).join("");
++      reviewItems.querySelectorAll("input,select").forEach(input => input.addEventListener("input", refreshApply));
++      refreshApply();
++    }
++
++    async function signedIn() {
++      try {
++        return Boolean(await window.SNS_AUTH?.session?.());
++      } catch {
++        return false;
++      }
++    }
++
++    function stopCamera() {
++      scanning = false;
++      (stream?.getTracks?.() || []).forEach(track => track.stop());
++      stream = null;
++      video.srcObject = null;
++      cameraHolder.hidden = true;
++      cameraButton.textContent = "Use phone camera";
++    }
++
++    async function lookupBarcode() {
++      const barcode = barcodeInput.value.replace(/\D/g, "");
++      if (barcode.length < 8 || barcode.length > 14) {
++        setError("Enter or scan an 8- to 14-digit barcode.");
++        return;
++      }
++      stopCamera();
++      setError();
++      review.hidden = true;
++      setBusy(true, "Looking up that package…");
++      try {
++        showReview(await postJson(API.resolveBarcode, { barcode }));
++      } catch (caught) {
++        setError(caught.message || "That barcode could not be read. Enter the item manually instead.");
++      } finally {
++        setBusy(false);
++      }
++    }
++
++    async function startCamera() {
++      if (!navigator.mediaDevices?.getUserMedia) {
++        setError("This browser cannot open the camera. Type the barcode numbers above instead.");
++        return;
++      }
++      if (stream) return stopCamera();
++      setError();
++      try {
++        cameraButton.disabled = true;
++        cameraButton.textContent = "Preparing camera…";
++        const Detector = await barcodeDetectorClass();
++        if (!Detector) throw new Error("barcode decoder unavailable");
++        const supported = await Detector.getSupportedFormats?.() || [];
++        const wanted = ["ean_13", "ean_8", "upc_a", "upc_e"].filter(format => !supported.length || supported.includes(format));
++        const detector = new Detector(wanted.length ? { formats: wanted } : undefined);
++        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
++        video.srcObject = stream;
++        await video.play();
++        cameraHolder.hidden = false;
++        cameraButton.textContent = "Stop camera";
++        scanning = true;
++        const scan = async () => {
++          if (!scanning) return;
++          try {
++            const codes = await detector.detect(video);
++            const value = String(codes?.[0]?.rawValue || "").replace(/\D/g, "");
++            if (value) {
++              barcodeInput.value = value;
++              await lookupBarcode();
++              return;
++            }
++          } catch {
++            // A frame can fail while autofocus settles; keep scanning.
++          }
++          if (scanning) requestAnimationFrame(scan);
++        };
++        requestAnimationFrame(scan);
++      } catch {
++        stopCamera();
++        setError("Camera access was not available. Type the barcode numbers above instead.");
++      } finally {
++        cameraButton.disabled = false;
++      }
++    }
++
++    async function recognizePhoto() {
++      const file = photoInput.files?.[0];
++      if (!file) return;
++      setError();
++      review.hidden = true;
++      setBusy(true, "Preparing the photo on this device…");
++      try {
++        const imageDataUrl = await pantryPhotoDataUrl(file);
++        progress.textContent = "Finding visible pantry items…";
++        showReview(await postJson(API.recognizePantryPhoto, { image_data_url: imageDataUrl }));
++      } catch (caught) {
++        setError(caught.message || "The photo could not be read. Try a clearer photo or add the items manually.");
++      } finally {
++        setBusy(false);
++      }
++    }
++
++    async function openCapture(mode) {
++      setError();
++      review.hidden = true;
++      reviewItems.replaceChildren();
++      applyButton.disabled = true;
++      barcodePanel.hidden = mode !== "barcode";
++      photoPanel.hidden = mode !== "photo";
++      dialog.querySelector("[data-capture-title]").textContent = mode === "photo" ? "Add from a pantry photo" : "Scan a barcode";
++      if (!(await signedIn())) {
++        setError("Log in first so confirmed items can be saved to the same kitchen on every device.");
++      }
++      dialog.showModal();
++      if (mode === "barcode") barcodeInput.focus();
++    }
++
++    document.querySelectorAll("[data-open-inventory-capture]").forEach(button =>
++      button.addEventListener("click", () => openCapture(button.dataset.openInventoryCapture))
++    );
++    dialog.querySelectorAll("[data-close-inventory-capture]").forEach(button => button.addEventListener("click", () => dialog.close()));
++    dialog.addEventListener("close", stopCamera);
++    lookupButton.addEventListener("click", lookupBarcode);
++    barcodeInput.addEventListener("keydown", event => {
++      if (event.key === "Enter") { event.preventDefault(); lookupBarcode(); }
++    });
++    cameraButton.addEventListener("click", startCamera);
++    photoInput.addEventListener("change", () => { photoButton.disabled = !photoInput.files?.[0]; });
++    photoButton.addEventListener("click", recognizePhoto);
++    dialog.querySelector("[data-select-all-capture]").addEventListener("click", () => {
++      reviewItems.querySelectorAll("[data-capture-include]").forEach(input => { input.checked = true; });
++      refreshApply();
++    });
++    applyButton.addEventListener("click", async () => {
++      const items = selectedItems();
++      if (!items.length) return;
++      applyButton.disabled = true;
++      applyImportedPantry(items, "merge");
++      dialog.close();
++      await saveKitchen();
++      const status = document.querySelector("[data-save-status]");
++      if (status) status.textContent = `${items.length} reviewed ${items.length === 1 ? "item" : "items"} added to My Kitchen.`;
++    });
++  }
++
+   function syncInventoryDetails(group) {
+     if (!group) return;
+     const unit = group.querySelector("[data-unit]")?.value;
+@@ -1853,6 +2112,7 @@ const SNS = (() => {
+     bindAmounts();
+     bindKitchenDashboard();
+     bindPantryImporter();
++    bindInventoryCapture();
+     updateCount();
+     initializeKitchenAccordion();
+     renderRecipeChoices();

@@ -1,0 +1,1223 @@
+From badd7e78c24e29bdebc3196ce47bf96dc0c16212 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Sat, 18 Jul 2026 17:47:53 -0600
+Subject: [PATCH] Harden pantry quantity form and safety contracts
+
+---
+ api_http.py                                   |  43 +-
+ api_service.py                                |  34 +-
+ ...OYMENT-2-SAFETY-AND-INVENTORY-CONTRACTS.md |  42 ++
+ inventory_capture.py                          |  24 ++
+ inventory_contract.py                         | 382 ++++++++++++++++++
+ ko_behavior.py                                |   8 +-
+ ko_contract.py                                | 102 ++++-
+ recipe_engine.py                              |  24 +-
+ test_api_http.py                              |  54 +++
+ test_inventory_capture.py                     |   1 +
+ test_inventory_contract.py                    |  97 +++++
+ test_ko_behavior.py                           |  37 +-
+ test_public_site_copy.py                      |   3 +
+ web/public-site/sns-flow.js                   |  29 +-
+ 14 files changed, 816 insertions(+), 64 deletions(-)
+ create mode 100644 docs/DEPLOYMENT-2-SAFETY-AND-INVENTORY-CONTRACTS.md
+ create mode 100644 inventory_contract.py
+ create mode 100644 test_inventory_contract.py
+
+diff --git a/api_http.py b/api_http.py
+index 5bfa8c2..e71249a 100644
+--- a/api_http.py
++++ b/api_http.py
+@@ -28,6 +28,7 @@ from inventory_capture import (
+     recognize_pantry_photo,
+     resolve_barcode,
+ )
++from inventory_contract import inventory_catalog
+ from recipe_reports import RecipeReportError, normalize_recipe_report
+ from supabase_gateway import (
+     SupabaseGateway,
+@@ -136,28 +137,28 @@ def _durable_payload(payload: dict, authorization: str | None) -> dict:
+ def _canonical_sync_payload(payload: dict) -> dict:
+     """Resolve known aliases before they become the household source of truth."""
+     normalized = normalize_kitchen_snapshot(payload)
+-    resolved, _pending = resolve_inventory(normalized, DB_PATH)
++    resolved, _pending = resolve_inventory(
++        normalized, DB_PATH, strict_contract=True
++    )
+     canonical = {
+-        str(item.source.get("name") or "").strip().lower(): (item.name, item.form_name)
++        str(item.source.get("_requested_name") or item.source.get("name") or "").strip().lower(): item
+         for item in resolved
+     }
+     inventory = []
+     for item in normalized["inventory_lots"]:
+-        name, form = canonical.get(
+-            str(item.get("name") or "").strip().lower(),
+-            (item.get("name"), item.get("form")),
+-        )
++        resolved_item = canonical.get(str(item.get("name") or "").strip().lower())
++        source = resolved_item.source if resolved_item else item
+         inventory.append({
+-            "name": name,
+-            "form": form,
+-            "storage": item.get("storage_location"),
+-            "quantity": item.get("quantity"),
+-            "unit": item.get("unit"),
+-            "origin": item.get("origin"),
+-            "opened_at": item.get("opened_at"),
+-            "refrigerated_after_opening": item.get("refrigerated_after_opening"),
+-            "package_weight_oz": item.get("package_weight_oz"),
+-            "expiration_date": item.get("expiration_date"),
++            "name": resolved_item.name if resolved_item else item.get("name"),
++            "form": resolved_item.form_name if resolved_item else item.get("form"),
++            "storage": source.get("storage_location"),
++            "quantity": source.get("quantity"),
++            "unit": source.get("unit"),
++            "origin": source.get("origin"),
++            "opened_at": source.get("opened_at"),
++            "refrigerated_after_opening": source.get("refrigerated_after_opening"),
++            "package_weight_oz": source.get("package_weight_oz"),
++            "expiration_date": source.get("expiration_date"),
+         })
+     canonical_payload = dict(payload)
+     canonical_payload["inventory"] = inventory
+@@ -165,10 +166,16 @@ def _canonical_sync_payload(payload: dict) -> dict:
+ 
+ 
+ @app.get("/api/MyKitchen")
+-def get_kitchen_endpoint(authorization: str | None = Header(default=None)) -> dict:
++def get_kitchen_endpoint(
++    authorization: str | None = Header(default=None),
++    include_contracts: bool = False,
++) -> dict:
+     """Return the signed-in user's RLS-protected household kitchen."""
+     try:
+-        return _SUPABASE.kitchen_snapshot(_access_token(authorization))
++        snapshot = _SUPABASE.kitchen_snapshot(_access_token(authorization))
++        if include_contracts:
++            snapshot["inventory_contracts"] = inventory_catalog(DB_PATH)
++        return snapshot
+     except Exception as exc:
+         raise _domain_error(exc) from exc
+ 
+diff --git a/api_service.py b/api_service.py
+index 6f59ae2..434782a 100644
+--- a/api_service.py
++++ b/api_service.py
+@@ -17,6 +17,7 @@ from datetime import date
+ from config import DB_PATH
+ from build_provenance import DEPLOYED_BUILD_PROVENANCE, public_build_provenance
+ from household_inventory import replace_household_inventory, submit_pending_items
++from inventory_contract import InventoryContractError, normalize_inventory_lot
+ from ko_behavior import default_form_for, resolve_behavior
+ from recipe_engine import build_recipe_from_candidate, generate_candidates
+ 
+@@ -220,7 +221,12 @@ def _form_row(con: sqlite3.Connection, ingredient_id: int, form_name: str | None
+     ).fetchone()
+ 
+ 
+-def resolve_inventory(payload: dict, db_path: str | Path = DB_PATH) -> tuple[list[ResolvedIngredient], list[dict]]:
++def resolve_inventory(
++    payload: dict,
++    db_path: str | Path = DB_PATH,
++    *,
++    strict_contract: bool = False,
++) -> tuple[list[ResolvedIngredient], list[dict]]:
+     """Resolve household names to CKB identities without editing the CKB."""
+     snapshot = normalize_kitchen_snapshot(payload)
+     resolved: list[ResolvedIngredient] = []
+@@ -236,14 +242,32 @@ def resolve_inventory(payload: dict, db_path: str | Path = DB_PATH) -> tuple[lis
+                     "section": item["storage_location"],
+                 })
+                 continue
+-            form = _form_row(con, int(row["ingredient_id"]), item["form"])
++            try:
++                normalized_item, _profile = normalize_inventory_lot(
++                    item, str(row["name"]), db_path=db_path, strict=strict_contract
++                )
++                normalized_item["_requested_name"] = item["name"]
++            except InventoryContractError as exc:
++                raise APIContractError(str(exc)) from exc
++            except sqlite3.OperationalError:
++                # Tiny legacy/test databases can predate the KO contract
++                # tables. Their existing local persistence path remains
++                # usable; production's complete CKB always takes the strict
++                # branch above.
++                normalized_item = dict(item)
++            form = _form_row(
++                con, int(row["ingredient_id"]), normalized_item["form"]
++            )
+             resolved.append(ResolvedIngredient(
+                 ingredient_id=int(row["ingredient_id"]),
+                 name=str(row["name"]),
+                 category=str(row["category"]),
+                 form_id=int(form["form_id"]) if form else None,
+-                form_name=str(form["form_name"]) if form else item["form"],
+-                source=item,
++                form_name=(
++                    str(form["form_name"])
++                    if form else normalized_item["form"]
++                ),
++                source=normalized_item,
+             ))
+     return resolved, pending
+ 
+@@ -350,7 +374,7 @@ def save_my_kitchen(
+     db_path: str | Path = DB_PATH,
+ ) -> dict:
+     """Persist a kitchen after a trusted HTTP/auth layer resolves membership."""
+-    resolved, pending = resolve_inventory(payload, db_path)
++    resolved, pending = resolve_inventory(payload, db_path, strict_contract=True)
+     items = [{
+         "ingredient_id": item.ingredient_id,
+         "form_id": item.form_id,
+diff --git a/docs/DEPLOYMENT-2-SAFETY-AND-INVENTORY-CONTRACTS.md b/docs/DEPLOYMENT-2-SAFETY-AND-INVENTORY-CONTRACTS.md
+new file mode 100644
+index 0000000..ad5a5db
+--- /dev/null
++++ b/docs/DEPLOYMENT-2-SAFETY-AND-INVENTORY-CONTRACTS.md
+@@ -0,0 +1,42 @@
++# Deployment 2: Safety and inventory contracts
++
++Production baseline: `975478649628e2a6d74052949ea63661e2fa6f6b`
++
++This deployment closes the second implementation package without changing the
++Supabase schema. It can therefore ship as one normal API/static-site rollout.
++
++## Release contract
++
++- Every advertised ingredient/form route must pass 18 named KO safety gates:
++  classification, form route, environment, equipment, timing, attention,
++  stage, handling, operation, outcome, doneness, failure mode, recovery,
++  holdability, portion model, form match, frozen handling, and raw-protein
++  endpoint.
++- All 140 distinct ingredient/form rows in the 11 regional sample pantries
++  must resolve to a canonical inventory profile and an allowed unit.
++- My Kitchen retrieves its unit choices from the server contract. The browser,
++  barcode/photo capture, API persistence boundary, and recipe quantity engine
++  therefore use the same rules.
++- Legacy `item/items` rows migrate to the ingredient's canonical default unit.
++  Unknown package weights remain unknown; they are never converted into a fake
++  exact quantity.
++- Weight-to-portion conversion is explicit. In particular, one pound of an
++  intact piece-based protein represents four four-ounce standard portions.
++- Impossible units are rejected before they enter the shared Supabase kitchen.
++
++## Verification
++
++Run from the repository root:
++
++```text
++python -m unittest discover
++```
++
++Expected result for this deployment: 150 tests pass. The suite includes all
++140 regional pantry rows, every editable inventory contract, the 18 KO gates,
++barcode normalization, Supabase save normalization, quantity conversions, and
++the existing recipe/capability matrix.
++
++After deployment, verify `/health`, open My Kitchen, and save one legacy item.
++Confirm that the API and static site both report the new commit before testing
++recipes.
+diff --git a/inventory_capture.py b/inventory_capture.py
+index 0031f20..a6687d3 100644
+--- a/inventory_capture.py
++++ b/inventory_capture.py
+@@ -23,6 +23,11 @@ from urllib.parse import quote
+ from urllib.request import Request, urlopen
+ 
+ from config import DB_PATH
++from inventory_contract import (
++    InventoryContractError,
++    inventory_profile,
++    normalize_unit,
++)
+ 
+ 
+ MAX_PHOTO_BYTES = 6 * 1024 * 1024
+@@ -223,6 +228,25 @@ def normalize_capture_candidates(
+         form, storage = _form_and_storage(raw, matched)
+         confidence = min(1.0, max(0.0, _float(raw.get("confidence"), match_confidence)))
+         unit = _unit(raw.get("unit"), form)
++        if matched:
++            try:
++                profile = inventory_profile(canonical_name, form, db_path=db_path)
++                requested_unit = normalize_unit(raw.get("unit"))
++                # Recognition providers frequently call every retail object a
++                # package. Prefer the ingredient/form contract when the
++                # provider supplied no meaningful unit (for example a can).
++                if (
++                    not requested_unit
++                    or requested_unit not in profile.allowed_units
++                    or (requested_unit == "package" and profile.default_unit == "can")
++                ):
++                    unit = profile.default_unit
++                else:
++                    unit = requested_unit
++                form = profile.default_form
++                storage = profile.default_storage
++            except InventoryContractError:
++                status = "needs_review"
+         quantity = _float(raw.get("quantity"), 1.0)
+         key = (_key(canonical_name), storage)
+         prior = drafts.get(key)
+diff --git a/inventory_contract.py b/inventory_contract.py
+new file mode 100644
+index 0000000..fa6e6b8
+--- /dev/null
++++ b/inventory_contract.py
+@@ -0,0 +1,382 @@
++"""Canonical form, quantity, and unit contracts for household inventory.
++
++The browser, capture services, recipe engine, and persistence boundary must
++interpret an inventory lot the same way.  This module derives practical
++inventory choices from verified KO families instead of maintaining a short
++second catalog in JavaScript.
++"""
++
++from __future__ import annotations
++
++from dataclasses import asdict, dataclass
++from functools import lru_cache
++from pathlib import Path
++import sqlite3
++
++from config import DB_PATH
++from ko_behavior import default_form_for, resolve_behavior
++
++
++CONTRACT_VERSION = "inventory-2.0"
++
++UNIT_ALIASES = {
++    "items": "item", "cans": "can", "jars": "jar", "boxes": "box",
++    "bags": "bag", "packages": "package", "pieces": "piece",
++    "pounds": "lb", "pound": "lb", "lbs": "lb", "ounces": "oz",
++    "ounce": "oz", "cups": "cup", "cartons": "carton",
++    "bottles": "bottle", "bunches": "bunch", "loaves": "loaf",
++    "slices": "slice", "eggs": "egg", "dozens": "dozen",
++    "portions": "portion", "meals": "meal",
++}
++
++COUNT_UNITS = {
++    "item", "can", "jar", "box", "bag", "package", "piece", "carton",
++    "bottle", "bunch", "loaf", "slice", "egg", "dozen", "portion", "meal",
++}
++MEASURE_UNITS = {"lb", "oz", "cup"}
++KNOWN_UNITS = COUNT_UNITS | MEASURE_UNITS
++
++FORM_LABELS = {
++    "fresh": "Fresh",
++    "fresh raw": "Fresh Raw",
++    "frozen": "Frozen",
++    "frozen raw": "Frozen Raw",
++    "canned": "Canned",
++    "cooked": "Cooked",
++    "ready to eat": "Ready to Eat",
++    "refrigerated": "Refrigerated",
++    "dry": "Dry",
++    "dried": "Dry",
++    "shelf stable": "Shelf-stable",
++}
++
++FAMILY_UNIT_RULES = {
++    "egg": ("egg", "dozen", "carton"),
++    "ready_protein": ("can", "package", "cup", "oz"),
++    "prepared_legume": ("can", "jar", "cup", "package"),
++    "legume": ("can", "bag", "package", "lb", "cup"),
++    "bread_wrap": ("loaf", "slice", "package", "piece"),
++    "pasta": ("box", "package", "bag", "lb", "oz", "cup"),
++    "white_rice": ("bag", "box", "package", "lb", "cup"),
++    "brown_rice": ("bag", "box", "package", "lb", "cup"),
++    "quinoa": ("bag", "box", "package", "lb", "cup"),
++    "broth_liquid": ("carton", "can", "cup", "bottle"),
++    "milk_cream": ("carton", "bottle", "can", "package", "cup"),
++    "tomato_product": ("can", "jar", "cup", "package"),
++    "creamy_soup_base": ("can", "cup", "package"),
++    "prepared_condiment": ("bottle", "jar", "package", "cup"),
++    "acid_condiment": ("bottle", "jar", "cup"),
++    "cooking_fat": ("bottle", "jar", "package", "lb", "oz", "cup"),
++    "melting_cheese": ("package", "lb", "oz", "cup"),
++    "cultured_creamy": ("carton", "package", "cup", "oz"),
++    "dry_seasoning": ("jar", "bottle", "package", "oz"),
++    "salt_seasoning": ("box", "jar", "package", "oz"),
++    "dry_baking_helper": ("bag", "box", "package", "lb", "oz", "cup"),
++    "sweetener": ("bag", "box", "jar", "bottle", "package", "lb", "oz", "cup"),
++    "fresh_herb": ("bunch", "package", "bag", "oz"),
++    "aromatic_fast": ("piece", "jar", "package", "bag", "lb", "oz", "cup"),
++    "raw_finish": ("piece", "jar", "package", "bag", "lb", "cup", "bunch"),
++    "ready_cured_meat": ("package", "piece", "lb", "oz"),
++    "bacon": ("package", "piece", "lb", "oz"),
++}
++
++
++class InventoryContractError(ValueError):
++    """An inventory lot contradicts its canonical ingredient contract."""
++
++
++def _clean(value) -> str:
++    return " ".join(str(value or "").strip().split())
++
++
++def _key(value) -> str:
++    return _clean(value).lower().replace("-", " ")
++
++
++def normalize_unit(value) -> str:
++    key = _key(value)
++    return UNIT_ALIASES.get(key, key)
++
++
++def quantity_step(unit: str) -> float:
++    unit = normalize_unit(unit)
++    if unit in {"lb", "cup", "oz", "package"}:
++        return 0.25
++    if unit == "can":
++        return 0.5
++    return 1.0
++
++
++def _storage_for_form(form: str, default_storage: str = "") -> str:
++    key = _key(form)
++    if "frozen" in key:
++        return "Freezer"
++    if key in {"canned", "dry", "shelf stable"}:
++        return "Pantry"
++    if key in {"refrigerated", "cooked", "ready to eat"}:
++        return "Fridge"
++    if key in {"fresh", "fresh raw"}:
++        return "Fresh" if _key(default_storage) == "fresh" else "Fridge" if _key(default_storage) == "fridge" else "Fresh"
++    return FORM_LABELS.get(_key(default_storage), _clean(default_storage)) or "Pantry"
++
++
++def _role_for(con: sqlite3.Connection, ingredient_id: int, name: str, category: str) -> str:
++    if con.execute(
++        "SELECT 1 FROM proteins WHERE ingredient_id=? AND verified=1", (ingredient_id,)
++    ).fetchone():
++        return "protein"
++    if con.execute(
++        "SELECT 1 FROM vegetables WHERE ingredient_id=? AND verified=1", (ingredient_id,)
++    ).fetchone() or _key(category) == "fruit":
++        return "vegetable"
++    if con.execute(
++        "SELECT 1 FROM foundations WHERE lower(name)=lower(?) AND verified=1", (name,)
++    ).fetchone():
++        return "foundation"
++    return "ingredient"
++
++
++def _forms_for(
++    ingredient_id: int,
++    family,
++    con: sqlite3.Connection,
++    selected_form: str = "",
++    selected_method=None,
++) -> tuple[str, ...]:
++    values: list[str] = [
++        str(row[0]) for row in con.execute(
++            "SELECT form_name FROM ingredient_forms WHERE ingredient_id=? ORDER BY form_id",
++            (ingredient_id,),
++        ) if _clean(row[0])
++    ]
++    if family:
++        for rule in family.methods:
++            for value in rule.forms:
++                label = FORM_LABELS.get(_key(value), _clean(value).title())
++                if label and _key(label) not in {_key(item) for item in values}:
++                    values.append(label)
++    # Supporting KOs intentionally use form-agnostic cooking methods. Their
++    # storage form still matters, but an empty method.forms tuple means "all
++    # verified inventory forms," not "this ingredient has no valid form."
++    if selected_method and not selected_method.forms and _clean(selected_form):
++        label = FORM_LABELS.get(_key(selected_form), _clean(selected_form))
++        if _key(label) not in {_key(item) for item in values}:
++            values.append(label)
++    return tuple(values)
++
++
++def _canonical_inventory_form(selected_form: str, forms: tuple[str, ...], family) -> str | None:
++    selected_key = _key(selected_form)
++    method_keys = {
++        _key(value)
++        for rule in (family.methods if family else ())
++        for value in rule.forms
++        if _clean(value)
++    }
++    by_key = {_key(value): value for value in forms}
++    if not method_keys:
++        return by_key.get(selected_key) or _clean(selected_form)
++    aliases = {
++        "pantry": ("shelf stable", "dry", "dried", "ready to eat", "cooked"),
++        "shelf stable": ("shelf stable", "dry", "dried", "ready to eat", "cooked"),
++        "dry": ("dry", "dried", "shelf stable"),
++        "dried": ("dried", "dry", "shelf stable"),
++        "refrigerated": ("refrigerated", "fresh raw", "cooked", "ready to eat", "fresh"),
++        "frozen": ("frozen", "frozen raw"),
++        "fresh": ("fresh", "fresh raw"),
++        "canned": ("canned", "cooked", "ready to eat"),
++    }
++    for candidate in aliases.get(selected_key, (selected_key,)):
++        if candidate in method_keys:
++            return by_key.get(candidate) or FORM_LABELS.get(candidate, candidate.title())
++    return None
++
++
++def _units_for(family_code: str, role: str, form: str, category: str) -> tuple[str, ...]:
++    if family_code in FAMILY_UNIT_RULES:
++        units = list(FAMILY_UNIT_RULES[family_code])
++    elif role == "protein":
++        units = ["piece", "lb", "oz", "package"]
++    elif role == "vegetable":
++        units = ["piece", "lb", "bag", "package", "cup", "bunch"]
++    elif role == "foundation":
++        units = ["package", "bag", "box", "lb", "cup", "piece"]
++    elif _key(category) == "spices":
++        units = ["jar", "bottle", "package", "oz"]
++    else:
++        units = ["package", "jar", "bottle", "box", "bag", "lb", "oz", "cup"]
++    if _key(form) == "canned":
++        units.insert(0, "can")
++    return tuple(dict.fromkeys(unit for unit in units if unit in KNOWN_UNITS))
++
++
++def _default_unit(family_code: str, form: str, allowed: tuple[str, ...]) -> str:
++    if _key(form) == "canned" and "can" in allowed:
++        return "can"
++    preferred = {
++        "egg": "egg", "bread_wrap": "package", "broth_liquid": "carton",
++        "milk_cream": "carton", "prepared_condiment": "bottle",
++        "acid_condiment": "bottle", "cooking_fat": "bottle",
++        "dry_seasoning": "jar", "fresh_herb": "bunch",
++    }.get(family_code)
++    if preferred in allowed:
++        return preferred
++    return allowed[0] if allowed else "package"
++
++
++@dataclass(frozen=True)
++class InventoryProfile:
++    ingredient_id: int
++    name: str
++    category: str
++    role: str
++    family_code: str
++    default_form: str
++    allowed_forms: tuple[str, ...]
++    default_storage: str
++    default_unit: str
++    allowed_units: tuple[str, ...]
++    quantity_step: float
++    contract_version: str = CONTRACT_VERSION
++
++    def as_dict(self) -> dict:
++        return asdict(self)
++
++
++def inventory_profile(
++    name: str,
++    form: str = "",
++    *,
++    db_path: str | Path = DB_PATH,
++) -> InventoryProfile:
++    with sqlite3.connect(db_path) as con:
++        con.row_factory = sqlite3.Row
++        row = con.execute(
++            "SELECT ingredient_id,name,category,default_storage FROM ingredients WHERE active=1 AND lower(name)=lower(?)",
++            (_clean(name),),
++        ).fetchone()
++        if not row:
++            row = con.execute(
++                """SELECT i.ingredient_id,i.name,i.category,i.default_storage
++                     FROM ingredient_aliases a JOIN ingredients i USING(ingredient_id)
++                    WHERE i.active=1 AND lower(a.alias_name)=lower(?)""",
++                (_clean(name),),
++            ).fetchone()
++        if not row:
++            raise InventoryContractError(f"Unknown inventory item: {name}")
++        role = _role_for(con, int(row["ingredient_id"]), str(row["name"]), str(row["category"] or ""))
++        selected_form = _clean(form) or default_form_for(str(row["name"]), role, db_path)
++        behavior = resolve_behavior(str(row["name"]), role, selected_form, db_path=db_path)
++        family = behavior.primary_family
++        family_code = family.code if family else ""
++        forms = _forms_for(
++            int(row["ingredient_id"]), family, con, selected_form, behavior.method
++        )
++        canonical_form = _canonical_inventory_form(selected_form, forms, family)
++        if not canonical_form:
++            raise InventoryContractError(
++                f"{row['name']} does not support the inventory form {selected_form or '(blank)'}"
++            )
++        units = _units_for(family_code, role, canonical_form, str(row["category"] or ""))
++        default_unit = _default_unit(family_code, canonical_form, units)
++        return InventoryProfile(
++            int(row["ingredient_id"]), str(row["name"]), str(row["category"] or ""),
++            role, family_code, canonical_form, forms,
++            _storage_for_form(canonical_form, str(row["default_storage"] or "")),
++            default_unit, units, quantity_step(default_unit),
++        )
++
++
++def normalize_inventory_lot(
++    lot: dict,
++    canonical_name: str,
++    *,
++    db_path: str | Path = DB_PATH,
++    strict: bool = True,
++) -> tuple[dict, InventoryProfile]:
++    profile = inventory_profile(canonical_name, _clean(lot.get("form")), db_path=db_path)
++    unit = normalize_unit(lot.get("unit")) or profile.default_unit
++    if unit not in profile.allowed_units:
++        # Earlier My Kitchen versions stored the undifferentiated unit "item."
++        # Migrate those rows to the KO default so an existing shared kitchen is
++        # not locked out by the stricter contract introduced here.
++        if unit == "item":
++            unit = profile.default_unit
++        elif strict:
++            choices = ", ".join(profile.allowed_units)
++            raise InventoryContractError(
++                f"{profile.name} cannot be stored as {unit}; choose {choices}."
++            )
++        else:
++            unit = profile.default_unit
++    normalized = dict(lot)
++    normalized.update({
++        "name": profile.name,
++        "form": profile.default_form,
++        "storage_location": _clean(lot.get("storage_location") or lot.get("storage")) or profile.default_storage,
++        "unit": unit,
++    })
++    return normalized, profile
++
++
++def quantity_in_basis(
++    quantity: float,
++    unit: str,
++    basis: str,
++    *,
++    package_weight_oz: float = 0,
++) -> float | None:
++    """Convert only defensible quantities; unknown package sizes stay unknown."""
++    value = max(0.0, float(quantity or 0))
++    unit = normalize_unit(unit)
++    basis = _key(basis)
++    ounces = None
++    if unit == "lb":
++        ounces = value * 16
++    elif unit == "oz":
++        ounces = value
++    elif unit == "package" and package_weight_oz:
++        ounces = value * float(package_weight_oz)
++
++    if basis == "weight_oz":
++        return ounces / 16 if ounces is not None else None
++    if basis == "pieces":
++        if unit in {"item", "piece", "egg", "slice"}:
++            return value
++        if unit == "dozen":
++            return value * 12
++        # One standard intact protein portion is modeled as four ounces. This
++        # prevents one pound of chicken from being misread as one chicken piece.
++        return ounces / 4 if ounces is not None else None
++    if basis == "cans":
++        return value if unit == "can" else None
++    if basis in {"dry_cups", "prepared_cups"}:
++        return value if unit == "cup" else None
++    if basis == "whole_count":
++        return value if unit in {"item", "piece", "bunch"} else None
++    return value
++
++
++def _catalog_version(db_path: str | Path) -> tuple[str, int]:
++    path = Path(db_path)
++    return str(path), path.stat().st_mtime_ns
++
++
++@lru_cache(maxsize=4)
++def _inventory_catalog(path: str, _mtime_ns: int) -> tuple[dict, ...]:
++    with sqlite3.connect(path) as con:
++        names = [row[0] for row in con.execute(
++            "SELECT name FROM ingredients WHERE active=1 ORDER BY display_order,name"
++        )]
++    profiles = []
++    for name in names:
++        try:
++            profiles.append(inventory_profile(name, db_path=path).as_dict())
++        except InventoryContractError:
++            # Untrained identities stay out of the editable inventory catalog.
++            continue
++    return tuple(profiles)
++
++
++def inventory_catalog(db_path: str | Path = DB_PATH) -> list[dict]:
++    return [dict(profile) for profile in _inventory_catalog(*_catalog_version(db_path))]
+diff --git a/ko_behavior.py b/ko_behavior.py
+index f6bec49..ed17943 100644
+--- a/ko_behavior.py
++++ b/ko_behavior.py
+@@ -118,7 +118,7 @@ FAMILY_LIBRARY: Dict[str, BehaviorFamily] = {
+             "browned crumbles and rendered fat", 2, 8, 7, .7, "burner", "middle",
+             "Keep raw {name} separate from ready-to-eat food. Thaw first when frozen.",
+             "Add {name} to the hot skillet and break it into small crumbles. Cook until no raw areas remain, then verify safe doneness.",
+-            "Evenly browned, moist crumbles.", "The center of the thickest clump reaches the ingredient's safe temperature.",
++            "Evenly browned, moist crumbles.", "Beef reaches 160°F; poultry reaches 165°F in the center of the thickest clump.",
+             "Large clumps can brown outside while remaining undercooked inside.",
+             "Break apart large clumps and continue cooking; add sauce if it becomes dry.", "fair",
+             frozen_thaw_minutes=7, frozen_thaw_equipment="microwave",
+@@ -136,7 +136,7 @@ FAMILY_LIBRARY: Dict[str, BehaviorFamily] = {
+             "Cut {name} into 1 1/2- to 2-inch pieces so it can tenderize on this stovetop schedule; thaw before browning.",
+             "Brown {name} in batches, add enough liquid for a braise, cover, and cook gently until fork-tender.",
+             "Fork-tender meat with connective tissue softened into the cooking liquid.",
+-            "A fork enters easily and the meat yields without springing back.",
++            "The center has passed 190°F and a fork enters easily; the meat yields without springing back.",
+             "A short hot cook leaves the meat safe but unpleasantly tough.",
+             "Add liquid, cover, lower the heat, and continue until tender.", "excellent",
+         ), method(
+@@ -145,7 +145,7 @@ FAMILY_LIBRARY: Dict[str, BehaviorFamily] = {
+             "Cut {name} into even pieces when appropriate; thaw before browning.",
+             "Brown {name}, add braising liquid, cover tightly, and cook in a 325°F oven until fork-tender.",
+             "Fork-tender meat with connective tissue softened into the cooking liquid.",
+-            "A fork enters easily and the meat yields without springing back.",
++            "The center has passed 190°F and a fork enters easily; the meat yields without springing back.",
+             "An uncovered or dry vessel leaves the meat tough and can scorch the sauce.",
+             "Add hot liquid, cover tightly, and continue at 325°F until tender.", "excellent",
+         ), READY_REHEAT),
+@@ -1111,7 +1111,7 @@ FAMILY_LIBRARY.update({
+             "rendered fat and crisp bacon", 2, 9, 6, .65, "burner", "early",
+             "Separate {name} and cut it first only when the meal needs small pieces.",
+             "Start {name} in the skillet before it is fully hot and cook, turning as needed, until the fat renders and the desired crispness is reached.",
+-            "Evenly rendered bacon at the chosen tenderness or crispness.", "Fat is rendered and the meat is deeply colored without blackened edges.",
++            "Evenly rendered bacon at the chosen tenderness or crispness.", "The bacon is safely cooked, its fat is rendered, and the meat is deeply colored without blackened edges.",
+             "High starting heat burns lean areas before the fat renders.",
+             "Lower the heat and turn more often; badly burned bacon cannot be recovered.", "fair",
+         ), READY_REHEAT), ("renders-cooking-fat", "early-entry"),
+diff --git a/ko_contract.py b/ko_contract.py
+index 261ed07..a95c73c 100644
+--- a/ko_contract.py
++++ b/ko_contract.py
+@@ -8,6 +8,7 @@ recovery—not merely a name and a generic cooking verb.
+ from dataclasses import dataclass, field
+ import re
+ 
++from config import DB_PATH
+ from ko_behavior import ResolvedBehavior, resolve_behavior
+ 
+ 
+@@ -17,6 +18,31 @@ GENERIC_LANGUAGE = (
+     re.compile(r"\bcook as directed\b", re.I),
+ )
+ 
++# These are the 18 ingredient/method safety gates that must be satisfied before
++# a route can be advertised as operational.  They are deliberately executable:
++# release tests can name the exact missing dimension instead of treating
++# "classified" as equivalent to "ready to cook."
++SAFETY_GATES = (
++    "classification",
++    "form_route",
++    "environment",
++    "equipment",
++    "timing",
++    "attention",
++    "stage",
++    "handling",
++    "operation",
++    "outcome",
++    "doneness",
++    "failure_mode",
++    "recovery",
++    "holdability",
++    "portion_model",
++    "form_match",
++    "frozen_handling",
++    "raw_protein_endpoint",
++)
++
+ 
+ @dataclass
+ class ContractReport:
+@@ -29,6 +55,7 @@ class ContractReport:
+     status: str = "untrained"
+     missing: list[str] = field(default_factory=list)
+     warnings: list[str] = field(default_factory=list)
++    checks: dict[str, bool] = field(default_factory=dict)
+ 
+     @property
+     def operational(self):
+@@ -40,15 +67,39 @@ def _is_generic(text):
+     return not value or any(pattern.search(value) for pattern in GENERIC_LANGUAGE)
+ 
+ 
++def _form_matches(form_name, method_forms):
++    requested = str(form_name or "").strip().lower().replace("-", " ")
++    supported = {
++        str(value or "").strip().lower().replace("-", " ")
++        for value in method_forms
++    }
++    if not requested or not supported or requested in supported:
++        return True
++    aliases = {
++        "dry": {"dried", "shelf stable"},
++        "dried": {"dry", "shelf stable"},
++        "shelf stable": {"dry", "dried"},
++    }
++    return bool(aliases.get(requested, set()) & supported)
++
++
+ def audit_behavior(name, role, form_name="", strategy="", db_path=None):
+     resolved: ResolvedBehavior = resolve_behavior(
+-        name, role, form_name, strategy, db_path
++        name, role, form_name, strategy, db_path or DB_PATH
+     )
+     report = ContractReport(
+         name, role, form_name, strategy, resolved.family_codes, resolved.source
+     )
+     family = resolved.primary_family
+     rule = resolved.method
++    form_key = str(form_name or "").strip().lower().replace("-", " ")
++    raw_protein = role == "protein" and family and family.code != "plant_protein" and any(
++        word in form_key for word in ("raw", "fresh", "frozen")
++    ) and not any(word in form_key for word in ("cooked", "ready to eat", "canned"))
++    frozen = "frozen" in form_key
++    checks = {gate: False for gate in SAFETY_GATES}
++    checks["classification"] = bool(family and resolved.family_codes)
++    checks["form_route"] = bool(rule)
+     if not family:
+         report.missing.append("verified behavior-family classification")
+     if family and not rule:
+@@ -56,6 +107,46 @@ def audit_behavior(name, role, form_name="", strategy="", db_path=None):
+         if resolved.incompatibility_reason:
+             report.warnings.append(resolved.incompatibility_reason)
+     if rule:
++        checks.update({
++            "environment": bool(str(rule.environment or "").strip() and str(rule.creates_environment or "").strip()),
++            "equipment": bool(str(rule.equipment or "").strip()),
++            "timing": (
++                isinstance(rule.prep_minutes, int)
++                and isinstance(rule.cook_minutes, int)
++                and isinstance(rule.active_minutes, int)
++                and rule.prep_minutes >= 0
++                and rule.cook_minutes >= 0
++                and 0 <= rule.active_minutes <= rule.prep_minutes + rule.cook_minutes
++            ),
++            "attention": 0 <= float(rule.attention_load) <= 1,
++            "stage": rule.stage in {"early", "middle", "late", "finish"},
++            "handling": not _is_generic(rule.handling_template),
++            "operation": not _is_generic(rule.instruction_template),
++            "outcome": bool(str(rule.desired_outcome or "").strip()),
++            "doneness": bool(str(rule.doneness_cue or "").strip()),
++            "failure_mode": bool(str(rule.failure_mode or "").strip()),
++            "recovery": bool(str(rule.recovery_hint or "").strip()),
++            "holdability": rule.holdability in {"poor", "fair", "good", "excellent"},
++            "portion_model": bool(
++                family
++                and str(family.portion_basis or "").strip()
++                and float(family.portion_per_standard) > 0
++                and str(family.portion_label or "").strip()
++                and str(family.portion_rounding or "").strip()
++            ),
++            "form_match": _form_matches(form_name, rule.forms),
++            "frozen_handling": (
++                not frozen
++                or bool(rule.frozen_thaw_template)
++                or "thaw" in str(rule.handling_template or "").lower()
++                or any("frozen" in str(value or "").lower() for value in rule.forms)
++            ),
++        })
++        cue = str(rule.doneness_cue or "").lower()
++        checks["raw_protein_endpoint"] = (
++            not raw_protein
++            or any(token in cue for token in ("°f", "opaque", "no raw", "safely cooked"))
++        )
+         required = {
+             "cooking environment": rule.environment,
+             "created environment": rule.creates_environment,
+@@ -72,10 +163,15 @@ def audit_behavior(name, role, form_name="", strategy="", db_path=None):
+             report.missing.append("specific handling instruction")
+         if _is_generic(rule.instruction_template):
+             report.missing.append("specific operation instruction")
+-        if role == "protein" and any(word in form_name.lower() for word in ("raw", "fresh", "frozen")):
+-            cue = rule.doneness_cue.lower()
++        if raw_protein:
+             if not any(token in cue for token in ("°f", "opaque", "no raw", "safely cooked")):
+                 report.missing.append("raw-protein safety endpoint")
++        report.missing.extend(
++            f"safety gate: {gate.replace('_', ' ')}"
++            for gate, passed in checks.items()
++            if not passed
++        )
++    report.checks = checks
+     report.missing = list(dict.fromkeys(report.missing))
+     report.status = "operational" if not report.missing else (
+         "conditional" if family else "untrained"
+diff --git a/recipe_engine.py b/recipe_engine.py
+index f789ece..b2c0b81 100644
+--- a/recipe_engine.py
++++ b/recipe_engine.py
+@@ -1,4 +1,5 @@
+ from ingredient_profiles import get_ingredient_profile
++from inventory_contract import quantity_in_basis
+ from ko_behavior import default_form_for, resolve_behavior
+ from config import DB_PATH
+ from cooking_planner import (
+@@ -193,7 +194,7 @@ def _quantity_plan(
+         lot = lots.get(key, {})
+         form = forms.get(key) or _key(lot.get("form"))
+         unit = _key(lot.get("unit"))
+-        available = float(lot.get("quantity") or 0)
++        recorded_quantity = float(lot.get("quantity") or 0)
+         behavior = resolve_behavior(name, "ingredient", form, db_path=DB_PATH)
+         family = behavior.primary_family
+         attributes = behavior.attributes or {}
+@@ -203,6 +204,14 @@ def _quantity_plan(
+         except (TypeError, ValueError):
+             amount = family.portion_per_standard if family else 1.0
+         quantity_label = attributes.get("quantity_label") or (family.portion_label if family else "")
++        package_weight = float(lot.get("package_weight_oz") or 0)
++        converted_available = quantity_in_basis(
++            recorded_quantity,
++            unit,
++            basis,
++            package_weight_oz=package_weight,
++        )
++        available = float(converted_available or 0)
+         role = roles.get(key, "")
+         # Supporting proteins flavor or stretch the main item. They must not
+         # silently become another full entree merely because their KO normally
+@@ -234,10 +243,10 @@ def _quantity_plan(
+                 "planned": pieces, "available": available,
+                 "shortfall": max(0, pieces - available) if available else 0,
+             }
+-            if unit in {"piece", "pieces"} and available and available < pieces:
++            if available and available < pieces:
+                 shortfall = pieces - available
+                 notes.append(
+-                    f"Only {available:g} {label}{'s are' if available != 1 else ' is'} recorded for {pieces} planned. "
++                    f"Only about {available:g} {label}{'s are' if available != 1 else ' is'} represented by the amount on hand for {pieces} planned. "
+                     f"Add {shortfall:g} more {label}{'' if shortfall == 1 else 's'} before making this meal."
+                 )
+         elif basis == "dry_cups":
+@@ -260,17 +269,14 @@ def _quantity_plan(
+         elif basis == "weight_oz":
+             pounds = _quarter_pound_up(effective * amount)
+             plan[key] = {"display": f"{pounds:g} lb", "planned": pounds, "available": available}
+-            available_pounds = available if unit in {"lb", "pound", "pounds"} else 0
+-            package_weight = float(lot.get("package_weight_oz") or 0)
+-            if unit in {"package", "packages"} and package_weight:
+-                available_pounds = available * package_weight / 16.0
++            available_pounds = available
+             if available_pounds and available_pounds < pounds:
+                 notes.append(
+                     f"About {available_pounds:g} lb of {name} is recorded for {pounds:g} lb planned. Stretch it through the selected vegetables or foundation."
+                 )
+-            elif unit in {"package", "packages"} and available and not package_weight:
++            elif unit in {"package", "packages"} and recorded_quantity and not package_weight:
+                 notes.append(
+-                    f"The {available:g}-package estimate for {name} is approximate because the original package weight is unknown."
++                    f"The {recorded_quantity:g}-package estimate for {name} is approximate because the original package weight is unknown."
+                 )
+         elif role == "vegetable":
+             # Produce varies in physical size, so cups prepared are more useful
+diff --git a/test_api_http.py b/test_api_http.py
+index 256c0f8..f6da41e 100644
+--- a/test_api_http.py
++++ b/test_api_http.py
+@@ -58,6 +58,60 @@ class APIHTTPTests(unittest.TestCase):
+         self.assertEqual(response.status_code, 200)
+         self.assertEqual(response.json()["household_id"], "house-1")
+ 
++    def test_my_kitchen_can_request_server_owned_inventory_contracts(self):
++        with patch("api_http._SUPABASE") as gateway:
++            gateway.token_from_authorization.return_value = "user-token"
++            gateway.kitchen_snapshot.return_value = {
++                "household_id": "house-1", "inventory": [], "equipment": []
++            }
++            response = self.client.get(
++                "/api/MyKitchen?include_contracts=true",
++                headers={"Authorization": "Bearer user-token"},
++            )
++
++        self.assertEqual(response.status_code, 200)
++        contracts = {item["name"]: item for item in response.json()["inventory_contracts"]}
++        self.assertIn("Chicken breast", contracts)
++        self.assertIn("lb", contracts["Chicken breast"]["allowed_units"])
++        self.assertEqual(contracts["Chicken broth"]["contract_version"], "inventory-2.0")
++
++    def test_shared_kitchen_save_canonicalizes_alias_form_and_legacy_unit(self):
++        with patch("api_http._SUPABASE") as gateway:
++            gateway.token_from_authorization.return_value = "user-token"
++            gateway.sync_kitchen.return_value = {"household_id": "house-1"}
++            response = self.client.post(
++                "/api/SaveMyKitchen",
++                json={
++                    "inventory": [{
++                        "name": "ribeye", "form": "Refrigerated",
++                        "quantity": 2, "unit": "items", "storage": "Fridge",
++                    }]
++                },
++                headers={"Authorization": "Bearer user-token"},
++            )
++
++        self.assertEqual(response.status_code, 200)
++        saved = gateway.sync_kitchen.call_args.args[1]["inventory"][0]
++        self.assertEqual(saved["name"], "Ribeye steak")
++        self.assertEqual(saved["unit"], "piece")
++
++    def test_shared_kitchen_save_rejects_an_impossible_unit(self):
++        with patch("api_http._SUPABASE") as gateway:
++            gateway.token_from_authorization.return_value = "user-token"
++            response = self.client.post(
++                "/api/SaveMyKitchen",
++                json={
++                    "inventory": [{
++                        "name": "Chicken breast", "form": "Fresh Raw",
++                        "quantity": 1, "unit": "jar", "storage": "Fridge",
++                    }]
++                },
++                headers={"Authorization": "Bearer user-token"},
++            )
++
++        self.assertEqual(response.status_code, 400)
++        self.assertIn("cannot be stored", response.json()["detail"])
++
+     def test_anonymous_kitchen_save_is_rejected(self):
+         response = self.client.post("/api/SaveMyKitchen", json=kitchen_payload())
+ 
+diff --git a/test_inventory_capture.py b/test_inventory_capture.py
+index 3b7598b..631cc4b 100644
+--- a/test_inventory_capture.py
++++ b/test_inventory_capture.py
+@@ -67,6 +67,7 @@ class InventoryCaptureTests(unittest.TestCase):
+         self.assertEqual(result["items"][0]["name"], "Green beans")
+         self.assertEqual(result["items"][0]["form"], "Canned")
+         self.assertEqual(result["items"][0]["storage_location"], "Pantry")
++        self.assertEqual(result["items"][0]["unit"], "can")
+         self.assertNotIn("saved", result)
+ 
+     def test_barcode_validation_rejects_non_gtin_input_before_lookup(self):
+diff --git a/test_inventory_contract.py b/test_inventory_contract.py
+new file mode 100644
+index 0000000..64b5957
+--- /dev/null
++++ b/test_inventory_contract.py
+@@ -0,0 +1,97 @@
++import csv
++from io import TextIOWrapper
++import unittest
++from zipfile import ZipFile
++
++from config import DB_PATH
++from inventory_contract import (
++    InventoryContractError,
++    inventory_profile,
++    normalize_inventory_lot,
++    normalize_unit,
++    quantity_in_basis,
++)
++from ko_contract import SAFETY_GATES, audit_behavior
++from recipe_engine import _quantity_plan
++from sample_pantry_catalog import SAMPLE_PANTRY_ZIP
++
++
++def regional_pantry_rows():
++    rows = {}
++    with ZipFile(SAMPLE_PANTRY_ZIP) as archive:
++        for filename in sorted(
++            name for name in archive.namelist()
++            if name.startswith("csv/") and name.endswith(".csv")
++        ):
++            with archive.open(filename) as raw:
++                for row in csv.DictReader(TextIOWrapper(raw, encoding="utf-8-sig")):
++                    key = (row["name"].strip(), row["form"].strip())
++                    rows[key] = row
++    return tuple(rows.values())
++
++
++class InventoryContractTests(unittest.TestCase):
++    def test_every_regional_pantry_form_and_unit_has_a_complete_contract(self):
++        rows = regional_pantry_rows()
++        self.assertEqual(len(rows), 140)
++        failures = []
++        for row in rows:
++            try:
++                profile = inventory_profile(row["name"], row["form"], db_path=DB_PATH)
++                if normalize_unit(row["unit"]) not in profile.allowed_units:
++                    failures.append((row["name"], row["form"], row["unit"], "unit"))
++                    continue
++                report = audit_behavior(
++                    profile.name, profile.role, profile.default_form, db_path=DB_PATH
++                )
++                failed_gates = [name for name in SAFETY_GATES if not report.checks[name]]
++                if failed_gates:
++                    failures.append((row["name"], row["form"], row["unit"], failed_gates))
++            except InventoryContractError as exc:
++                failures.append((row["name"], row["form"], row["unit"], str(exc)))
++        self.assertEqual(failures, [])
++
++    def test_one_pound_of_chicken_is_four_standard_piece_portions(self):
++        self.assertEqual(quantity_in_basis(1, "lb", "pieces"), 4)
++        self.assertEqual(quantity_in_basis(8, "oz", "pieces"), 2)
++
++        _effective, plan, note = _quantity_plan(
++            ["Chicken breast"],
++            {"Chicken breast": "Fresh Raw"},
++            [{"name": "Chicken breast", "form": "Fresh Raw", "quantity": 1, "unit": "lb"}],
++            4,
++            {},
++            False,
++            {"Chicken breast": "protein"},
++        )
++        self.assertEqual(plan["chicken breast"]["available"], 4)
++        self.assertEqual(plan["chicken breast"]["shortfall"], 0)
++        self.assertNotIn("Only about 1", note)
++
++    def test_unknown_package_weight_is_not_invented(self):
++        self.assertIsNone(quantity_in_basis(1, "package", "pieces"))
++        self.assertEqual(
++            quantity_in_basis(2, "package", "pieces", package_weight_oz=8), 4
++        )
++
++    def test_legacy_item_unit_migrates_to_the_ko_default(self):
++        lot, profile = normalize_inventory_lot(
++            {"name": "Chicken broth", "form": "Shelf-stable", "quantity": 1, "unit": "item"},
++            "Chicken broth",
++            db_path=DB_PATH,
++            strict=True,
++        )
++        self.assertEqual(lot["unit"], profile.default_unit)
++
++    def test_an_incompatible_unit_is_rejected_at_the_persistence_boundary(self):
++        with self.assertRaisesRegex(InventoryContractError, "cannot be stored"):
++            normalize_inventory_lot(
++                {"name": "Chicken breast", "form": "Fresh Raw", "quantity": 1, "unit": "jar"},
++                "Chicken breast",
++                db_path=DB_PATH,
++                strict=True,
++            )
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/test_ko_behavior.py b/test_ko_behavior.py
+index 300c1fd..341acd9 100644
+--- a/test_ko_behavior.py
++++ b/test_ko_behavior.py
+@@ -4,6 +4,7 @@ import unittest
+ from pathlib import Path
+ 
+ from config import DB_PATH
++from inventory_contract import inventory_catalog
+ from ko_behavior import (
+     FAMILY_LIBRARY,
+     family_codes_for,
+@@ -174,30 +175,20 @@ class KOBehaviorFamilyTests(unittest.TestCase):
+         finally:
+             con.close()
+ 
+-    def test_every_real_catalog_form_resolves_to_complete_ko_knowledge(self):
+-        con = sqlite3.connect(DB_PATH)
+-        try:
+-            rows = con.execute(
+-                """SELECT i.name,i.category,coalesce(f.form_name,'')
+-                     FROM ingredients i LEFT JOIN ingredient_forms f USING(ingredient_id)
+-                    WHERE i.active=1 ORDER BY i.name,f.form_name"""
+-            ).fetchall()
+-            failures = []
+-            for name, category, form_name in rows:
+-                if name == "Centauran Gotlet Ribs":
+-                    continue
+-                role = (
+-                    "protein" if category.lower() == "protein"
+-                    else "foundation" if category.lower() == "foundation"
+-                    else "vegetable" if category.lower() in {"vegetable", "fruit"}
+-                    else "ingredient"
++    def test_every_editable_inventory_contract_resolves_to_complete_ko_knowledge(self):
++        failures = []
++        profiles = inventory_catalog(DB_PATH)
++        self.assertGreaterEqual(len(profiles), 139)
++        for profile in profiles:
++            report = audit_behavior(
++                profile["name"], profile["role"], profile["default_form"],
++                db_path=DB_PATH,
++            )
++            if not report.operational:
++                failures.append(
++                    (profile["name"], profile["default_form"], report.missing)
+                 )
+-                report = audit_behavior(name, role, form_name, db_path=DB_PATH)
+-                if not report.operational:
+-                    failures.append((name, form_name, report.missing))
+-            self.assertEqual(failures, [])
+-        finally:
+-            con.close()
++        self.assertEqual(failures, [])
+ 
+     def test_every_family_method_carries_outcome_failure_and_recovery_knowledge(self):
+         incomplete = []
+diff --git a/test_public_site_copy.py b/test_public_site_copy.py
+index 80c75be..1847708 100644
+--- a/test_public_site_copy.py
++++ b/test_public_site_copy.py
+@@ -81,6 +81,9 @@ def test_my_kitchen_uses_real_quantities_and_units_for_countable_food():
+     assert "data-kitchen-dialog-form novalidate" in kitchen_page
+     assert "quantity," in flow
+     assert "unit:" in flow
++    assert "function installInventoryContracts(contracts)" in flow
++    assert "?include_contracts=true" in flow
++    assert "allowed_units" in flow
+ 
+ 
+ def test_my_kitchen_uses_compact_rows_and_a_phone_first_accordion():
+diff --git a/web/public-site/sns-flow.js b/web/public-site/sns-flow.js
+index 41d0195..10fb653 100644
+--- a/web/public-site/sns-flow.js
++++ b/web/public-site/sns-flow.js
+@@ -20,7 +20,8 @@ const SNS = (() => {
+     ["bag", "bags"], ["package", "packages"],
+     ["egg", "eggs"], ["piece", "pieces"], ["lb", "pounds"], ["oz", "ounces"],
+     ["cup", "cups"], ["carton", "cartons"], ["bottle", "bottles"],
+-    ["bunch", "bunches"], ["loaf", "loaves"], ["portion", "portions"],
++    ["bunch", "bunches"], ["loaf", "loaves"], ["slice", "slices"],
++    ["dozen", "dozens"], ["portion", "portions"],
+     ["meal", "meals"]
+   ];
+   const quantityProfiles = {
+@@ -201,6 +202,25 @@ const SNS = (() => {
+     return quantityProfiles[String(name || "").toLowerCase()] || { unit: "item", step: 1 };
+   }
+ 
++  function installInventoryContracts(contracts) {
++    if (!Array.isArray(contracts)) return;
++    contracts.forEach(contract => {
++      const key = String(contract?.name || "").trim().toLowerCase();
++      const allowed = Array.isArray(contract?.allowed_units)
++        ? contract.allowed_units.filter(Boolean)
++        : [];
++      if (!key || !allowed.length) return;
++      const unit = allowed.includes(contract.default_unit)
++        ? contract.default_unit
++        : allowed[0];
++      quantityProfiles[key] = {
++        unit,
++        step: Number(contract.quantity_step) || quantityStepForUnit(unit)
++      };
++      unitRules[key] = allowed;
++    });
++  }
++
+   function quantityStepForUnit(unit) {
+     return ({ lb: 0.25, cup: 0.25, package: 0.25, can: 0.5 }[unit] || 1);
+   }
+@@ -1463,7 +1483,12 @@ const SNS = (() => {
+     setKitchenStatus("Loading your shared kitchen…", "loading");
+ 
+     try {
+-      let remote = await getJson(API.myKitchen);
++      const kitchenEndpoint = currentPage() === "my-kitchen.html"
++        ? `${API.myKitchen}?include_contracts=true`
++        : API.myKitchen;
++      let remote = await getJson(kitchenEndpoint);
++      installInventoryContracts(remote.inventory_contracts);
++      delete remote.inventory_contracts;
+       let legacyLocal = {};
+       try { legacyLocal = JSON.parse(localStorage.getItem(legacyKitchenStorageKey) || "{}"); }
+       catch { legacyLocal = {}; }
+-- 
+2.51.1
+

@@ -1,0 +1,28 @@
+SNS Deployment 3 — tested final-file overlay
+
+Use this package instead of either Deployment 3 patch.
+
+1. Extract the contents directly into:
+   C:\Users\tlove\OneDrive\Desktop\SNS
+
+2. When Windows asks, choose Replace the files in the destination.
+   The docs and web subfolders must remain as shown in the ZIP.
+
+3. From the SNS command prompt, run:
+
+   git status --short
+
+   You should see seven modified files and three new source files, plus any old
+   deployment packages already present as untracked files.
+
+4. Commit only the Deployment 3 source files:
+
+   git add api_http.py inventory_capture.py render.yaml test_api_http.py test_inventory_capture.py test_public_site_copy.py docs/DEPLOYMENT-3-INVENTORY-CAPTURE.md web/public-site/my-kitchen.html web/public-site/sns-flow.css web/public-site/sns-flow.js
+   git commit -m "Add reviewed barcode and photo pantry capture"
+   git push origin main
+
+Validated release contents:
+  216 tests passed
+  730 subtests passed
+  JavaScript syntax passed
+  Git whitespace check passed

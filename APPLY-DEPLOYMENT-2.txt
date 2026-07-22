@@ -1,0 +1,42 @@
+STOCK & STIR — DEPLOYMENT 2
+Safety gaps and quantity/form/unit contracts
+
+Expected starting commit:
+975478649628e2a6d74052949ea63661e2fa6f6b
+
+Deployment 2 commit produced and tested here:
+badd7e7 Harden pantry quantity form and safety contracts
+
+PREFERRED INSTALL — PATCH
+
+1. Put SNS-Deployment-2-Safety-Contracts.patch in the root of your SNS folder.
+2. Confirm you are not in the middle of git am:
+   git status
+3. Check the patch before changing anything:
+   git apply --check SNS-Deployment-2-Safety-Contracts.patch
+4. If that succeeds:
+   git apply SNS-Deployment-2-Safety-Contracts.patch
+5. Run the tests:
+   python -m unittest discover
+6. Stage only the implementation files (do not add downloaded patch/zip files):
+   git add api_http.py api_service.py inventory_capture.py inventory_contract.py ko_behavior.py ko_contract.py recipe_engine.py test_api_http.py test_inventory_capture.py test_inventory_contract.py test_ko_behavior.py test_public_site_copy.py web/public-site/sns-flow.js docs/DEPLOYMENT-2-SAFETY-AND-INVENTORY-CONTRACTS.md
+7. Commit and push:
+   git commit -m "Harden pantry quantity form and safety contracts"
+   git push origin main
+
+FALLBACK INSTALL — CHANGED-FILES OVERLAY
+
+Use this only if git apply --check fails because your local copies differ.
+
+1. Make sure intentional local changes to the 14 listed files are committed or
+   backed up first.
+2. Extract SNS-Deployment-2-changed-files.zip directly over the SNS repository
+   root, preserving its folders.
+3. Run:
+   python -m unittest discover
+4. Use the same explicit git add, commit, and push commands above.
+
+EXPECTED RESULT
+
+150 tests pass. Render should deploy sns-api and sns-web after the push. Verify
+that /health is JSON and that both services show the new commit before testing.

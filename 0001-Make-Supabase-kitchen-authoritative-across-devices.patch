@@ -1,0 +1,398 @@
+From 14ca19dfb245a66c4ce4f1c4c8521c22498192b2 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Sat, 18 Jul 2026 17:10:14 -0600
+Subject: [PATCH] Make Supabase kitchen authoritative across devices
+
+---
+ api_http.py                 |  40 ++++-------
+ test_api_http.py            |   6 ++
+ test_public_site_copy.py    |   9 +++
+ web/public-site/login.html  |  21 +++++-
+ web/public-site/sns-auth.js |   2 +-
+ web/public-site/sns-flow.js | 129 ++++++++++++++++++++++++++++--------
+ 6 files changed, 149 insertions(+), 58 deletions(-)
+
+diff --git a/api_http.py b/api_http.py
+index e173496..5bfa8c2 100644
+--- a/api_http.py
++++ b/api_http.py
+@@ -1,9 +1,8 @@
+ """FastAPI transport for the Stock & Stir application service boundary.
+ 
+-The functions in :mod:`api_service` remain framework-independent.  This
+-module only translates HTTP/JSON requests, establishes the explicit shared
+-tester household used before managed authentication exists, and maps domain
+-errors to stable HTTP responses.
++The functions in :mod:`api_service` remain framework-independent. This
++module translates HTTP/JSON requests, requires managed identity for
++user-owned data, and maps domain errors to stable HTTP responses.
+ """
+ 
+ from __future__ import annotations
+@@ -20,15 +19,10 @@ from api_service import (
+     get_recipe_list,
+     normalize_kitchen_snapshot,
+     resolve_inventory,
+-    save_my_kitchen,
+ )
+ from build_provenance import DEPLOYED_BUILD_PROVENANCE, public_build_provenance
+ from config import DB_PATH
+-from household_inventory import (
+-    InventoryAccessError,
+-    InventoryError,
+-    bootstrap_local_household,
+-)
++from household_inventory import InventoryAccessError, InventoryError
+ from inventory_capture import (
+     InventoryCaptureError,
+     recognize_pantry_photo,
+@@ -184,26 +178,18 @@ def save_kitchen_endpoint(
+     payload: dict,
+     authorization: str | None = Header(default=None),
+ ) -> dict:
+-    """Save the authenticated household, retaining a local test fallback."""
++    """Save only the authenticated user's RLS-protected household."""
+     try:
+         token = _access_token(authorization)
+-        if token:
+-            response = _SUPABASE.sync_kitchen(
+-                token,
+-                _canonical_sync_payload(payload),
+-                source_type=payload.get("sync_source_type"),
+-                source_fingerprint=payload.get("sync_source_fingerprint"),
+-            )
+-            response["storage_mode"] = "supabase_household"
+-            return response
+-        user_id, household_id = bootstrap_local_household(DB_PATH)
+-        response = save_my_kitchen(
+-            payload,
+-            household_id=household_id,
+-            acting_user_id=user_id,
+-            db_path=DB_PATH,
++        if not token:
++            raise SupabaseGatewayError("Log in to save your shared kitchen.")
++        response = _SUPABASE.sync_kitchen(
++            token,
++            _canonical_sync_payload(payload),
++            source_type=payload.get("sync_source_type"),
++            source_fingerprint=payload.get("sync_source_fingerprint"),
+         )
+-        response["storage_mode"] = "shared_tester_household"
++        response["storage_mode"] = "supabase_household"
+         return response
+     except Exception as exc:
+         raise _domain_error(exc) from exc
+diff --git a/test_api_http.py b/test_api_http.py
+index ec98bf4..c6c54ae 100644
+--- a/test_api_http.py
++++ b/test_api_http.py
+@@ -58,6 +58,12 @@ class APIHTTPTests(unittest.TestCase):
+         self.assertEqual(response.status_code, 200)
+         self.assertEqual(response.json()["household_id"], "house-1")
+ 
++    def test_anonymous_kitchen_save_is_rejected(self):
++        response = self.client.post("/api/SaveMyKitchen", json=kitchen_payload())
++
++        self.assertEqual(response.status_code, 401)
++        self.assertIn("Log in", response.json()["detail"])
++
+     def test_signed_in_recipe_request_uses_the_durable_inventory(self):
+         kitchen = kitchen_payload()
+         snapshot = {
+diff --git a/test_public_site_copy.py b/test_public_site_copy.py
+index e3dae07..7c996f7 100644
+--- a/test_public_site_copy.py
++++ b/test_public_site_copy.py
+@@ -35,11 +35,20 @@ def test_accounts_use_supabase_and_migrate_the_browser_kitchen_once():
+     assert "signInWithPassword" in auth
+     assert "resetPasswordForEmail" in auth
+     assert "persistSession: true" in auth
++    assert "callback(currentSession, event)" in auth
+     assert "sb_publishable_" in config
+     assert "service_role" not in config
+     assert "snsAuthPrototype" not in login
+     assert "snsKitchenMigrated:" in flow
+     assert "Move them into your shared Stock & Stir kitchen" in flow
++    assert "snsKitchenStateV2:${userId}" in flow
++    assert "kitchenDraftKey(sharedKitchenSync.userId)" in flow
++    assert "saved-as-draft" in flow
++    assert "saving is disabled" in flow
++    assert "Saved in this browser; API connection is pending." not in flow
++    assert 'event === "SIGNED_IN"' in flow
++    assert "friendlyAuthError" in login
++    assert "Do not keep clicking it" in login
+     assert 'myKitchen: endpoint("/api/MyKitchen")' in flow
+     assert "Authorization: `Bearer ${token}`" in flow
+     assert 'data-preference-type="allergy"' in preferences
+diff --git a/web/public-site/login.html b/web/public-site/login.html
+index 7b619b7..612687a 100644
+--- a/web/public-site/login.html
++++ b/web/public-site/login.html
+@@ -194,6 +194,23 @@
+       target.classList.toggle("error", error);
+     }
+ 
++    function friendlyAuthError(error, action) {
++      const message = String(error?.message || "");
++      const code = String(error?.code || "");
++      if (code === "over_email_send_rate_limit" || /email rate limit/i.test(message)) {
++        return action === "reset"
++          ? "Supabase has temporarily limited password-reset emails. Do not keep clicking it. Wait before requesting another email; the most recent reset email you received is still the one to use."
++          : "Supabase has temporarily limited account emails. If this account already exists, choose Log In instead of Start Free Trial. Otherwise, wait before requesting another email.";
++      }
++      if (code === "invalid_credentials" || /invalid login credentials/i.test(message)) {
++        return "That email and password do not match. Use Forgot password once if you need to set a new password.";
++      }
++      if (/already registered|already exists/i.test(message)) {
++        return "That account already exists. Choose Log In instead of creating another trial account.";
++      }
++      return message || "The account request could not be completed.";
++    }
++
+     function renderMode() {
+       const signingUp = mode === "signup";
+       const recovering = mode === "recovery";
+@@ -267,7 +284,7 @@
+         }
+         showMessage("Account created. Check your email to confirm it, then return here to log in.");
+       } catch (error) {
+-        showMessage(error.message || "The account request could not be completed.", true);
++        showMessage(friendlyAuthError(error, mode), true);
+       } finally {
+         button.disabled = false;
+       }
+@@ -284,7 +301,7 @@
+         await window.SNS_AUTH.resetPassword(email);
+         showMessage("Password reset instructions are on their way. Check your email.");
+       } catch (error) {
+-        showMessage(error.message || "Password reset could not be started.", true);
++        showMessage(friendlyAuthError(error, "reset"), true);
+       }
+     });
+ 
+diff --git a/web/public-site/sns-auth.js b/web/public-site/sns-auth.js
+index 210a91b..2f938ca 100644
+--- a/web/public-site/sns-auth.js
++++ b/web/public-site/sns-auth.js
+@@ -58,7 +58,7 @@
+       if (error) throw error;
+     },
+     onChange(callback) {
+-      return client.auth.onAuthStateChange((_event, currentSession) => callback(currentSession));
++      return client.auth.onAuthStateChange((event, currentSession) => callback(currentSession, event));
+     }
+   };
+ })();
+diff --git a/web/public-site/sns-flow.js b/web/public-site/sns-flow.js
+index 1d694fe..9997bda 100644
+--- a/web/public-site/sns-flow.js
++++ b/web/public-site/sns-flow.js
+@@ -69,7 +69,13 @@ const SNS = (() => {
+     "frozen vegetables": ["bag", "package", "cup"], "prepared meal": ["meal", "portion", "package"],
+     "cooked leftovers": ["portion", "cup", "package"]
+   };
+-  const kitchenStorageKey = "snsKitchenStateV1";
++  const legacyKitchenStorageKey = "snsKitchenStateV1";
++  let kitchenStorageKey = legacyKitchenStorageKey;
++  const sharedKitchenSync = {
++    mode: "guest",
++    userId: "",
++    householdId: ""
++  };
+   const kitchenImportUndoKey = "snsKitchenImportUndoV1";
+   const mealHistoryKey = "snsMealHistoryV1";
+   const defaultForms = {
+@@ -83,6 +89,25 @@ const SNS = (() => {
+     return location.pathname.split("/").pop() || "home.html";
+   }
+ 
++  function signedInKitchenKey(userId) {
++    return `snsKitchenStateV2:${userId}`;
++  }
++
++  function kitchenDraftKey(userId) {
++    return `snsKitchenDraftV1:${userId}`;
++  }
++
++  function setKitchenStatus(message, mode = sharedKitchenSync.mode) {
++    sharedKitchenSync.mode = mode;
++    const status = document.querySelector("[data-save-status]");
++    if (status) {
++      status.textContent = message;
++      status.dataset.syncState = mode;
++    }
++    const save = document.querySelector("[data-save-kitchen], [data-save-household]");
++    if (save) save.disabled = mode === "loading" || mode === "error";
++  }
++
+   function installAppShell() {
+     if (!document.body.hasAttribute("data-app-shell")) return;
+     document.body.classList.add("app-shell-page");
+@@ -114,7 +139,7 @@ const SNS = (() => {
+         ${link("kitchen-training.html", "Kitchen Training")}
+         ${link("pantry-101.html", "Pantry 101")}
+       </nav>
+-      ${onKitchenPage ? `<div class="app-sidebar-save"><span data-save-status>Changes are stored in this browser.</span><button class="btn btn-primary" type="button" data-save-kitchen>Save My Kitchen</button></div>` : ""}
++      ${onKitchenPage ? `<div class="app-sidebar-save"><span data-save-status>Checking your shared kitchen…</span><button class="btn btn-primary" type="button" data-save-kitchen>Save My Kitchen</button></div>` : ""}
+       <a class="app-sidebar-account" href="login.html">Account</a>`;
+     const overlay = document.createElement("button");
+     overlay.type = "button";
+@@ -486,7 +511,10 @@ const SNS = (() => {
+   }
+ 
+   function storeBrowserKitchen() {
+-    localStorage.setItem(kitchenStorageKey, JSON.stringify(browserKitchenState()));
++    const key = sharedKitchenSync.userId
++      ? kitchenDraftKey(sharedKitchenSync.userId)
++      : kitchenStorageKey;
++    localStorage.setItem(key, JSON.stringify(browserKitchenState()));
+   }
+ 
+   function recentMealHistory() {
+@@ -1411,16 +1439,35 @@ const SNS = (() => {
+   }
+ 
+   async function hydrateSharedKitchen() {
+-    if (!window.SNS_AUTH?.configured) return;
++    if (!window.SNS_AUTH?.configured) {
++      kitchenStorageKey = legacyKitchenStorageKey;
++      setKitchenStatus("Account service is unavailable. Changes are not shared between devices.", "guest");
++      return false;
++    }
+     let session;
+     try { session = await window.SNS_AUTH.session(); }
+-    catch { return; }
+-    if (!session) return;
++    catch (error) {
++      setKitchenStatus(`Could not verify your login. ${error.message || "Please log in again."}`, "error");
++      return false;
++    }
++    if (!session) {
++      kitchenStorageKey = legacyKitchenStorageKey;
++      sharedKitchenSync.userId = "";
++      sharedKitchenSync.householdId = "";
++      setKitchenStatus("Log in to load and save one kitchen across your devices.", "guest");
++      return false;
++    }
++
++    sharedKitchenSync.userId = session.user.id;
++    kitchenStorageKey = signedInKitchenKey(session.user.id);
++    setKitchenStatus("Loading your shared kitchen…", "loading");
+ 
+     try {
+       let remote = await getJson(API.myKitchen);
+-      const local = savedKitchenState();
+-      const localFoods = (local.foods || []).filter(item => Number(item.quantity || 0) > 0);
++      let legacyLocal = {};
++      try { legacyLocal = JSON.parse(localStorage.getItem(legacyKitchenStorageKey) || "{}"); }
++      catch { legacyLocal = {}; }
++      const localFoods = (legacyLocal.foods || []).filter(item => Number(item.quantity || 0) > 0);
+       const remoteFoods = (remote.foods || remote.inventory || []).filter(item => Number(item.quantity || 0) > 0);
+       const marker = `snsKitchenMigrated:${session.user.id}`;
+ 
+@@ -1430,49 +1477,65 @@ const SNS = (() => {
+         );
+         if (move) {
+           remote = await postJson(API.saveKitchen, {
+-            ...local,
++            ...legacyLocal,
+             inventory: localFoods,
+-            servings: (local.household_members || []).length || 4,
+-            energy: local.tonight_effort || "Low",
+-            effort: local.tonight_effort || "Low",
++            servings: (legacyLocal.household_members || []).length || 4,
++            energy: legacyLocal.tonight_effort || "Low",
++            effort: legacyLocal.tonight_effort || "Low",
+             sync_source_type: "browser_migration",
+             sync_source_fingerprint: `browser-v1:${session.user.id}`
+           });
++        } else {
++          localStorage.setItem(kitchenDraftKey(session.user.id), JSON.stringify(legacyLocal));
+         }
+-        localStorage.setItem(marker, move ? "moved" : "kept-local");
++        localStorage.setItem(marker, move ? "moved" : "saved-as-draft");
+       }
+ 
+-      const sharedFoods = (remote.foods || remote.inventory || []).filter(item => Number(item.quantity || 0) > 0);
+-      if (sharedFoods.length || !localFoods.length) {
+-        localStorage.setItem(kitchenStorageKey, JSON.stringify(remote));
+-      }
+-      const status = document.querySelector("[data-save-status]");
+-      if (status) status.textContent = "This kitchen is shared across your signed-in devices.";
++      localStorage.setItem(kitchenStorageKey, JSON.stringify(remote));
++      sharedKitchenSync.householdId = remote.household_id || "";
++      setKitchenStatus("Shared kitchen loaded. Changes will appear on every signed-in device.", "shared");
++      return true;
+     } catch (error) {
+-      const status = document.querySelector("[data-save-status]");
+-      if (status) status.textContent = `Using this device's saved kitchen for now. ${error.message || "Shared sync is unavailable."}`;
++      setKitchenStatus(
++        `Shared kitchen could not load. A last-synced copy may be shown, but saving is disabled. Reload before making changes. ${error.message || "Please try again."}`,
++        "error"
++      );
++      return false;
+     }
+   }
+ 
+   async function saveKitchen() {
+     const payload = kitchenPayload();
+     sessionStorage.setItem("snsKitchenPayload", JSON.stringify(payload));
+-    storeBrowserKitchen();
+     try {
++      if (window.SNS_AUTH?.configured) {
++        const session = await window.SNS_AUTH.session();
++        if (!session) {
++          setKitchenStatus("Log in before saving so this kitchen is shared across your devices.", "guest");
++          return;
++        }
++        if (sharedKitchenSync.mode !== "shared" || sharedKitchenSync.userId !== session.user.id) {
++          setKitchenStatus("Your shared kitchen is not current. Reload this page before saving.", "error");
++          return;
++        }
++      }
+       const response = await postJson(API.saveKitchen, {
+         ...payload,
+         preferences: browserKitchenState().preferences
+       });
+       if (response?.storage_mode === "supabase_household") {
+         localStorage.setItem(kitchenStorageKey, JSON.stringify(response));
++        localStorage.removeItem(kitchenDraftKey(sharedKitchenSync.userId));
++        sharedKitchenSync.householdId = response.household_id || sharedKitchenSync.householdId;
+       }
+-      const status = document.querySelector("[data-save-status]");
+-      if (status) status.textContent = document.querySelector("[data-save-household]")
++      setKitchenStatus(document.querySelector("[data-save-household]")
+         ? "Household preferences are saved to every signed-in device."
+-        : "My Kitchen is saved to every signed-in device.";
+-    } catch {
+-      const status = document.querySelector("[data-save-status]");
+-      if (status) status.textContent = "Saved in this browser; API connection is pending.";
++        : "My Kitchen is saved to every signed-in device.", "shared");
++    } catch (error) {
++      setKitchenStatus(
++        `My Kitchen was not saved. Your shared kitchen is unchanged. ${error.message || "Please try again."}`,
++        "error"
++      );
+     }
+   }
+ 
+@@ -2132,6 +2195,16 @@ const SNS = (() => {
+     document.querySelector("[data-billing-portal]")?.addEventListener("click", billingPortal);
+     runRequestedKitchenAction();
+     refreshRecipeChoices();
++    window.SNS_AUTH?.onChange?.((session, event) => {
++      if (event === "SIGNED_OUT") {
++        kitchenStorageKey = legacyKitchenStorageKey;
++        sharedKitchenSync.userId = "";
++        sharedKitchenSync.householdId = "";
++        setKitchenStatus("Signed out. Log in to load your shared kitchen.", "guest");
++      } else if (event === "SIGNED_IN" && session?.user?.id !== sharedKitchenSync.userId) {
++        location.reload();
++      }
++    });
+   }
+ 
+   return { init, kitchenPayload, API };
+-- 
+2.51.1
+

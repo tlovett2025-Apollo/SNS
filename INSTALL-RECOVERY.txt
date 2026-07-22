@@ -1,0 +1,28 @@
+SNS Deployments 1–3 consolidated recovery overlay
+
+Why this exists:
+The production GitHub tree was missing several Deployment 1 and 2 source files,
+including supabase_gateway.py, recipe_reports.py, sns-auth.js, sns-config.js, and
+the Supabase migrations. Deployment 3 imported those modules, so sns-api could
+not start.
+
+Install:
+1. Extract this ZIP directly into:
+   C:\Users\tlove\OneDrive\Desktop\SNS
+
+2. Choose Replace the files in the destination.
+
+3. From the SNS command prompt:
+   git status --short
+   git add --pathspec-from-file=RECOVERY-FILES.txt
+   git commit -m "Restore complete Deployments 1 through 3"
+   git push origin main
+
+RECOVERY-FILES.txt deliberately stages only the 37 release files. Old patches,
+ZIPs, and instruction files remain untracked and will not be committed.
+
+Validated final tree:
+216 tests passed
+730 subtests passed
+JavaScript syntax passed
+Git whitespace check passed

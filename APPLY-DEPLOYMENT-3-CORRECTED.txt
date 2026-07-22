@@ -1,0 +1,30 @@
+SNS Deployment 3 — corrected package for production commit 4551690
+
+This package replaces the earlier Deployment 3 package. Do not use the old
+SNS-Deployment-3.patch or SNS-Deployment-3-changed-files.zip.
+
+From C:\Users\tlove\OneDrive\Desktop\SNS, first confirm the repository is clean:
+
+  git status --short
+
+It is okay if the only lines shown begin with ?? and name old deployment package
+files. Then apply this corrected patch:
+
+  git apply --check SNS-Deployment-3-Corrected.patch
+
+If that command prints nothing, continue:
+
+  git apply SNS-Deployment-3-Corrected.patch
+  git status --short
+  git add api_http.py inventory_capture.py render.yaml test_api_http.py test_inventory_capture.py test_public_site_copy.py docs/DEPLOYMENT-3-INVENTORY-CAPTURE.md web/public-site/my-kitchen.html web/public-site/sns-flow.css web/public-site/sns-flow.js
+  git commit -m "Add reviewed barcode and photo pantry capture"
+  git push origin main
+
+Render should then deploy the API and public site automatically. OPENAI_API_KEY
+must remain set only in the sns-api Render environment; never commit the key.
+
+Validated before packaging:
+  216 tests passed
+  730 subtests passed
+  node --check web/public-site/sns-flow.js passed
+  git diff --check passed
