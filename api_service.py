@@ -1237,6 +1237,7 @@ def _candidate_view(candidate: dict) -> dict:
         "vegetable": candidate.get("vegetable"),
         "foundation": candidate.get("foundation"),
         "cuisine": candidate.get("cuisine"),
+        "orchestration": dict(candidate.get("orchestration") or {}),
         "cooking_method": method,
         "match": _match_text(int(candidate.get("selection_score", candidate.get("score", 0)))),
         "summary": (

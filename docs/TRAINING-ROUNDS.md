@@ -10,8 +10,8 @@ training pipeline without reopening the architecture.
    resting, holding, and recovery across protein families.
 3. **Flavor identity — complete.** Sauces, seasoning systems, cuisine affinity,
    compatibility, and controlled substitutions across nine launch identities.
-4. **Meal orchestration.** Meal shapes, component coordination, attention,
-   parallel work, holding, and service.
+4. **Meal orchestration — complete.** Eight meal shapes, component coordination,
+   attention interlacing, equipment concurrency, holding, and service.
 5. **Retail products.** Barcode product identity, packaged and convenience
    foods, directions, enrichment provenance, and household confirmation.
 6. **Household fit and safety.** Allergies, exclusions, dietary constraints,

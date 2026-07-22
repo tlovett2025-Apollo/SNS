@@ -17,6 +17,7 @@ from culinary_opportunities import discover_opportunities, serialize_opportuniti
 from sauce_profiles import SauceIngredient, get_sauce_profile
 from recipe_validation import validate_recipe
 from meal_components import recognize_meal_components
+from meal_orchestration import build_orchestration_report
 from flavor_identity import (
     flavor_identity,
     identity_requirements,
@@ -926,6 +927,7 @@ def generate_candidates(
             c["soup_liquid_quantity"] = method_ingredients[0].quantity
 
         schedule = build_kitchen_lane_schedule(c)
+        c["orchestration"] = build_orchestration_report(c, schedule)
         c["minutes"] = max((item.end_minute for item in schedule), default=0)
         c["active_minutes"] = sum(item.attention_minutes for item in schedule)
         c["passive_minutes"] = max(0, c["minutes"] - c["active_minutes"])
@@ -983,6 +985,7 @@ def build_recipe_from_candidate(candidate):
         "quantity_note": candidate.get("quantity_note") or "",
         "coherence_omissions": list(candidate.get("coherence_omissions") or []),
         "component_plan": dict(candidate.get("component_plan") or {}),
+        "orchestration": dict(candidate.get("orchestration") or {}),
         "validation": validation,
         "summary": f"{candidate.get('label')} · {candidate.get('energy')} energy · {candidate.get('budget')} · {candidate.get('minutes')} min · serves {candidate.get('servings', 4)}",
     }

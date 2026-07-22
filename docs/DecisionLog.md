@@ -699,3 +699,34 @@ Impact:
 - Mediterranean lemon-to-lime substitution remains available because that
   exact cross-acid substitution is trained for the identity.
 - New cuisines extend the identity library and matrix instead of the planner.
+
+
+Decision #0018
+
+Title:
+Round 4 makes attention interlacing and service convergence explicit
+
+Date:
+2026-07-22
+
+Decision:
+Whole-meal orchestration is a contract above component execution. Eight meal
+shapes define how separately cooked components converge at service. Every
+candidate publishes an audit of equipment lanes, attention reservations,
+concurrent process windows, component holding, and the service minute.
+
+Human-busy activity does not automatically reserve the cook for its full
+elapsed duration. Continuous work is exclusive. Intermittent work reserves its
+calculated attention window and may then interlace with another vessel or oven
+process. Passive and launch-and-check processes chiefly reserve equipment.
+
+Impact:
+
+- A single cook may legitimately alternate between ground beef, a sauce, and
+  an oven timer when their attention reservations do not collide.
+- Two burners and an oven are modeled as separate physical resources.
+- Oven-roasted chicken and stovetop macaroni and cheese converge at service
+  without pretending they are one-pan cooking.
+- Holding windows become visible for later quality-limit training.
+- True attention conflicts are machine-detectable instead of inferred from
+  overlapping wall-clock ranges.
