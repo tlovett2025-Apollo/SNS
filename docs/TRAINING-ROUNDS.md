@@ -12,8 +12,8 @@ training pipeline without reopening the architecture.
    compatibility, and controlled substitutions across nine launch identities.
 4. **Meal orchestration — complete.** Eight meal shapes, component coordination,
    attention interlacing, equipment concurrency, holding, and service.
-5. **Retail products.** Barcode product identity, packaged and convenience
-   foods, directions, enrichment provenance, and household confirmation.
+5. **Retail products — complete.** Barcode product identity, eight packaged and
+   convenience-food kinds, directions, provenance, and household confirmation.
 6. **Household fit and safety.** Allergies, exclusions, dietary constraints,
    preference strength, substitutions, and person-specific needs.
 7. **Coverage and learning operations.** Generated matrices, clustered failure

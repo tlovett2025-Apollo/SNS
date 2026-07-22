@@ -75,6 +75,26 @@ class InventoryCaptureTests(unittest.TestCase):
             resolve_barcode("not-a-barcode", db_path=DB_PATH)
 
     @patch("inventory_capture.urlopen")
+    def test_ginger_ale_barcode_never_matches_canonical_ginger(self, mocked_open):
+        mocked_open.return_value = _JSONResponse({
+            "status": 1,
+            "product": {
+                "product_name": "Ginger Ale",
+                "categories": "Soft drinks, Beverages",
+                "packaging": "Can",
+            },
+        })
+
+        result = resolve_barcode("07811403", db_path=DB_PATH)
+
+        self.assertEqual("prepared_beverage", result["retail_product"]["product_kind"])
+        self.assertEqual("Ginger Ale", result["items"][0]["name"])
+        self.assertNotEqual("Ginger", result["items"][0]["name"])
+        self.assertEqual("unrecognized", result["items"][0]["status"])
+        self.assertTrue(result["confirmation_required"])
+        self.assertFalse(result["ckb_changed"])
+
+    @patch("inventory_capture.urlopen")
     def test_photo_recognition_is_structured_transient_and_never_stores_the_photo(self, mocked_open):
         mocked_open.return_value = _JSONResponse({
             "output_text": json.dumps({

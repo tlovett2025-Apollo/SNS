@@ -28,6 +28,7 @@ from inventory_contract import (
     inventory_profile,
     normalize_unit,
 )
+from retail_products import preparation_contract, retail_product_draft
 
 
 MAX_PHOTO_BYTES = 6 * 1024 * 1024
@@ -107,7 +108,9 @@ def _catalog(path: str, _mtime_ns: int) -> tuple[dict[str, dict], tuple[tuple[st
     return exact, tuple(phrases)
 
 
-def _match_name(names: list[str], db_path: str | Path) -> tuple[dict | None, str, float]:
+def _match_name(
+    names: list[str], db_path: str | Path, product_kind: str = "",
+) -> tuple[dict | None, str, float]:
     exact, phrases = _catalog(*_catalog_version(db_path))
     keys = [
         _key(CAPTURE_NAME_ALIASES.get(_key(name), name))
@@ -116,6 +119,11 @@ def _match_name(names: list[str], db_path: str | Path) -> tuple[dict | None, str
     for name_key in keys:
         if name_key in exact:
             return exact[name_key], "matched", 1.0
+    if product_kind in {"prepared_beverage", "boxed_side", "prepared_meal"}:
+        # “Ginger ale” is not ginger and boxed scalloped potatoes are not raw
+        # potatoes. These retail objects require an exact product/component
+        # identity or household review; substring luck may not create a KO.
+        return None, "unrecognized", 0.0
     for name_key in keys:
         padded = f" {name_key} "
         for phrase, item in phrases:
@@ -223,7 +231,10 @@ def normalize_capture_candidates(
             *([_clean(value) for value in raw.get("candidate_names", [])]
               if isinstance(raw.get("candidate_names"), list) else []),
         ]
-        matched, status, match_confidence = _match_name(alternates, db_path)
+        retail_kind = _clean(raw.get("retail_product_kind"))
+        matched, status, match_confidence = _match_name(
+            alternates, db_path, retail_kind
+        )
         canonical_name = (matched or {}).get("name") or source_name
         form, storage = _form_and_storage(raw, matched)
         confidence = min(1.0, max(0.0, _float(raw.get("confidence"), match_confidence)))
@@ -269,6 +280,8 @@ def normalize_capture_candidates(
             "existing_quantity": current["quantity"] if current else 0,
             "existing_unit": current["unit"] if current else None,
             "barcode": _clean(raw.get("barcode")) or None,
+            "retail_product_kind": retail_kind or None,
+            "retail_product_review_required": bool(retail_kind and not matched),
         }
     return list(drafts.values())
 
@@ -298,7 +311,7 @@ def resolve_barcode(
     template = os.getenv("SNS_BARCODE_LOOKUP_URL", OPEN_FOOD_FACTS_URL)
     url = template.format(barcode=quote(clean_barcode))
     separator = "&" if "?" in url else "?"
-    url += separator + "fields=code,product_name,product_name_en,generic_name,categories,quantity,packaging"
+    url += separator + "fields=code,product_name,product_name_en,generic_name,categories,quantity,packaging,preparation,preparation_en,instructions"
     payload = _json_request(url, headers={
         "Accept": "application/json",
         "User-Agent": os.getenv("SNS_BARCODE_USER_AGENT", "StockAndStir/1.0 (pantry capture)"),
@@ -309,6 +322,7 @@ def resolve_barcode(
     name = _clean(product.get("product_name_en") or product.get("product_name") or product.get("generic_name"))
     if not name:
         raise InventoryCaptureError("That barcode has no usable product name. Enter the item manually instead.")
+    product_contract = retail_product_draft(product, clean_barcode)
     category_names = [part.strip() for part in _clean(product.get("categories")).split(",") if part.strip()]
     draft = normalize_capture_candidates([{
         "name": name,
@@ -320,10 +334,21 @@ def resolve_barcode(
         "unit": "package",
         "confidence": 0.98,
         "barcode": clean_barcode,
+        "retail_product_kind": product_contract.product_kind,
     }], db_path=db_path, existing_inventory=existing_inventory)
     if not draft:
         raise InventoryCaptureError("That product could not be turned into a pantry item.")
-    return {"source": "barcode", "barcode": clean_barcode, "items": draft}
+    return {
+        "source": "barcode",
+        "barcode": clean_barcode,
+        "items": draft,
+        "retail_product": product_contract.to_dict(),
+        "preparation_contract": preparation_contract(
+            product_contract.product_kind
+        ).__dict__,
+        "confirmation_required": True,
+        "ckb_changed": False,
+    }
 
 
 PHOTO_SCHEMA = {

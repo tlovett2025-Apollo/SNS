@@ -730,3 +730,34 @@ Impact:
 - Holding windows become visible for later quality-limit training.
 - True attention conflicts are machine-detectable instead of inferred from
   overlapping wall-clock ranges.
+
+
+Decision #0019
+
+Title:
+Round 5 separates retail evidence from canonical cooking knowledge
+
+Date:
+2026-07-22
+
+Decision:
+A barcode identifies a retail object, not necessarily an ingredient. Every
+lookup returns a review-first retail product draft with product kind,
+field-level source evidence, preparation text, confirmation state, enrichment
+state, schema version, and promotion target. Provider preparation directions
+remain non-executable until confirmed.
+
+Household confirmation may save the reviewed inventory item but cannot mutate
+the shared CKB. Reusable product knowledge is promoted separately into a retail
+registry after review. Phrase and fuzzy ingredient matching are disabled for
+beverages, boxed sides, and prepared meals because their flavor or component
+words do not establish canonical identity.
+
+Impact:
+
+- Ginger ale can never become dry ginger through substring matching.
+- Boxed scalloped potatoes retain their package-method identity.
+- Hawaiian rolls can serve as a confirmed bread foundation or side.
+- Canned ingredients, condiments, beverages, and prepared meals carry distinct
+  meal jobs and direction policies.
+- New scans create bounded enrichment work instead of uncontrolled CKB writes.
