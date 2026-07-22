@@ -516,3 +516,31 @@ Impact:
 - Equipment is emitted only for activities present in the final graph.
 - Dish identity can specialize generic KO preparation without changing the KO’s
   underlying ingredient facts.
+
+
+Decision #0012
+
+Title:
+Allergy categories expand before candidate generation
+
+Date:
+2026-07-22
+
+Decision:
+Household allergy and never-include categories are safety constraints, not
+ranking preferences. Category terms such as shellfish must expand to their
+known ingredient members before any candidate is generated. The same expanded
+blocklist applies to automatic ideas and explicit Build My Meal selections.
+
+Preference fields must never use realistic allergy examples as placeholder text
+because an empty placeholder can be mistaken for saved safety data. The screen
+must state clearly when no allergies are saved and identify active exclusions.
+
+Impact:
+
+- Shellfish blocks shrimp, prawns, crab, lobster, crawfish, clams, mussels,
+  oysters, and scallops.
+- Crustacean and mollusk category terms receive their appropriate expansions.
+- Allergy exclusions run before scoring and recipe planning.
+- Explicitly selected blocked ingredients fail the request instead of appearing
+  in a recipe.

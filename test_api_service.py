@@ -774,6 +774,33 @@ class APIServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(APIContractError, "listed in My Kitchen exclusions"):
             get_recipe_list(request)
 
+    def test_shellfish_allergy_expands_to_shrimp_before_candidate_generation(self):
+        kitchen = {
+            "inventory": [
+                {"name": "Shrimp", "form": "Frozen Raw", "amount": "plenty"},
+                {"name": "Broccoli", "form": "Fresh", "amount": "plenty"},
+            ],
+            "equipment": [{"name": "Stovetop"}],
+            "meal_preferences": {"excluded_items": ["shellfish"]},
+        }
+        request = {
+            "mode": "build_your_meal", "kitchen": kitchen,
+            "selections": {
+                "protein": "Shrimp", "protein_state": "Frozen Raw",
+                "thaw_readiness_confirmed": True,
+                "produce": ["Broccoli"], "cooking_method": "skillet",
+                "serving_temperature": "hot",
+            },
+        }
+
+        with self.assertRaisesRegex(APIContractError, "listed in My Kitchen exclusions"):
+            get_recipe_list(request)
+
+        assert all(
+            candidate.get("protein") != "Shrimp"
+            for candidate in get_recipe_list(kitchen)["candidates"]
+        )
+
     def test_snapshot_normalizes_current_browser_payload(self):
         snapshot = normalize_kitchen_snapshot(kitchen_payload())
         self.assertEqual(snapshot["api_version"], "1.0")

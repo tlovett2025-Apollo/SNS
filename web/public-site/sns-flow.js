@@ -1170,6 +1170,16 @@ const SNS = (() => {
         .filter(Boolean);
       input.value = values.join(", ");
     });
+    const allergyInput = document.querySelector('[data-preference-type="allergy"]');
+    const allergyState = document.querySelector("[data-allergy-state]");
+    const syncAllergyState = () => {
+      if (!allergyState || !allergyInput) return;
+      const value = allergyInput.value.trim();
+      allergyState.textContent = value ? `Active allergy exclusions: ${value}` : "No allergies saved.";
+      allergyState.classList.toggle("active", Boolean(value));
+    };
+    allergyInput?.addEventListener("input", syncAllergyState);
+    syncAllergyState();
   }
 
   function ensureRemoveControl(row) {

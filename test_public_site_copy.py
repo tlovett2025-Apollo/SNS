@@ -65,6 +65,9 @@ def test_accounts_use_supabase_and_migrate_the_browser_kitchen_once():
     assert 'myKitchen: endpoint("/api/MyKitchen")' in flow
     assert "Authorization: `Bearer ${token}`" in flow
     assert 'data-preference-type="allergy"' in preferences
+    assert "An empty box means no allergies are saved" in preferences
+    assert 'placeholder="Type allergies here"' in preferences
+    assert "Peanuts, shellfish" not in preferences
     assert 'data-preference-type="exclusion"' in preferences
 
 

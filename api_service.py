@@ -74,6 +74,36 @@ _PROTEIN_CATEGORIES = {
     "protein", "seafood", "turkey",
 }
 
+_EXCLUSION_GROUPS = {
+    "shellfish": {
+        "shrimp", "prawns", "crab", "lobster", "crawfish", "crayfish",
+        "clams", "mussels", "oysters", "scallops",
+    },
+    "shell fish": {
+        "shrimp", "prawns", "crab", "lobster", "crawfish", "crayfish",
+        "clams", "mussels", "oysters", "scallops",
+    },
+    "crustaceans": {"shrimp", "prawns", "crab", "lobster", "crawfish", "crayfish"},
+    "mollusks": {"clams", "mussels", "oysters", "scallops"},
+    "peanuts": {"peanuts", "peanut", "peanut butter"},
+    "pork": {
+        "pork", "bacon", "ham", "prosciutto", "pancetta", "pork sausage",
+    },
+}
+
+
+def _expand_exclusions(values) -> list[str]:
+    """Expand household safety categories before any candidate is generated."""
+    expanded = []
+    for value in values or []:
+        name = _clean(value.get("name")) if isinstance(value, dict) else _clean(value)
+        if not name:
+            continue
+        for item in (name, *_EXCLUSION_GROUPS.get(_key(name), set())):
+            if _key(item) not in {_key(existing) for existing in expanded}:
+                expanded.append(item)
+    return expanded
+
 
 class APIContractError(ValueError):
     """Raised when a request cannot satisfy the public API contract."""
@@ -468,6 +498,7 @@ def _engine_request(payload: dict, db_path: str | Path):
             name = _clean(value.get("name")) if isinstance(value, dict) else _clean(value)
             if name and name not in excluded_items:
                 excluded_items.append(name)
+    excluded_items = _expand_exclusions(excluded_items)
     names = [item.name for item in resolved]
     equipment = [
         _clean(item.get("display_name", item.get("name"))) if isinstance(item, dict) else _clean(item)
