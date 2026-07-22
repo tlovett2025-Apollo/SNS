@@ -330,6 +330,18 @@ const SNS = (() => {
       equipment,
       meal_preferences: {
         household_members: members,
+        allergies: (saved.preferences || [])
+          .filter(item => item.preference_type === "allergy")
+          .map(item => item.target_value),
+        never_include: (saved.preferences || [])
+          .filter(item => ["medical_exclusion", "religious_exclusion", "exclusion"].includes(item.preference_type))
+          .map(item => item.target_value),
+        usually_avoid: (saved.preferences || [])
+          .filter(item => ["dislike", "avoid"].includes(item.preference_type))
+          .map(item => item.target_value),
+        favorite_directions: (saved.preferences || [])
+          .filter(item => ["preference", "favorite"].includes(item.preference_type))
+          .map(item => item.target_value),
         excluded_items: (saved.preferences || [])
           .filter(item => ["allergy", "medical_exclusion", "religious_exclusion", "exclusion"].includes(item.preference_type))
           .filter(item => ["never", "avoid"].includes(item.severity))

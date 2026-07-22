@@ -761,3 +761,33 @@ Impact:
 - Canned ingredients, condiments, beverages, and prepared meals carry distinct
   meal jobs and direction policies.
 - New scans create bounded enrichment work instead of uncontrolled CKB writes.
+
+
+Decision #0020
+
+Title:
+Round 6 gives safety absolute precedence over household preference
+
+Date:
+2026-07-22
+
+Decision:
+Household allergies, medical or religious exclusions, “never include,” and
+dietary constraints compile into hard ingredient exclusions before recipe
+generation. “Usually avoid” and favorites are distinct ranking signals. An
+avoid match lowers a safe candidate; a favorite raises a safe candidate. No
+preference score can offset a hard safety block.
+
+Safety categories expand into concrete ingredient identities before the recipe
+engine runs. Person-specific allergies and exclusions apply to the people
+selected for tonight; when no tonight selection exists, every saved household
+person remains in scope.
+
+Impact:
+
+- Shellfish reliably blocks shrimp before candidate generation.
+- Allergies and dislikes no longer share the same severity.
+- Vegan, vegetarian, gluten-free, and dairy-free constraints compile into
+  explicit launch exclusions.
+- Household favorites influence ordering without injecting random ingredients.
+- Each candidate carries an auditable household-fit result.

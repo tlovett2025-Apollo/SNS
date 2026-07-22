@@ -20,6 +20,7 @@ from household_inventory import replace_household_inventory, submit_pending_item
 from inventory_contract import InventoryContractError, normalize_inventory_lot
 from ko_behavior import default_form_for, resolve_behavior
 from meal_components import suggest_known_sides
+from household_fit import assess_candidate_fit, compile_household_fit
 from recipe_engine import build_recipe_from_candidate, generate_candidates
 
 
@@ -531,16 +532,10 @@ def _engine_request(payload: dict, db_path: str | Path):
                 foundations.append(item)
 
     preferences = snapshot["meal_preferences"]
-    excluded_items = []
-    for field in ("excluded_items", "exclusions", "ingredient_exclusions"):
-        values = preferences.get(field) or []
-        if isinstance(values, str):
-            values = [values]
-        for value in values:
-            name = _clean(value.get("name")) if isinstance(value, dict) else _clean(value)
-            if name and name not in excluded_items:
-                excluded_items.append(name)
-    excluded_items = _expand_exclusions(excluded_items)
+    household_fit_profile = compile_household_fit(
+        preferences, payload.get("people") or payload.get("selected_people")
+    )
+    excluded_items = list(household_fit_profile.hard_exclusions)
     names = [item.name for item in resolved]
     equipment = [
         _clean(item.get("display_name", item.get("name"))) if isinstance(item, dict) else _clean(item)
@@ -563,6 +558,8 @@ def _engine_request(payload: dict, db_path: str | Path):
         "available_items": names,
         "available_equipment": [name for name in equipment if name],
         "excluded_items": excluded_items,
+        "household_fit_profile": household_fit_profile,
+        "household_fit": household_fit_profile.to_dict(),
         "inventory_lots": snapshot["inventory_lots"],
         "foundation_names": [item.name for item in foundations],
         "component_forms": {
@@ -894,6 +891,23 @@ def _score_make_candidate(candidate: dict, engine_request: dict) -> dict:
     effort_target = _effort_target(effort_level)
     score = int(candidate.get("score") or 0)
     reasons = []
+    fit_profile = engine_request.get("household_fit_profile")
+    fit = assess_candidate_fit(candidate, fit_profile) if fit_profile else {
+        "safe": True, "blocked": [], "usually_avoid_matches": [],
+        "favorite_matches": [], "preference_adjustment": 0,
+        "people_in_scope": [],
+    }
+    candidate["household_fit"] = fit
+    if not fit["safe"]:
+        candidate["selection_score"] = -100000
+        candidate["selection_reasons"] = ["blocked by household safety settings"]
+        candidate["effort_label"] = _effort_label(effort)
+        return candidate
+    score += int(fit["preference_adjustment"])
+    if fit["favorite_matches"]:
+        reasons.append("matches a household favorite direction")
+    if fit["usually_avoid_matches"]:
+        reasons.append("contains something the household usually avoids")
     if effort <= effort_target:
         score += 12 + (effort_target - effort) * 3
         reasons.append(f"{_effort_label(effort).lower()} effort for tonight")
@@ -1238,6 +1252,7 @@ def _candidate_view(candidate: dict) -> dict:
         "foundation": candidate.get("foundation"),
         "cuisine": candidate.get("cuisine"),
         "orchestration": dict(candidate.get("orchestration") or {}),
+        "household_fit": dict(candidate.get("household_fit") or {}),
         "cooking_method": method,
         "match": _match_text(int(candidate.get("selection_score", candidate.get("score", 0)))),
         "summary": (
@@ -1481,6 +1496,9 @@ def _builder_candidates(payload: dict, db_path: str | Path):
             "Try changing the cooking environment or one ingredient."
         )
     candidate = candidates[0]
+    candidate["household_fit"] = assess_candidate_fit(
+        candidate, engine_request["household_fit_profile"]
+    )
     # Small scheduling overruns are estimates and should not reject an
     # otherwise valid ordinary meal. A material shortfall (the long-cook case
     # this guard exists for) needs an explicit planning-ahead resolution.
@@ -1542,7 +1560,9 @@ def _raw_candidates(payload: dict, db_path: str | Path):
                 _slug(candidate.get("vegetable")), _slug(candidate.get("foundation")),
                 _slug(candidate.get("cuisine")), str(index + 1), str(option_index + 1),
             )))
-            pool.append(_score_make_candidate(candidate, engine_request))
+            scored = _score_make_candidate(candidate, engine_request)
+            if scored.get("household_fit", {}).get("safe", True):
+                pool.append(scored)
     # Do not manufacture variety by offering a meal wildly above tonight's
     # stated capacity. A small stretch remains visible; a different kind of
     # evening should not.

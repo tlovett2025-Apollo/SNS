@@ -14,8 +14,8 @@ training pipeline without reopening the architecture.
    attention interlacing, equipment concurrency, holding, and service.
 5. **Retail products — complete.** Barcode product identity, eight packaged and
    convenience-food kinds, directions, provenance, and household confirmation.
-6. **Household fit and safety.** Allergies, exclusions, dietary constraints,
-   preference strength, substitutions, and person-specific needs.
+6. **Household fit and safety — complete.** Allergies, exclusions, dietary
+   constraints, preference strength, and person-specific meal scope.
 7. **Coverage and learning operations.** Generated matrices, clustered failure
    review, enrichment queues, promotion gates, monitoring, and release policy.
 

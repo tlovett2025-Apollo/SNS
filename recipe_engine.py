@@ -986,6 +986,7 @@ def build_recipe_from_candidate(candidate):
         "coherence_omissions": list(candidate.get("coherence_omissions") or []),
         "component_plan": dict(candidate.get("component_plan") or {}),
         "orchestration": dict(candidate.get("orchestration") or {}),
+        "household_fit": dict(candidate.get("household_fit") or {}),
         "validation": validation,
         "summary": f"{candidate.get('label')} · {candidate.get('energy')} energy · {candidate.get('budget')} · {candidate.get('minutes')} min · serves {candidate.get('servings', 4)}",
     }
