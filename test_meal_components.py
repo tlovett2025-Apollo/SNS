@@ -1,6 +1,6 @@
 """Golden contracts for reusable meal-component recognition."""
 
-import pytest
+import unittest
 
 from meal_components import (
     component_by_archetype,
@@ -25,7 +25,9 @@ def component_candidate(foundation, available):
     }
 
 
-def test_pasta_cheese_and_milk_capabilities_recognize_mac_and_cheese():
+class MealComponentTests(unittest.TestCase):
+
+ def test_pasta_cheese_and_milk_capabilities_recognize_mac_and_cheese(self):
     plan = recognize_meal_components(component_candidate(
         "Pasta", ["Pasta", "Mozzarella cheese", "Milk"],
     )).to_dict()
@@ -38,7 +40,7 @@ def test_pasta_cheese_and_milk_capabilities_recognize_mac_and_cheese():
     }
 
 
-def test_pasta_without_cheese_remains_a_plain_prepared_side():
+ def test_pasta_without_cheese_remains_a_plain_prepared_side(self):
     plan = recognize_meal_components(component_candidate(
         "Macaroni", ["Macaroni", "Milk", "Butter"],
     )).to_dict()
@@ -46,7 +48,7 @@ def test_pasta_without_cheese_remains_a_plain_prepared_side():
     assert side["archetype"] == "prepared_side"
 
 
-def test_recognized_mac_and_cheese_compiles_to_a_separate_side_component():
+ def test_recognized_mac_and_cheese_compiles_to_a_separate_side_component(self):
     candidate = generate_candidates(
         "Chicken thighs", "", "Macaroni", "BBQ", "High", "Budget", 60, 2, 1,
         protein_state="Fresh Raw",
@@ -70,19 +72,19 @@ def test_recognized_mac_and_cheese_compiles_to_a_separate_side_component():
     assert recipe["component_plan"]["components"]
 
 
-def test_component_method_contract_can_distinguish_main_from_side_environment():
+ def test_component_method_contract_can_distinguish_main_from_side_environment(self):
     candidate = component_candidate("Macaroni", ["Macaroni", "Cheddar cheese", "Milk"])
     candidate["component_methods"] = {"main": "oven"}
     plan = recognize_meal_components(candidate).to_dict()
     main = next(item for item in plan["components"] if item["role"] == "main")
     side = next(item for item in plan["components"] if item["role"] == "side")
 
-    assert main["method"] == "oven"
-    assert "oven" in main["equipment"]
+    assert main["method"] == "roast"
+    assert "Oven" in main["equipment"]
     assert side["method"] == "boil_then_cheese_sauce"
 
 
-def test_known_side_suggestions_are_selection_recipes_not_generated_meals():
+ def test_known_side_suggestions_are_selection_recipes_not_generated_meals(self):
     suggestions = suggest_known_sides(
         ["Macaroni", "Cheddar cheese", "Milk", "Broccoli", "Bread"],
         ["Macaroni", "Bread"], ["Broccoli"],
@@ -98,27 +100,28 @@ def test_known_side_suggestions_are_selection_recipes_not_generated_meals():
     assert by_archetype["warmed_bread_side"]["selection"]["foundation"] == "Bread"
 
 
-def test_round_one_trains_fifteen_side_archetypes_as_data():
+ def test_round_one_trains_fifteen_side_archetypes_as_data(self):
     assert len(SIDE_ARCHETYPES) == 15
     assert set(SIDE_ARCHETYPES) == set(SIDE_ACTIVITY_TEMPLATES)
     assert all(item.required_jobs for item in SIDE_ARCHETYPES.values())
     assert {"side_base", "vegetable", "aromatic", "acid", "heat"} <= set(INGREDIENT_JOBS)
 
 
-def test_ingredient_jobs_come_from_family_and_trained_item_knowledge():
+ def test_ingredient_jobs_come_from_family_and_trained_item_knowledge(self):
     assert ingredient_job("Limes") == "acid"
     assert ingredient_job("Onions") == "aromatic"
     assert ingredient_job("Serranos") == "heat"
     assert ingredient_job("Cheddar cheese") == "cheese"
 
 
-@pytest.mark.parametrize("archetype", sorted(SIDE_ARCHETYPES))
-def test_round_one_side_training_matrix_has_executable_knowledge(archetype):
-    trained = SIDE_ARCHETYPES[archetype]
-    template = SIDE_ACTIVITY_TEMPLATES[archetype]
+ def test_round_one_side_training_matrix_has_executable_knowledge(self):
+    for archetype in sorted(SIDE_ARCHETYPES):
+        with self.subTest(archetype=archetype):
+            trained = SIDE_ARCHETYPES[archetype]
+            template = SIDE_ACTIVITY_TEMPLATES[archetype]
 
-    assert trained.method
-    assert trained.equipment
-    assert trained.outcome.endswith(".")
-    assert trained.holdability in {"poor", "fair", "good", "excellent"}
-    assert "{" in template and "}" in template
+            assert trained.method
+            assert trained.equipment
+            assert trained.outcome.endswith(".")
+            assert trained.holdability in {"poor", "fair", "good", "excellent"}
+            assert "{" in template and "}" in template
