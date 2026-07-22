@@ -1009,6 +1009,7 @@ def _concept_title(candidate: dict) -> str:
 
 def _candidate_ingredients(candidate: dict) -> list[str]:
     ingredients = []
+    coherence_omissions = {_key(item) for item in candidate.get("coherence_omissions") or []}
     proteins = [
         item.get("name") for item in candidate.get("proteins") or []
         if isinstance(item, dict)
@@ -1019,7 +1020,7 @@ def _candidate_ingredients(candidate: dict) -> list[str]:
         candidate.get("foundation"),
     ):
         name = _clean(item)
-        if name and name not in ingredients:
+        if name and _key(name) not in coherence_omissions and name not in ingredients:
             ingredients.append(name)
 
     method = candidate.get("cooking_method", candidate.get("strategy"))
@@ -1047,7 +1048,7 @@ def _candidate_ingredients(candidate: dict) -> list[str]:
                 continue
         else:
             name = _clean(requirement)
-        if name and not any(_key(existing) == _key(name) for existing in ingredients):
+        if name and _key(name) not in coherence_omissions and not any(_key(existing) == _key(name) for existing in ingredients):
             ingredients.append(name)
     return ingredients
 
@@ -1095,6 +1096,10 @@ def _candidate_ingredient_lines(
         requirement = requirements.get(key)
         planned = (candidate.get("quantity_plan") or {}).get(key, {})
         quantity = _clean(planned.get("display")) or (_clean(requirement.get("quantity")) if requirement else "")
+        if "lime" in name.lower() and "lemon" in quantity.lower():
+            quantity = quantity.lower().replace("lemons", "lime").replace("lemon", "lime")
+        elif "lemon" in name.lower() and "lime" in quantity.lower():
+            quantity = quantity.lower().replace("limes", "lemon").replace("lime", "lemon")
         if float(planned.get("shortfall") or 0) > 0:
             available = float(planned.get("available") or 0)
             target = float(planned.get("planned") or 0)
@@ -1532,6 +1537,13 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
         "ingredient_adjustments": [
             item for item in recipe.get("inventory_requirements") or []
             if item.get("status") in {"Substitute", "Omit"}
+        ] + [
+            {
+                "name": item,
+                "status": "Omit",
+                "omission_consequence": "It does not support the selected cuisine and meal identity.",
+            }
+            for item in recipe.get("coherence_omissions") or []
         ],
         "quantity_note": recipe.get("quantity_note") or "",
         "recipe_validation": recipe.get("validation") or {},

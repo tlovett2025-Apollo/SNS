@@ -73,6 +73,8 @@ def validate_recipe(candidate: dict, plan_items: list[dict]) -> dict:
 
     for name in candidate.get("selected_extras") or []:
         name = _clean(name)
+        if _key(name) in {_key(item) for item in candidate.get("coherence_omissions") or []}:
+            continue
         requirement = next((
             item for item in candidate.get("inventory_requirements") or []
             if isinstance(item, dict) and _key(item.get("name")) == _key(name)

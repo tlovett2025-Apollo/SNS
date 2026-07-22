@@ -487,3 +487,32 @@ Impact:
 - Equipment substitutions are stated where a common tool may be absent.
 - Selected extras receive a purposeful component role before sauce finishing.
 
+
+Decision #0011
+
+Title:
+Meal identity governs execution, helpers, and attention—not only the title
+
+Date:
+2026-07-22
+
+Decision:
+Before publication, SNS applies a meal-coherence gate that reconciles the dish
+family, cuisine, ingredient forms, side roles, safety endpoints, equipment, and
+pantry helpers. A named preparation such as a hash controls cut size and serving
+structure. Pantry ingredients that conflict with the selected identity are
+omitted with an explanation.
+
+Elapsed activity windows may overlap for one cook when their verified attention
+loads can be interlaced. The single-cook constraint applies to simultaneous
+attention demand, not to passive oven, burner, or appliance occupancy.
+
+Impact:
+
+- Substitutions rewrite units, ingredient names, and downstream instructions.
+- Protein safety language names only the selected protein’s endpoint.
+- Bread sides remain alongside unless the meal shape explicitly uses them as a
+  wrapper or base.
+- Equipment is emitted only for activities present in the final graph.
+- Dish identity can specialize generic KO preparation without changing the KO’s
+  underlying ingredient facts.

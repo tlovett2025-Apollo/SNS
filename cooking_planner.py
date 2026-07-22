@@ -86,6 +86,17 @@ def _extras_instruction(candidate: dict, strategy: str, phase: str = "finish") -
         and _clean(item).lower() not in sauce_keys
         and _clean(item).lower() != _clean(candidate.get("soup_liquid")).lower()
     ]
+    cuisine = _clean(candidate.get("cuisine")).lower()
+    incompatible = [
+        item for item in extras
+        if item.lower() == "salsa" and any(value in cuisine for value in ("italian", "mediterranean"))
+    ]
+    if incompatible:
+        omissions = candidate.setdefault("coherence_omissions", [])
+        for item in incompatible:
+            if item not in omissions:
+                omissions.append(item)
+        extras = [item for item in extras if item not in incompatible]
     if not extras:
         return ""
     family_codes = {
@@ -247,10 +258,35 @@ def _resolved_sauce_prep(candidate: dict, sauce_profile) -> str:
             else requirement.get("name")
         ) if requirement else ingredient.name
         quantity = _clean(requirement.get("quantity")) if requirement else ingredient.quantity
+        if "lime" in name.lower() and "lemon" in quantity.lower():
+            quantity = re.sub(r"\blemons?\b", "lime", quantity, flags=re.IGNORECASE)
+        elif "lemon" in name.lower() and "lime" in quantity.lower():
+            quantity = re.sub(r"\blimes?\b", "lemon", quantity, flags=re.IGNORECASE)
         if not name or not quantity or "to taste" in quantity.lower() or "after tasting" in quantity.lower():
             continue
-        measurements.append(f"Measure {quantity} {name}.")
+        singular_name = name.rstrip("s").lower()
+        measurements.append(
+            f"Measure {quantity}."
+            if singular_name and singular_name in quantity.lower()
+            else f"Measure {quantity} {name}."
+        )
     return " ".join(measurements)
+
+
+def _resolved_sauce_finish(candidate: dict, sauce_profile) -> str:
+    instruction = sauce_profile.cook_instruction if sauce_profile else ""
+    for ingredient in sauce_profile.ingredients if sauce_profile else []:
+        requirement = _requirement(candidate, ingredient.name)
+        if not requirement or requirement.get("status") != "Substitute":
+            continue
+        original = ingredient.name.rstrip("s")
+        resolved = _clean(requirement.get("resolved_name")).rstrip("s")
+        if original and resolved:
+            instruction = re.sub(
+                rf"\b{re.escape(original)}s?\b", resolved.lower(), instruction,
+                flags=re.IGNORECASE,
+            )
+    return instruction
 
 
 def _resolved_braise_sauce_prep(candidate: dict, sauce_profile) -> str:
@@ -1322,7 +1358,7 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             finish_instruction = (
                 _comfort_sauce_finish(candidate, sauce_profile.cook_instruction)
                 if sauce_profile and sauce_profile.name == "simple comfort pan sauce"
-                else sauce_profile.cook_instruction if sauce_profile
+                else _resolved_sauce_finish(candidate, sauce_profile) if sauce_profile
                 else f"Taste, adjust seasoning, and finish {sauce}; use the browned cooking flavor when available."
             )
         finish_instruction = " ".join(filter(None, (
@@ -2050,6 +2086,67 @@ def consolidate_composed_plate_components(
     return rewritten
 
 
+def apply_meal_coherence_gate(
+    activities: List[KitchenActivity], candidate: dict,
+) -> List[KitchenActivity]:
+    """Make public instructions honor the claimed dish identity and component roles."""
+    dish_family = _clean(candidate.get("dish_family")).lower()
+    title = _clean(candidate.get("title")).lower()
+    is_hash = dish_family == "hash" or " hash" in title
+    foundation = _clean(candidate.get("foundation"))
+    foundation_codes = set(
+        get_ingredient_profile(foundation, "foundation").behavior_family_codes
+    ) if foundation else set()
+
+    for activity in activities:
+        if is_hash and activity.activity_type in {"prep", "launch prep"}:
+            for vegetable in _split_joined_items(candidate.get("vegetable")):
+                if "steam-friendly" not in set(
+                    get_ingredient_profile(vegetable, "vegetable").physical_traits
+                ):
+                    continue
+                pattern = rf"Trim {re.escape(vegetable)} and cut it into evenly sized florets, wedges, or halves; include tender stems"
+                activity.instruction = re.sub(
+                    pattern,
+                    f"Chop {vegetable} into even 1/2-inch pieces so it cooks as part of the hash",
+                    activity.instruction,
+                )
+        if _clean(candidate.get("protein")).lower() == "ground beef":
+            activity.instruction = activity.instruction.replace(
+                "Beef reaches 160°F; poultry reaches 165°F in the center of the thickest clump",
+                "Ground beef reaches 160°F in the center of several thick clumps",
+            )
+        if (
+            foundation
+            and "bread_wrap" in foundation_codes
+            and activity.activity_type == "finish and serve"
+        ):
+            activity.instruction = (
+                f"Spoon the finished hash onto plates. Serve {foundation} warm alongside it, "
+                "with the pan sauce spooned over the hash rather than the bread."
+            )
+        if (
+            foundation
+            and foundation.lower() == "biscuits"
+            and activity.component == foundation
+            and activity.activity_type in {"cook", "warm", "reheat"}
+        ):
+            activity.instruction = (
+                "Place Biscuits on a small sheet pan and warm them in a 350°F oven until heated through, "
+                "then cover loosely with a clean towel until serving."
+            )
+            activity.equipment = "oven"
+        if foundation and "bread_wrap" in foundation_codes and activity.activity_type in {"prep", "launch prep"}:
+            form = _clean((candidate.get("component_forms") or {}).get(foundation)).lower()
+            if "frozen" not in form:
+                activity.instruction = re.sub(
+                    rf"Separate the amount of {re.escape(foundation)} needed and thaw it first when frozen",
+                    f"Set aside the amount of {foundation} needed for serving",
+                    activity.instruction,
+                )
+    return activities
+
+
 def apply_vegetable_relationship_intelligence(
     activities: List[KitchenActivity], candidate: dict,
 ) -> List[KitchenActivity]:
@@ -2423,12 +2520,12 @@ def assign_available_equipment(activities: List[KitchenActivity], candidate: dic
 
     foundation_name = _clean(candidate.get("foundation"))
     rice_device = choose_rice_equipment(available)
-    candidate["selected_rice_equipment"] = rice_device
     foundation_profile = get_ingredient_profile(foundation_name, "foundation") if foundation_name else None
     rice_capable = bool(
         set(getattr(foundation_profile, "behavior_family_codes", ()))
         & {"white_rice", "brown_rice"}
     )
+    candidate["selected_rice_equipment"] = rice_device if rice_capable else ""
     if rice_capable and rice_device != "stovetop":
         removed = [activity for activity in activities if activity.component == foundation_name]
         removed_ids = {_activity_id(activity) for activity in removed}
@@ -2484,6 +2581,7 @@ def build_activity_graph(candidate: dict) -> Dict[str, KitchenActivity]:
     activities = consolidate_integrated_skillet_reheating(activities, candidate)
     activities = constrain_single_skillet_environment(activities, candidate)
     activities = consolidate_final_service(activities)
+    activities = apply_meal_coherence_gate(activities, candidate)
     for activity in activities:
         activity.activity_id = _activity_id(activity)
         if activity.activity_id in graph:
@@ -3248,6 +3346,9 @@ def generate_equipment_list(candidate: dict) -> List[str]:
     if "small saucepan" in instructions:
         add("1- to 2-quart saucepan")
         add("Whisk")
+    if any((item.activity.equipment or "").lower() == "oven" for item in schedule):
+        add("Oven")
+        add("Small sheet pan")
     if any(
         _clean(item.get("state")).lower().replace("-", " ") in {"fresh raw", "frozen raw"}
         for item in candidate.get("proteins") or [] if isinstance(item, dict)

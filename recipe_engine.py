@@ -239,6 +239,8 @@ def _quantity_plan(
         elif basis == "pieces":
             pieces = max(1, ceil(effective * amount))
             label = quantity_label or "piece"
+            if key == "biscuits":
+                label = "biscuit"
             plan[key] = {
                 "display": f"{pieces} {label}{'' if pieces == 1 else 's'}",
                 "planned": pieces, "available": available,
@@ -262,6 +264,8 @@ def _quantity_plan(
         elif basis == "whole_count":
             pieces = max(1, ceil(effective * amount))
             label = quantity_label or "piece"
+            if key == "biscuits":
+                label = "biscuit"
             plan[key] = {
                 "display": f"{pieces} {label}{'' if pieces == 1 else 's'}",
                 "planned": pieces, "available": available,
@@ -928,6 +932,7 @@ def build_recipe_from_candidate(candidate):
         "serving_styles": list(candidate.get("serving_styles") or []),
         "experience_overlays": list(candidate.get("experience_overlays") or []),
         "quantity_note": candidate.get("quantity_note") or "",
+        "coherence_omissions": list(candidate.get("coherence_omissions") or []),
         "validation": validation,
         "summary": f"{candidate.get('label')} · {candidate.get('energy')} energy · {candidate.get('budget')} · {candidate.get('minutes')} min · serves {candidate.get('servings', 4)}",
     }

@@ -167,10 +167,41 @@ def test_composed_plate_steams_compatible_vegetables_and_names_exact_equipment()
     assert "Add Broccoli & Cauliflower, cover, and steam together" in actions
     assert "add Onions" in actions
     assert "sprinkle with Cheddar cheese" in actions
-    assert "Serve Salsa on top or alongside" in actions
+    assert "Salsa" not in actions
+    assert recipe["coherence_omissions"] == ["Salsa"]
     assert "Transfer Broccoli to a plate" not in actions
     assert "Transfer Cauliflower to a plate" not in actions
     assert "3-quart saucepan or pot with a tight-fitting lid" in recipe["equipment"]
     assert "Steamer basket that fits inside the saucepan or pot (preferred, but optional)" in recipe["equipment"]
     assert "12-inch skillet" in recipe["equipment"]
     assert "Instant-read food thermometer" in recipe["equipment"]
+
+
+def test_hash_identity_controls_cuts_side_service_safety_and_equipment():
+    value = generate_candidates(
+        "Ground beef", "Broccoli & Cauliflower", "Biscuits", "Mediterranean",
+        "High", "Budget", 45, 2, 1,
+        vegetable_names=["Broccoli", "Cauliflower"], protein_state="Frozen Raw",
+        available_items=[
+            "Ground beef", "Broccoli", "Biscuits", "Olive oil", "Chicken broth",
+            "Limes", "Garlic powder", "Black pepper",
+        ],
+        available_equipment=["Pressure cooker", "Stovetop", "Oven"],
+        requested_method="skillet", meal_structure="integrated",
+    )[0]
+    value["dish_family"] = "hash"
+    value["title"] = "Mediterranean Ground beef, Broccoli & Cauliflower Hash with Biscuits"
+    recipe = build_recipe_from_candidate(value)
+    actions = " ".join(recipe["action_steps"])
+
+    assert "Chop Broccoli into even 1/2-inch pieces" in actions
+    assert "Chop Cauliflower into even 1/2-inch pieces" in actions
+    assert "Ground beef reaches 160°F" in actions
+    assert "poultry reaches" not in actions
+    assert "Serve Biscuits warm alongside" in actions
+    assert "Measure 1 lime." in actions
+    assert "add lime to taste" in actions
+    assert value["quantity_plan"]["biscuits"]["display"] == "4 biscuits"
+    assert "Electric pressure cooker with locking lid and pressure valve" not in recipe["equipment"]
+    assert "Oven" in recipe["equipment"]
+    assert "Small sheet pan" in recipe["equipment"]
