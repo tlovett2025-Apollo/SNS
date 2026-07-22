@@ -145,3 +145,32 @@ def test_selected_sauce_has_an_executable_timeline_activity():
     assert sauce.equipment in {"burner", "skillet"}
     assert any(word in sauce.instruction.lower() for word in ("simmer", "coat", "thicken"))
     assert "cook skillet:meal" in sauce.depends_on
+
+
+def test_composed_plate_steams_compatible_vegetables_and_names_exact_equipment():
+    value = generate_candidates(
+        "Ground beef", "Broccoli & Cauliflower & Onions", "Jasmine rice", "Italian",
+        "High", "Budget", 90, 2, 1,
+        vegetable_names=["Broccoli", "Cauliflower", "Onions"],
+        protein_state="Frozen Raw",
+        available_items=[
+            "Ground beef", "Broccoli", "Onions", "Jasmine rice", "Tomato sauce",
+            "Olive oil", "Garlic powder", "Black pepper", "Cheddar cheese", "Salsa",
+        ],
+        selected_extras=["Salsa", "Cheddar cheese"],
+        available_equipment=["Pressure cooker", "Stovetop"],
+        requested_method="skillet", meal_structure="composed_plate",
+    )[0]
+    recipe = build_recipe_from_candidate(value)
+    actions = " ".join(recipe["action_steps"])
+
+    assert "Add Broccoli & Cauliflower, cover, and steam together" in actions
+    assert "add Onions" in actions
+    assert "sprinkle with Cheddar cheese" in actions
+    assert "Serve Salsa on top or alongside" in actions
+    assert "Transfer Broccoli to a plate" not in actions
+    assert "Transfer Cauliflower to a plate" not in actions
+    assert "3-quart saucepan or pot with a tight-fitting lid" in recipe["equipment"]
+    assert "Steamer basket that fits inside the saucepan or pot (preferred, but optional)" in recipe["equipment"]
+    assert "12-inch skillet" in recipe["equipment"]
+    assert "Instant-read food thermometer" in recipe["equipment"]

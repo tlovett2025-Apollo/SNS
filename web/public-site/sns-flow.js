@@ -2151,6 +2151,9 @@ const SNS = (() => {
       `<li><span>${escapeHtml(item.name)}</span>${item.amount ? `<strong>${escapeHtml(item.amount)}</strong>` : ""}</li>`
     ).join("");
     if (groceryEmpty) groceryEmpty.hidden = groceryItems.length > 0;
+    const equipmentList = document.querySelector("[data-recipe-equipment]");
+    if (equipmentList) equipmentList.innerHTML = (recipe.equipment || [])
+      .map(item => `<li>${escapeHtml(item)}</li>`).join("");
     const kitchenItems = (recipe.inventory_requirements || [])
       .filter(item => ["Substitute", "Omit"].includes(item?.status))
       .filter(item => !(item.status === "Substitute" && [

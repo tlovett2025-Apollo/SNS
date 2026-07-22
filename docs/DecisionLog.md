@@ -457,3 +457,33 @@ Impact:
 - Deliberately verified cook-from-frozen profiles can be added later.
 
 
+Decision #0010
+
+Title:
+Plan shared components first and publish exact cooking equipment
+
+Date:
+2026-07-22
+
+Decision:
+SNS recipes publish a customer-facing equipment list with concrete vessels and
+tools, not only internal heat-source lanes. Compatible ingredients may form a
+shared component when their cooking environment and doneness windows agree.
+
+The first trained case combines steam-friendly vegetables in one covered pot
+and steamer basket, allows a covered-pot fallback, joins appropriate aromatics
+to ground meat, and reserves melting cheese for the vegetable side instead of
+automatically stirring it into the protein sauce.
+
+Reason:
+Serially cooking every selected ingredient in one skillet minimizes vessel count
+but can produce unnatural food and inflated active time. A meal planner must
+optimize coherent components, texture, effort, and available equipment together.
+
+Impact:
+
+- Recipes expose exact vessel and tool requirements before the cooking plan.
+- Shared vegetable behaviors replace redundant per-ingredient cooking windows.
+- Equipment substitutions are stated where a common tool may be absent.
+- Selected extras receive a purposeful component role before sauce finishing.
+

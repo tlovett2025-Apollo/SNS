@@ -1502,6 +1502,7 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
         "title": recipe.get("name") or classification["title"],
         "summary": recipe.get("summary") or classification["summary"],
         "ingredients": ingredients,
+        "equipment": list(recipe.get("equipment") or []),
         "steps": list(recipe.get("action_steps") or []),
         "instructions": list(recipe.get("instructions") or []),
         "plan_items": list(recipe.get("plan_items") or []),

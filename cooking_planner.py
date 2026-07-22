@@ -61,6 +61,16 @@ def _join(items):
     return " & ".join(cleaned)
 
 
+def _steam_side_vegetables(candidate: dict) -> List[str]:
+    """Return selected vegetables that can share a covered steaming vessel."""
+    return [
+        name for name in _split_joined_items(candidate.get("vegetable"))
+        if "steam-friendly" in set(
+            get_ingredient_profile(name, "vegetable").physical_traits
+        )
+    ]
+
+
 def _extras_instruction(candidate: dict, strategy: str, phase: str = "finish") -> str:
     """Give every user-selected pantry/fridge extra an explicit job."""
     sauce_profile = get_sauce_profile(_clean(candidate.get("sauce")))
@@ -82,15 +92,29 @@ def _extras_instruction(candidate: dict, strategy: str, phase: str = "finish") -
         item: set(get_ingredient_profile(item, "ingredient").behavior_family_codes)
         for item in extras
     }
+    has_side_cheese = any("melting_cheese" in family_codes[item] for item in extras)
+    reserved_for_vegetable_side = {
+        item for item in extras
+        if _clean(candidate.get("meal_structure")) == "composed_plate"
+        and _steam_side_vegetables(candidate)
+        and (
+            "melting_cheese" in family_codes[item]
+            or (has_side_cheese and "milk_cream" in family_codes[item])
+        )
+    }
     table_families = (
         {"cultured_creamy"}
         if strategy == "soup"
         else {"prepared_condiment", "cultured_creamy"}
     )
-    table = [item for item in extras if family_codes[item] & table_families]
+    table = [
+        item for item in extras
+        if family_codes[item] & table_families
+        or item.lower() in {"salsa", "hot sauce", "ketchup", "mustard"}
+    ]
     cooking = [
         item for item in extras
-        if item not in table
+        if item not in table and item not in reserved_for_vegetable_side
         and not (strategy == "skillet" and "cooking_fat" in family_codes[item])
     ]
     parts = []
@@ -1878,6 +1902,154 @@ def consolidate_skillet_vegetables(
     return rewritten
 
 
+def consolidate_composed_plate_components(
+    activities: List[KitchenActivity], candidate: dict,
+) -> List[KitchenActivity]:
+    """Build natural shared components for a composed stovetop meal.
+
+    Steam-friendly vegetables share one covered pot instead of taking serial
+    trips through a skillet. Aromatics may join ground meat when that produces
+    the intended sauce base without sacrificing a distinct vegetable side.
+    """
+    if (
+        _strategy(candidate) != "skillet"
+        or _clean(candidate.get("meal_structure")) != "composed_plate"
+    ):
+        return activities
+
+    steam_names = _steam_side_vegetables(candidate)
+    steam_activities = [
+        activity for activity in activities
+        if activity.component in steam_names
+        and activity.activity_type in {"cook", "saute"}
+        and (activity.equipment or "").lower() == "burner"
+    ]
+    replacements: List[KitchenActivity] = []
+    removed: List[KitchenActivity] = []
+    replacement_ids: Dict[str, str] = {}
+
+    if len(steam_activities) >= 2:
+        old_ids = {_activity_id(activity) for activity in steam_activities}
+        dependencies = list(dict.fromkeys(
+            dependency
+            for activity in steam_activities
+            for dependency in activity.depends_on
+            if dependency not in old_ids
+        ))
+        extras = [_clean(item) for item in candidate.get("selected_extras") or []]
+        cheese = next((
+            item for item in extras
+            if "melting_cheese" in set(
+                get_ingredient_profile(item, "ingredient").behavior_family_codes
+            )
+        ), "")
+        milk = next((
+            item for item in extras
+            if "milk_cream" in set(
+                get_ingredient_profile(item, "ingredient").behavior_family_codes
+            )
+        ), "")
+        cheese_finish = ""
+        extra_minutes = 0
+        if cheese and milk:
+            cheese_finish = (
+                f" Transfer the vegetables to a serving bowl. In a small saucepan, warm {milk} gently; "
+                f"remove it from direct heat and whisk in {cheese} a little at a time until smooth. "
+                "Spoon the cheese sauce over the vegetables."
+            )
+            extra_minutes = 4
+        elif cheese:
+            cheese_finish = (
+                f" Transfer the vegetables to a serving bowl, sprinkle with {cheese}, "
+                "and cover briefly so the residual heat melts it."
+            )
+        shared = _planner_activity(
+            "steam vegetable side",
+            (
+                "Fit a steamer basket inside a 3-quart saucepan and add about 1 inch of water, "
+                "keeping the water below the basket. If you do not have a basket, put the vegetables "
+                "directly in the saucepan with 1/2 inch of water instead. Bring it to a boil. "
+                f"Add {_join(steam_names)}, cover, and steam together for 6–8 minutes. "
+                "Stop when a fork enters the thickest pieces with slight resistance and no raw crunch."
+                + cheese_finish
+            ),
+            minutes=8 + extra_minutes,
+            human_busy=True,
+            stage="middle",
+            depends_on=dependencies,
+            equipment="burner",
+        )
+        shared.attention_load = .45
+        shared.activity_id = "steam vegetable side:meal"
+        replacements.append(shared)
+        removed.extend(steam_activities)
+        replacement_ids.update({old_id: shared.activity_id for old_id in old_ids})
+
+    protein = _clean(candidate.get("protein"))
+    protein_profile = get_ingredient_profile(protein, "protein") if protein else None
+    is_ground = "ground" in set(getattr(protein_profile, "physical_traits", ()))
+    aromatic_names = [
+        name for name in _split_joined_items(candidate.get("vegetable"))
+        if name not in steam_names
+        and "joins-sauce-base" in set(
+            get_ingredient_profile(name, "vegetable").behavior_traits
+        )
+    ]
+    protein_cook = next((
+        activity for activity in activities
+        if activity.component == protein and activity.activity_type == "cook"
+    ), None)
+    aromatic_activities = [
+        activity for activity in activities
+        if activity.component in aromatic_names
+        and activity.activity_type in {"cook", "saute"}
+        and (activity.equipment or "").lower() == "burner"
+    ]
+    if is_ground and protein_cook and aromatic_activities:
+        grouped = [protein_cook, *aromatic_activities]
+        old_ids = {_activity_id(activity) for activity in grouped}
+        dependencies = list(dict.fromkeys(
+            dependency for activity in grouped for dependency in activity.depends_on
+            if dependency not in old_ids
+        ))
+        endpoint = resolve_behavior(
+            protein, "protein", _clean(candidate.get("protein_state")), "skillet", DB_PATH
+        ).method
+        doneness = endpoint.doneness_cue.rstrip(".") if endpoint else "the meat reaches its verified safe temperature"
+        shared = _planner_activity(
+            "cook meat and aromatics",
+            (
+                f"Heat a 12-inch skillet over medium-high heat. Add {protein} and break it into small crumbles. "
+                f"After about 3 minutes, add {_join(aromatic_names)} and continue cooking until softened and {doneness}. "
+                "Color alone is not the safety test. Drain only excess fat, leaving a light coating for the sauce."
+            ),
+            minutes=max(10, int(protein_cook.minutes or 0)),
+            human_busy=True,
+            stage="middle",
+            depends_on=dependencies,
+            equipment="burner",
+        )
+        shared.attention_load = max(float(item.attention_load or 0) for item in grouped)
+        shared.activity_id = "cook meat and aromatics:meal"
+        replacements.append(shared)
+        removed.extend(grouped)
+        replacement_ids.update({old_id: shared.activity_id for old_id in old_ids})
+
+    if not removed:
+        return activities
+    rewritten = []
+    for activity in activities:
+        if activity in removed:
+            continue
+        activity.depends_on = list(dict.fromkeys(
+            replacement_ids.get(dependency, dependency)
+            for dependency in activity.depends_on
+        ))
+        rewritten.append(activity)
+    rewritten.extend(replacements)
+    return rewritten
+
+
 def apply_vegetable_relationship_intelligence(
     activities: List[KitchenActivity], candidate: dict,
 ) -> List[KitchenActivity]:
@@ -2306,6 +2478,7 @@ def build_activity_graph(candidate: dict) -> Dict[str, KitchenActivity]:
     activities = apply_protein_role_intelligence(activities, candidate)
     activities = apply_vegetable_relationship_intelligence(activities, candidate)
     activities = stage_ready_protein_after_sauce(activities, candidate)
+    activities = consolidate_composed_plate_components(activities, candidate)
     activities = clarify_composed_skillet_transfers(activities, candidate)
     activities = consolidate_skillet_vegetables(activities, candidate)
     activities = consolidate_integrated_skillet_reheating(activities, candidate)
@@ -3040,6 +3213,51 @@ def generate_human_plan_items(candidate: dict) -> List[dict]:
 
     items.append({"kind": "info", "text": completion_message(candidate)})
     return items
+
+
+def generate_equipment_list(candidate: dict) -> List[str]:
+    """Consolidate activity requirements into concrete customer-facing tools."""
+    schedule = build_kitchen_lane_schedule(candidate)
+    instructions = " ".join(item.activity.instruction for item in schedule).lower()
+    activity_types = {item.activity.activity_type for item in schedule}
+    servings = max(1, int(candidate.get("servings") or 4))
+    equipment: List[str] = []
+
+    def add(item: str):
+        if item and item not in equipment:
+            equipment.append(item)
+
+    rice_device = _clean(candidate.get("selected_rice_equipment"))
+    if rice_device == "pressure cooker":
+        add("Electric pressure cooker with locking lid and pressure valve")
+    elif rice_device == "rice cooker":
+        add("Rice cooker with inner pot and lid")
+    elif rice_device == "microwave":
+        add("Large microwave-safe bowl with vented cover")
+
+    if "steam vegetable side" in activity_types:
+        pot_size = "3-quart" if servings <= 4 else "4- to 5-quart"
+        add(f"{pot_size} saucepan or pot with a tight-fitting lid")
+        add("Steamer basket that fits inside the saucepan or pot (preferred, but optional)")
+    if "skillet" in instructions or any(
+        value in activity_types for value in {"cook skillet", "cook meat and aromatics"}
+    ):
+        skillet_size = "12-inch" if servings <= 4 else "large 14-inch or deep"
+        add(f"{skillet_size} skillet")
+        add("Wooden spoon or heat-safe spatula")
+    if "small saucepan" in instructions:
+        add("1- to 2-quart saucepan")
+        add("Whisk")
+    if any(
+        _clean(item.get("state")).lower().replace("-", " ") in {"fresh raw", "frozen raw"}
+        for item in candidate.get("proteins") or [] if isinstance(item, dict)
+    ) or _clean(candidate.get("protein_state")).lower().replace("-", " ") in {"fresh raw", "frozen raw"}:
+        add("Instant-read food thermometer")
+    if "ingredient prep:" in instructions or re.search(r"\b(?:cut|slice|chop|dice|trim)\b", instructions):
+        add("Cutting board and chef’s knife")
+    if "measure" in instructions:
+        add("Measuring cups and spoons")
+    return equipment
 
 
 def generate_human_instruction_steps(candidate: dict) -> List[str]:

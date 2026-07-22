@@ -218,6 +218,8 @@ def test_builder_uses_one_catalog_for_owned_and_purchase_ingredients():
     assert "selectedPurchaseNames" in flow
     assert "Added to this meal’s grocery list" in builder_page
     assert "Everything this recipe needs that is not currently in My Kitchen." in recipe_page
+    assert "data-recipe-equipment" in recipe_page
+    assert "recipe.equipment" in flow
 
 
 def test_quantity_and_form_controls_cover_packages_cans_appetites_and_garlic():
