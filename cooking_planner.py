@@ -1359,6 +1359,11 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
                 f"Prepare {sauce} separately as a finishing sauce or table accompaniment. "
                 "Keep it off the grill's direct flame and taste before serving."
             )
+        elif strategy == "oven_roast":
+            finish_instruction = (
+                f"Warm {sauce} separately over low heat and use it as a light finishing glaze or table sauce. "
+                "Do not turn the dry-roasted main into a braise after it leaves the oven. Taste before serving."
+            )
         else:
             finish_instruction = (
                 _comfort_sauce_finish(candidate, sauce_profile.cook_instruction)
@@ -1698,7 +1703,14 @@ def consolidate_skillet_vegetables(
         if protein_cook is None:
             return activities
 
-        old_activities = [protein_cook, *vegetable_activities]
+        protein_verify = next((
+            activity for activity in activities
+            if activity.component == protein and activity.activity_type == "verify"
+        ), None)
+        # The consolidated cook instruction already contains the explicit
+        # endpoint and color warning. Absorb the separate verification node so
+        # safety remains mandatory without charging the cook for the same check twice.
+        old_activities = [protein_cook, *vegetable_activities, *([protein_verify] if protein_verify else [])]
         old_ids = {_activity_id(activity) for activity in old_activities}
         dependencies = []
         for activity in old_activities:
@@ -3444,7 +3456,7 @@ def generate_equipment_list(candidate: dict) -> List[str]:
     equipment: List[str] = []
 
     def add(item: str):
-        if item and item not in equipment:
+        if item and _clean(item).lower() not in {_clean(existing).lower() for existing in equipment}:
             equipment.append(item)
 
     for component in (candidate.get("component_plan") or {}).get("components") or []:
@@ -3474,7 +3486,8 @@ def generate_equipment_list(candidate: dict) -> List[str]:
         add("Whisk")
     if any((item.activity.equipment or "").lower() == "oven" for item in schedule):
         add("Oven")
-        add("Small sheet pan")
+        if not any("sheet pan" in item.lower() or "baking dish" in item.lower() for item in equipment):
+            add("Small sheet pan")
     if any(
         _clean(item.get("state")).lower().replace("-", " ") in {"fresh raw", "frozen raw"}
         for item in candidate.get("proteins") or [] if isinstance(item, dict)

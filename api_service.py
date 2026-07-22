@@ -39,16 +39,18 @@ _MEAL_SHAPES = {
     "grill": "plate",
     "braise": "plate",
     "oven_braise": "plate",
+    "oven_roast": "plate",
 }
 
 _LIVE_PLANNER_METHODS = {
-    "skillet", "casserole", "soup", "handheld", "grill", "braise", "oven_braise"
+    "skillet", "casserole", "soup", "handheld", "grill", "braise", "oven_braise", "oven_roast"
 }
 
 _BUILDER_METHODS = (
     {"id": "skillet", "label": "Stovetop", "description": "One or more stovetop vessels; meal structure decides whether components join or stay separate."},
+    {"id": "oven_roast", "label": "Oven Roast", "description": "Roast the main in the oven while selected sides use their own trained equipment."},
     {"id": "soup", "label": "Soup or Stew", "description": "A liquid-led one-vessel meal; SNS chooses the suitable owned pot."},
-    {"id": "casserole", "label": "Oven Bake", "description": "An oven-baked meal assembled in one baking dish."},
+    {"id": "casserole", "label": "Casserole / One Dish", "description": "An integrated oven-baked meal assembled in one baking dish."},
     {"id": "handheld", "label": "Handheld", "description": "Components cooked as needed, then assembled with bread or a wrap."},
     {"id": "grill", "label": "Grill", "description": "Direct and indirect grill zones with ingredient-specific doneness, flare-up, basket, and resting guidance."},
 )
@@ -750,6 +752,8 @@ def _dish_family(candidate: dict) -> str:
         return "slow_braise"
     if method == "oven_braise":
         return "oven_braise"
+    if method == "oven_roast":
+        return "oven_roasted_dinner"
     if method == "casserole":
         return "baked_casserole"
     if method == "handheld":
@@ -768,6 +772,7 @@ _FAMILY_LABELS = {
     "rustic_soup": "Rustic Soup",
     "slow_braise": "Slow Braise",
     "oven_braise": "Oven Braise",
+    "oven_roasted_dinner": "Oven-Roasted Dinner",
     "baked_casserole": "Casserole",
     "wrap_or_sandwich": "Wrap or Sandwich",
     "composed_plate": "Composed Plate",
@@ -794,7 +799,7 @@ def _production_strategy(candidate: dict) -> str:
 
 def _heat_source(candidate: dict) -> str:
     method = _clean(candidate.get("cooking_method", candidate.get("strategy")))
-    if method in {"casserole", "oven_braise"}:
+    if method in {"casserole", "oven_braise", "oven_roast"}:
         return "oven"
     if method == "handheld":
         return "mixed"
@@ -1080,6 +1085,7 @@ def _concept_title(candidate: dict) -> str:
         "handheld": "Wrap or Sandwich",
         "braise": "Stovetop Braise",
         "oven_braise": "Oven Braise",
+        "oven_roast": "Oven-Roasted Dinner",
     }
     return f"{component_text} {endings.get(method, 'Meal')}"
 

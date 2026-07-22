@@ -11,6 +11,7 @@ from typing import Iterable
 from ingredient_profiles import get_ingredient_profile
 from config import DB_PATH
 from ko_behavior import resolve_behavior
+from protein_archetypes import method_for_main
 from side_archetypes import side_archetype
 
 
@@ -110,13 +111,25 @@ def recognize_meal_components(candidate: dict) -> MealComponentPlan:
     components = []
 
     if protein:
-        main_method = _clean(
+        requested_main_method = _clean(
             (candidate.get("component_methods") or {}).get("main")
             or candidate.get("cooking_method") or candidate.get("strategy")
         )
+        broad_environment = {
+            "casserole": "oven", "oven_braise": "oven", "oven_roast": "oven", "oven": "oven",
+            "skillet": "stovetop", "braise": "stovetop", "stovetop": "stovetop",
+            "soup": "soup", "grill": "grill",
+        }.get(requested_main_method, requested_main_method)
+        main_method = method_for_main(
+            protein, _clean(candidate.get("protein_state")), broad_environment
+        ) or requested_main_method
         main_equipment = {
             "skillet": ("12-inch skillet",),
-            "oven": ("rimmed sheet pan or baking dish", "oven"),
+            "roast": ("rimmed sheet pan or baking dish", "Oven"),
+            "bake": ("oven-safe baking dish", "Oven"),
+            "casserole": ("casserole dish", "Oven"),
+            "oven_braise": ("covered Dutch oven or braising dish", "Oven"),
+            "braise": ("covered Dutch oven or deep skillet", "stovetop"),
             "grill": ("outdoor grill",),
             "air_fryer": ("air fryer basket",),
         }.get(main_method, ())
@@ -168,7 +181,7 @@ def recognize_meal_components(candidate: dict) -> MealComponentPlan:
             components.append(ComponentPlan(
                 "side-warmed-bread", "warmed_bread_side", foundation, "side",
                 "warm_in_oven", (ComponentIngredient(foundation, "bread_side"),),
-                ("small sheet pan", "oven"),
+                ("Small sheet pan", "Oven"),
                 "Warm bread served alongside without becoming the meal base.",
             ))
         else:

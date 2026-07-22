@@ -486,6 +486,8 @@ def _method_is_eligible(method, available, foundation, equipment):
         return _inventory_has_ko(
             available, physical_traits=("collagen-rich",), relationship_traits=("wet-cook",)
         )
+    if method == "oven_roast":
+        return not equipment_keys or any("oven" in item for item in equipment_keys)
     if method == "casserole":
         if equipment_keys and not any("oven" in item for item in equipment_keys):
             return False
@@ -508,7 +510,7 @@ def _serving_styles(method):
     """Return presentation choices independently from cooking method."""
     if method == "soup":
         return ["bowl", "cup"]
-    if method in {"braise", "oven_braise"}:
+    if method in {"braise", "oven_braise", "oven_roast"}:
         return ["plate", "bowl"]
     if method == "handheld":
         return ["handheld", "plate"]
@@ -622,6 +624,7 @@ def generate_candidates(
         {"strategy": "cold_meal", "cooking_method": "cold_meal", "label": "Cold Meal", "title": f"Cold {cuisine} {base} Meal", "minutes": 12, "energy": "Very Low", "energy_rank": 0, "budget": "Budget", "budget_rank": 1, "why": "no-cook or low-cook assembly"},
         {"strategy": "braise", "cooking_method": "braise", "label": "Stovetop Braise", "title": f"{cuisine} {base} Stovetop Braise", "minutes": 120, "energy": "Low", "energy_rank": 1, "budget": "Moderate", "budget_rank": 2, "why": "a patient covered cook makes a collagen-rich cut tender"},
         {"strategy": "oven_braise", "cooking_method": "oven_braise", "label": "Oven Braise", "title": f"{cuisine} {base} Oven Braise", "minutes": 150, "energy": "Low", "energy_rank": 1, "budget": "Moderate", "budget_rank": 2, "why": "a covered moderate oven makes a collagen-rich cut tender"},
+        {"strategy": "oven_roast", "cooking_method": "oven_roast", "label": "Oven Roast", "title": f"Oven-Roasted {cuisine} {base}", "minutes": 45, "energy": "Low", "energy_rank": 1, "budget": "Budget", "budget_rank": 1, "why": "the main roasts while separately trained sides cook in their own vessels"},
     ]
     requested = _clean(requested_method)
     requested_methods = {requested} if requested else set()

@@ -1448,6 +1448,107 @@ soup_protein_method(
 )
 
 
+def _add_family_method(family_code, rule):
+    family = FAMILY_LIBRARY[family_code]
+    if any(item.method == rule.method and item.forms == rule.forms for item in family.methods):
+        return
+    FAMILY_LIBRARY[family_code] = replace(family, methods=(*family.methods, rule))
+
+
+# Round 2 closes the common oven gap. "Oven Bake" can now roast a main
+# protein separately instead of forcing every protein through casserole grammar.
+_add_family_method("poultry_piece", method(
+    "roast", ("fresh raw", "frozen raw", "refrigerated"), "preheated oven",
+    "roasted poultry and pan juices", 4, 35, 7, .25, "oven", "middle",
+    "Pat {name} dry, arrange pieces with space between them, and season.",
+    "Roast {name} at 400°F until browned and safely cooked through; rotate the pan if browning is uneven.",
+    "Brown skin or edges with juicy meat.", "The thickest edible portion reaches 165°F.",
+    "Crowding slows browning, and uneven pieces can finish at different times.",
+    "Remove finished smaller pieces; continue larger pieces to 165°F and serve dry pieces with pan juices.",
+    "fair", verification_required=True, rest_minutes=5,
+    rest_template="Rest {name} for 5 minutes before serving.",
+))
+_add_family_method("fish_fillet", method(
+    "roast", ("fresh raw", "frozen raw", "refrigerated"), "preheated oven",
+    "gently roasted fish", 3, 12, 3, .2, "oven", "middle",
+    "Pat {name} dry, remove obvious bones, and place it in a lightly greased baking dish.",
+    "Roast {name} at 400°F and begin checking the thinnest fillets early.",
+    "Moist flakes with lightly colored edges.", "The thickest portion reaches 145°F and flakes easily.",
+    "A long oven window dries thin fillets before thick ones finish.",
+    "Remove finished fillets individually and serve overdone fish with a moist sauce.",
+    "poor", verification_required=True,
+))
+_add_family_method("sausage", method(
+    "roast", ("fresh raw", "frozen raw", "refrigerated"), "preheated oven",
+    "browned sausage and rendered fat", 2, 22, 4, .2, "oven", "middle",
+    "Arrange {name} links with space between them on a rimmed sheet pan.",
+    "Roast {name} at 400°F, turning once for even browning, until safely cooked through.",
+    "Brown casing with a juicy safely cooked center.", "Poultry sausage reaches 165°F; pork or beef sausage reaches 160°F.",
+    "A dark casing can hide an undercooked center.",
+    "Lower the oven temperature if the casing darkens early and continue to the required center temperature.",
+    "fair", verification_required=True, rest_minutes=3,
+    rest_template="Rest {name} for 3 minutes before slicing.",
+))
+_add_family_method("plant_protein", method(
+    "roast", ("fresh", "refrigerated", "fresh raw", "frozen"), "preheated oven",
+    "browned plant protein", 5, 25, 4, .2, "oven", "middle",
+    "Drain {name}, press excess moisture when appropriate, and cut it into even pieces.",
+    "Coat {name} lightly with fat and seasoning, spread it on a sheet pan, and roast at 425°F, turning once.",
+    "Brown edges with a hot seasoned center.", "Several surfaces are browned and the center is hot.",
+    "Wet or crowded pieces steam instead of browning.",
+    "Spread pieces farther apart and continue roasting until surface moisture evaporates.", "good",
+))
+_add_family_method("pork_cut", method(
+    "roast", ("fresh raw", "frozen raw", "refrigerated"), "preheated oven",
+    "roasted pork and pan juices", 4, 25, 4, .2, "oven", "middle",
+    "Pat {name} dry, make portions even, and season.",
+    "Roast {name} at 400°F and use temperature, not color or time alone, as the endpoint.",
+    "Brown outside and juicy inside.", "The thickest part reaches 145°F, followed by at least a 3-minute rest.",
+    "Thin portions dry before thick portions reach temperature.",
+    "Remove finished portions individually and serve overdone pork with sauce or pan juices.",
+    "fair", verification_required=True, rest_minutes=3,
+    rest_template="Rest {name} for at least 3 minutes before slicing or serving.",
+))
+_add_family_method("bacon", method(
+    "roast", ("fresh raw", "frozen raw", "refrigerated"), "preheated oven",
+    "evenly rendered bacon", 2, 18, 3, .15, "oven", "middle",
+    "Arrange {name} strips in one layer on a rimmed sheet pan.",
+    "Bake {name} at 400°F until the fat is rendered and the strips reach the desired crispness; transfer to a draining rack or paper.",
+    "Evenly cooked bacon with rendered fat.", "The meat is deeply colored and safely cooked without blackened edges.",
+    "Thin strips can burn quickly near the end.",
+    "Remove finished strips individually; badly burned bacon cannot be recovered.", "fair",
+    verification_required=True,
+))
+_add_family_method("egg", method(
+    "bake", ("fresh raw", "refrigerated"), "preheated oven",
+    "set baked eggs", 5, 18, 5, .2, "oven", "middle",
+    "Crack {name} into a bowl, remove shell fragments, season, and combine only as much as the preparation requires.",
+    "Bake {name} in a greased oven-safe dish at 350°F until the center is just set.",
+    "Tender evenly set eggs.", "No liquid raw egg remains; use 160°F when a fully verified endpoint is needed.",
+    "Residual heat can turn fully firm eggs rubbery.",
+    "Remove the dish while the center is just set; serve dry eggs with a moist topping.", "poor",
+))
+_add_family_method("stew_cut", replace(
+    FAMILY_LIBRARY["tough_meat"].methods[1], cook_minutes=95,
+    instruction_template=(
+        "Brown {name} in batches, add enough hot liquid for a braise, cover tightly, "
+        "and cook at 325°F until the pieces are fork-tender."
+    ),
+))
+
+# Verification is a family safety contract, not optional wording.
+for _family_code, _method_names in {
+    "ground_meat": {"skillet"}, "shellfish_quick": {"skillet"},
+    "tough_meat": {"braise", "oven_braise"}, "stew_cut": {"braise", "oven_braise"},
+}.items():
+    _family = FAMILY_LIBRARY[_family_code]
+    FAMILY_LIBRARY[_family_code] = replace(_family, methods=tuple(
+        replace(item, verification_required=True)
+        if item.method in _method_names else item
+        for item in _family.methods
+    ))
+
+
 def _set_portion(family_code, basis, amount, label, rounding="practical", stretchable=False):
     FAMILY_LIBRARY[family_code] = replace(
         FAMILY_LIBRARY[family_code], portion_basis=basis,
@@ -1820,6 +1921,11 @@ def _resolve_behavior_uncached(name, role, form_name="", strategy="", db_path=No
             "oven_braise", "roast", "bake", "reheat", "assemble", "simmer",
             "saute", "saute_steam", "bloom", "wilt", "brief_heat",
         }
+        oven_roast_methods = (
+            {"roast", "bake", "reheat"}
+            if role == "protein"
+            else {"roast", "bake", "reheat", "assemble", "saute", "saute_steam", "brief_heat", "wilt", "simmer", "boil", "warm"}
+        )
         braise_methods = {
             "braise", "simmer", "saute", "saute_steam", "bloom", "wilt",
             "brief_heat", "reheat", "assemble", "skillet",
@@ -1861,6 +1967,8 @@ def _resolve_behavior_uncached(name, role, form_name="", strategy="", db_path=No
                 strategy_key == "casserole" and candidate.method in casserole_methods
             ) or (
                 strategy_key == "oven_braise" and candidate.method in oven_braise_methods
+            ) or (
+                strategy_key == "oven_roast" and candidate.method in oven_roast_methods
             ) or (
                 strategy_key == "braise" and candidate.method in braise_methods
             ) or (

@@ -1747,7 +1747,7 @@ const SNS = (() => {
       const method = form.querySelector('input[name="cooking-method"]:checked')?.value;
       const structureInputs = [...form.querySelectorAll('input[name="meal-structure"]')];
       structureInputs.forEach(input => {
-        input.disabled = !["skillet", "grill"].includes(method) && input.value !== "integrated";
+        input.disabled = !["skillet", "grill", "oven_roast"].includes(method) && input.value !== "integrated";
       });
       if (structureInputs.find(input => input.checked)?.disabled) {
         structureInputs.find(input => input.value === "integrated").checked = true;
@@ -1755,7 +1755,7 @@ const SNS = (() => {
       const structure = structureInputs.find(input => input.checked)?.value;
       const produceCount = form.querySelectorAll('input[name="produce"]:checked').length;
       const guidance = form.querySelector("[data-structure-guidance]");
-      if (!["skillet", "grill"].includes(method)) {
+      if (!["skillet", "grill", "oven_roast"].includes(method)) {
         guidance.textContent = "This cooking family currently determines how the components come together. More structures will appear as their cooking grammar is trained.";
       } else if (structure === "composed_plate" && produceCount > 2) {
         guidance.textContent = "Composed plates usually feature one or two vegetables. You can continue, or choose the ingredients you most want to taste separately.";

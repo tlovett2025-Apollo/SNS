@@ -635,3 +635,36 @@ Impact:
   full vegetable portions merely because they were selected as produce.
 - Batch matrix tests verify every archetype's executable knowledge contract.
 - Additional side training is primarily data entry, not planner rewiring.
+
+
+Decision #0016
+
+Title:
+Round 2 separates protein execution methods from broad environments
+
+Date:
+2026-07-22
+
+Decision:
+Every main-protein family owns an execution contract covering safety endpoint,
+verification, rest, holding, and supported environment-to-method mappings. The
+selected customer environment resolves through that contract before activities
+are published.
+
+Oven Roast is a distinct public environment from Casserole / One Dish. It may
+roast a main while sides use separate trained vessels. Oven-roasted mains use a
+finishing glaze or table sauce and must not receive post-roast braising language.
+
+Mandatory verification may be absorbed into a consolidated cook activity when
+the combined instruction already states the explicit endpoint and recovery.
+The scheduler must not charge a duplicate task for the same safety check.
+
+Impact:
+
+- Sixteen main-protein families have explicit execution contracts.
+- Common oven methods are trained for poultry pieces, fish, sausage, plant
+  proteins, pork cuts, bacon, eggs, and stew cuts.
+- Ground meat, shellfish, and collagen-rich meats consistently require their
+  trained verification endpoint.
+- Chicken thighs can roast while macaroni and cheese cooks on the stovetop.
+- Family/environment coverage is enforced by a generated matrix.

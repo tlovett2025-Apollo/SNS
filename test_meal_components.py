@@ -79,8 +79,8 @@ class MealComponentTests(unittest.TestCase):
     main = next(item for item in plan["components"] if item["role"] == "main")
     side = next(item for item in plan["components"] if item["role"] == "side")
 
-    assert main["method"] == "oven"
-    assert "oven" in main["equipment"]
+    assert main["method"] == "roast"
+    assert "Oven" in main["equipment"]
     assert side["method"] == "boil_then_cheese_sauce"
 
 
