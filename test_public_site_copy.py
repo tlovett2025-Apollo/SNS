@@ -182,13 +182,16 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     assert 'link("build-your-meal.html", "Help Me Build My Meal"' in flow
     assert 'mode: "build_your_meal"' in flow
     assert "await requestRecipe(candidate.candidate_id" in flow
-    assert "Choose one or more" in builder_page
-    assert "Vegetables &amp; fruit" in builder_page
-    assert "Pantry &amp; fridge extras" in builder_page
+    assert "Choose everything in one place" in builder_page
+    assert "Chosen for this meal" in builder_page
+    assert "data-catalog-filter=\"vegetable\"" in builder_page
+    assert "data-catalog-filter=\"fruit\"" in builder_page
+    assert "data-catalog-filter=\"canned\"" in builder_page
+    assert "data-catalog-filter=\"spice\"" in builder_page
     assert "options.meal_structures" in flow
     assert "options.methods" in flow
-    assert "data-protein-search" in builder_page
-    assert "data-browse-catalog" in builder_page
+    assert "data-protein-search" not in builder_page
+    assert "data-browse-catalog" not in builder_page
     assert ".produce-choice[hidden]" in (PUBLIC_FLOW.parent / "sns-flow.css").read_text(encoding="utf-8")
     assert '>Canned</option>' in flow
     assert 'item.id' in flow
@@ -200,17 +203,18 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     assert "body.detail || body.message" in flow
 
 
-def test_builder_starts_with_owned_food_and_uses_one_purchase_catalog():
+def test_builder_uses_one_catalog_for_owned_and_purchase_ingredients():
     flow = PUBLIC_FLOW.read_text(encoding="utf-8")
     builder_page = (PUBLIC_FLOW.parent / "build-your-meal.html").read_text(encoding="utf-8")
     recipe_page = (PUBLIC_FLOW.parent / "recipe.html").read_text(encoding="utf-8")
 
-    assert "Only food you have is shown below." in builder_page
+    assert "Your kitchen items appear first" in builder_page
     assert "data-open-ingredient-catalog" in builder_page
     assert "data-ingredient-catalog" in builder_page
     assert "data-catalog-options" in builder_page
     assert 'data-owned="${isOwned}"' in flow
-    assert 'choice.hidden = !choice.querySelector("input")?.checked' in flow
+    assert "const catalogItems" in flow
+    assert ".filter(item => !(item.owned" not in flow
     assert "selectedPurchaseNames" in flow
     assert "Added to this meal’s grocery list" in builder_page
     assert "Everything this recipe needs that is not currently in My Kitchen." in recipe_page

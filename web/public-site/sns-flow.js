@@ -1716,14 +1716,12 @@ const SNS = (() => {
       `<option value="${escapeHtml(name)}"${name === "Comfort Food" ? " selected" : ""}>${escapeHtml(name)}</option>`
     ).join("");
 
-    form.querySelector("[data-method-options]").innerHTML = (options.methods || []).map((item, index) => `
+    const availableMethods = (options.methods || []).filter(item => item.available !== false);
+    form.querySelector("[data-method-options]").innerHTML = availableMethods.map((item, index) => `
       <label class="builder-choice-card${item.available === false ? " unavailable" : ""}">
         <input type="radio" name="cooking-method" value="${escapeHtml(item.id)}"${index === 0 ? " checked" : ""}${item.available === false ? " disabled" : ""}>
         <span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.note || item.description)}</small></span>
       </label>`).join("");
-    const grillOption = (options.methods || []).find(item => item.id === "grill");
-    const grillNote = form.querySelector("[data-grill-equipment-note]");
-    if (grillNote) grillNote.hidden = grillOption?.available !== false;
     form.querySelector("[data-structure-options]").innerHTML = (options.meal_structures || []).map((item, index) => `
       <label class="builder-choice-card">
         <input type="radio" name="meal-structure" value="${escapeHtml(item.id)}"${index === 0 ? " checked" : ""}>
@@ -1793,17 +1791,35 @@ const SNS = (() => {
 
     const catalogDialog = document.querySelector("[data-ingredient-catalog]");
     const catalogHolder = catalogDialog?.querySelector("[data-catalog-options]");
+    const spiceNames = new Set([
+      "basil", "bay leaves", "black pepper", "cayenne pepper", "chili powder", "cinnamon",
+      "cumin", "curry powder", "dill", "garlic powder", "ginger", "italian seasoning",
+      "onion powder", "oregano", "paprika", "parsley", "red pepper flakes", "rosemary",
+      "sage", "salt", "smoked paprika", "thyme", "turmeric"
+    ]);
+    const pantryGroup = item => {
+      const name = String(item.name || "").toLowerCase();
+      const category = String(item.category || "").toLowerCase();
+      if (/sauce|salsa|ketchup|mustard|mayonnaise|pickle|paste|soy|worcestershire/.test(name)) return "sauce";
+      if (/rice|pasta|noodle|grain|oat|flour|bread|tortilla|potato|grit|polenta/.test(name)) return "grain";
+      if (/cheese|cream|milk|yogurt|butter/.test(name) || category.includes("dairy")) return "dairy";
+      if (/broth|stock|oil|cornstarch/.test(name)) return "broth";
+      return "other";
+    };
     const catalogItems = [
-      ...(options.proteins || []).map(item => ({ ...item, catalogKind: "protein", catalogLabel: "Protein" })),
-      ...(options.produce || []).map(item => ({ ...item, catalogKind: "produce", catalogLabel: item.kind === "fruit" ? "Fruit" : "Produce" })),
-      ...(options.foundations || []).map(item => ({ ...item, catalogKind: "foundation", catalogLabel: "Side" })),
-      ...(options.extras || []).map(item => ({ ...item, catalogKind: "extra", catalogLabel: "Pantry & fridge" })),
-    ].filter(item => !(item.owned ?? owned.has(String(item.name).toLowerCase())));
+      ...(options.proteins || []).map(item => ({ ...item, catalogKind: item.default_state === "Canned" ? "canned" : "protein", selectionKind: "protein", catalogLabel: item.default_state === "Canned" ? "Canned Food" : "Protein" })),
+      ...(options.produce || []).map(item => ({ ...item, catalogKind: item.canned ? "canned" : item.kind === "fruit" ? "fruit" : "vegetable", selectionKind: "produce", catalogLabel: item.canned ? "Canned Food" : item.kind === "fruit" ? "Fruit" : "Vegetable" })),
+      ...(options.foundations || []).map(item => ({ ...item, catalogKind: item.canned ? "canned" : "foundation", selectionKind: "foundation", pantryGroup: item.canned ? "" : pantryGroup(item), catalogLabel: item.canned ? "Canned Food" : "Side" })),
+      ...(options.extras || []).map(item => {
+        const isSpice = String(item.category || "").toLowerCase() === "spices" || spiceNames.has(String(item.name || "").toLowerCase());
+        return { ...item, catalogKind: item.canned ? "canned" : isSpice ? "spice" : "pantry", selectionKind: "extra", pantryGroup: pantryGroup(item), catalogLabel: item.canned ? "Canned Food" : isSpice ? "Spice" : "Pantry" };
+      }),
+    ];
 
     if (catalogHolder) {
       catalogHolder.innerHTML = catalogItems.map(item => `
-        <button type="button" data-catalog-item data-catalog-kind="${item.catalogKind}" data-catalog-name="${escapeHtml(item.name)}" data-search-name="${escapeHtml(item.name.toLowerCase())}" aria-pressed="false">
-          <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.catalogLabel)}</small></span>
+        <button type="button" data-catalog-item data-catalog-kind="${item.catalogKind}" data-selection-kind="${item.selectionKind || item.catalogKind}" data-pantry-group="${item.pantryGroup || ""}" data-catalog-name="${escapeHtml(item.name)}" data-search-name="${escapeHtml(item.name.toLowerCase())}" aria-pressed="false">
+          <span><strong>${escapeHtml(item.name)}</strong><small>${item.owned ?? owned.has(String(item.name).toLowerCase()) ? "In My Kitchen · " : "Grocery item · "}${escapeHtml(item.catalogLabel)}</small></span>
           <b data-catalog-action>Add</b>
         </button>`).join("");
     }
@@ -1828,7 +1844,7 @@ const SNS = (() => {
       });
       catalogHolder?.querySelectorAll("[data-catalog-item]").forEach(button => {
         const name = button.dataset.catalogName;
-        const kind = button.dataset.catalogKind;
+        const kind = button.dataset.selectionKind;
         const selected = kind === "foundation"
           ? foundation.value === name
           : Boolean(selectedInput(kind, name)?.checked);
@@ -1836,6 +1852,14 @@ const SNS = (() => {
         button.setAttribute("aria-pressed", String(selected));
         button.querySelector("[data-catalog-action]").textContent = selected ? "Added" : "Add";
       });
+      const selectedSummary = form.querySelector("[data-selected-ingredients]");
+      const chosen = catalogItems.filter(item => {
+        const kind = item.selectionKind || item.catalogKind;
+        return kind === "foundation" ? foundation.value === item.name : Boolean(selectedInput(kind, item.name)?.checked);
+      });
+      if (selectedSummary) selectedSummary.innerHTML = chosen.length
+        ? chosen.map(item => `<span>${escapeHtml(item.name)}<small>${escapeHtml(item.catalogLabel)}</small></span>`).join("")
+        : '<span class="builder-empty-selection">Nothing chosen yet.</span>';
     };
 
     const bindOwnedSearch = (inputSelector, choiceSelector) => {
@@ -1867,7 +1891,8 @@ const SNS = (() => {
     catalogHolder?.addEventListener("click", event => {
       const button = event.target.closest("[data-catalog-item]");
       if (!button) return;
-      const { catalogKind: kind, catalogName: name } = button.dataset;
+      const kind = button.dataset.selectionKind;
+      const { catalogName: name } = button.dataset;
       if (kind === "foundation") {
         const option = [...foundation.options].find(item => item.value === name);
         if (option) option.hidden = false;
@@ -1890,9 +1915,18 @@ const SNS = (() => {
     const applyCatalogFilter = () => {
       const query = catalogDialog?.querySelector("[data-catalog-search]")?.value.trim().toLowerCase() || "";
       const filter = catalogDialog?.querySelector("[data-catalog-filter].active")?.dataset.catalogFilter || "all";
+      const pantryFilter = catalogDialog?.querySelector("[data-pantry-group]")?.value || "all";
+      const spiceCuisines = catalogDialog?.querySelector("[data-spice-cuisines]");
+      const pantryGroups = catalogDialog?.querySelector("[data-pantry-groups]");
+      if (spiceCuisines) spiceCuisines.hidden = filter !== "spice";
+      if (pantryGroups) pantryGroups.hidden = filter !== "pantry";
       let matches = 0;
       catalogHolder?.querySelectorAll("[data-catalog-item]").forEach(button => {
-        const visible = (filter === "all" || button.dataset.catalogKind === filter)
+        const inFilter = filter === "all"
+          || button.dataset.catalogKind === filter
+          || (filter === "pantry" && button.dataset.catalogKind === "foundation" && Boolean(button.dataset.pantryGroup));
+        const visible = inFilter
+          && (filter !== "pantry" || pantryFilter === "all" || button.dataset.pantryGroup === pantryFilter)
           && (!query || button.dataset.searchName.includes(query));
         button.hidden = !visible;
         if (visible) matches += 1;
@@ -1901,6 +1935,17 @@ const SNS = (() => {
       if (empty) empty.hidden = matches > 0;
     };
     catalogDialog?.querySelector("[data-catalog-search]")?.addEventListener("input", applyCatalogFilter);
+    catalogDialog?.querySelector("[data-pantry-group]")?.addEventListener("change", applyCatalogFilter);
+    const cuisineOptions = catalogDialog?.querySelector("[data-cuisine-options]");
+    if (cuisineOptions) {
+      cuisineOptions.innerHTML = (options.cuisines || []).map(name => `<button type="button" data-cuisine-choice="${escapeHtml(name)}">${escapeHtml(name)}</button>`).join("");
+      cuisineOptions.addEventListener("click", event => {
+        const button = event.target.closest("[data-cuisine-choice]");
+        if (!button) return;
+        form.querySelector("[data-builder-cuisine]").value = button.dataset.cuisineChoice;
+        cuisineOptions.querySelectorAll("button").forEach(item => item.classList.toggle("active", item === button));
+      });
+    }
     catalogDialog?.querySelectorAll("[data-catalog-filter]").forEach(button => button.addEventListener("click", () => {
       catalogDialog.querySelectorAll("[data-catalog-filter]").forEach(item => item.classList.toggle("active", item === button));
       applyCatalogFilter();

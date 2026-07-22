@@ -233,7 +233,7 @@ def _quantity_plan(
             plan[key] = {"display": display, "unit": "can", "planned": planned, "available": available}
             if stretchable and available and available < planned:
                 notes.append(
-                    f"The {name} on hand appears short for the planned amount. Stretch it by distributing it through the selected vegetables or foundation."
+                    f"The {name} on hand appears short for the planned amount. Stretch it by distributing it through the selected vegetables or side."
                 )
         elif basis == "pieces":
             pieces = max(1, ceil(effective * amount))
@@ -272,7 +272,7 @@ def _quantity_plan(
             available_pounds = available
             if available_pounds and available_pounds < pounds:
                 notes.append(
-                    f"About {available_pounds:g} lb of {name} is recorded for {pounds:g} lb planned. Stretch it through the selected vegetables or foundation."
+                    f"About {available_pounds:g} lb of {name} is recorded for {pounds:g} lb planned. Stretch it through the selected vegetables or side."
                 )
             elif unit in {"package", "packages"} and recorded_quantity and not package_weight:
                 notes.append(
@@ -342,10 +342,10 @@ def _ko_combination_fit(component_specs):
     reasons = []
     if "protein-anchor" in functions and "foundation" in functions:
         score += 6
-        reasons.append("has a KO-defined protein and foundation")
+        reasons.append("has a KO-defined protein and side")
     if "absorbs-sauce" in functions and functions & {"sauce-builder", "moisture-source", "supplies-liquid"}:
         score += 5
-        reasons.append("has a foundation that can carry the meal's moisture and flavor")
+        reasons.append("has a side or base that can carry the meal's moisture and flavor")
     if flavors & {"rich", "savory", "umami"} and functions & {"brightness", "fresh-contrast", "balances-richness"}:
         score += 6
         reasons.append("balances savory richness with brightness or fresh contrast")

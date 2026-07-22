@@ -300,13 +300,31 @@ def get_meal_builder_options(payload: dict | None = None, db_path: str | Path = 
             """SELECT name FROM foundations WHERE verified=1 ORDER BY foundation_id"""
         ).fetchall()
         cuisines = con.execute("SELECT name FROM cuisines ORDER BY cuisine_id").fetchall()
+        ingredient_metadata = {
+            _key(row["name"]): {
+                "category": row["category"],
+                "canned": bool(row["has_canned_form"]),
+            }
+            for row in con.execute(
+                """SELECT i.name,i.category,
+                          MAX(CASE WHEN lower(f.form_name) LIKE '%canned%' THEN 1 ELSE 0 END) AS has_canned_form
+                   FROM ingredients i LEFT JOIN ingredient_forms f USING (ingredient_id)
+                   WHERE i.active=1 GROUP BY i.ingredient_id,i.name,i.category"""
+            ).fetchall()
+        }
 
     def choice(name: str, **extra) -> dict:
         inventory_item = resolved_by_name.get(_key(name))
+        metadata = ingredient_metadata.get(_key(name), {})
         return {
             "name": name,
             "owned": _key(name) in owned,
             "form": inventory_item.form_name if inventory_item else None,
+            "category": metadata.get("category", ""),
+            "canned": bool(
+                metadata.get("canned")
+                or "canned" in _key(inventory_item.form_name if inventory_item else "")
+            ),
             **extra,
         }
 
@@ -354,8 +372,8 @@ def get_meal_builder_options(payload: dict | None = None, db_path: str | Path = 
         "methods": methods,
         "meal_structures": [
             {"id": "integrated", "label": "Cooked Together", "description": "A cohesive one-vessel meal whose compatible ingredients join in stages."},
-            {"id": "composed_plate", "label": "Composed Plate", "description": "Restaurant-style: protein, vegetable, and foundation prepared independently."},
-            {"id": "layered_bowl", "label": "Layered Bowl", "description": "A foundation with components arranged or spooned over it."},
+            {"id": "composed_plate", "label": "Composed Plate", "description": "Protein, vegetables, and a selected side prepared independently."},
+            {"id": "layered_bowl", "label": "Layered Bowl", "description": "A side or base with the other components arranged or spooned over it."},
         ],
         "serving_temperatures": [
             {"id": "hot", "label": "Hot", "available": True},
@@ -816,7 +834,7 @@ def _score_make_candidate(candidate: dict, engine_request: dict) -> dict:
 
     if _clean(candidate.get("foundation")):
         score += 20
-        reasons.append("builds a complete meal with the available foundation")
+        reasons.append("builds a complete meal with the available side")
 
     method = _clean(candidate.get("cooking_method", candidate.get("strategy")))
     protein_behavior = resolve_behavior(
@@ -1237,7 +1255,7 @@ def _builder_candidates(payload: dict, db_path: str | Path):
     if unknown_produce:
         raise APIContractError(f"Unknown produce selection: {unknown_produce[0]}")
     if foundation and _key(foundation) not in valid_foundations:
-        raise APIContractError(f"Unknown foundation: {foundation}")
+        raise APIContractError(f"Unknown side: {foundation}")
     valid_extras = {_key(name) for name in _builder_extra_names(db_path)}
     unknown_extras = [name for name in extras if _key(name) not in valid_extras]
     if unknown_extras:

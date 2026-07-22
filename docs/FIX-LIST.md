@@ -29,3 +29,12 @@ In one dedicated housekeeping round:
 
 The user has confirmed that this directory contains build material only and
 authorized deletion of files verified to be unnecessary.
+
+## Meal structure training
+
+### [ ] Expand beyond the three current meal structures
+
+Build My Meal currently exposes only Cooked Together, Composed Plate, and
+Layered Bowl. Define additional common home-meal shapes and their orchestration
+rules before adding them to the interface; do not present untrained shapes as
+working choices.

@@ -30,40 +30,26 @@
       <section class="builder-section">
         <div class="builder-section-heading"><span>1</span><div><h2>Choose the food</h2><p>Choose a main protein and any supporting proteins, vegetables, or fruits.</p></div></div>
         <div class="builder-food-toolbar">
-          <div><strong>My Kitchen first</strong><span>Only food you have is shown below.</span></div>
-          <button class="btn btn-secondary" type="button" data-open-ingredient-catalog>+ Add an ingredient to buy</button>
+          <div><strong>Choose everything in one place</strong><span>Your kitchen items appear first. Anything else is added to the grocery list.</span></div>
+          <button class="btn btn-primary" type="button" data-open-ingredient-catalog>Choose ingredients</button>
+        </div>
+        <div class="builder-selected-summary" data-selected-summary>
+          <strong>Chosen for this meal</strong>
+          <div data-selected-ingredients><span class="builder-empty-selection">Nothing chosen yet.</span></div>
         </div>
         <div class="builder-purchase-summary" data-builder-purchase-summary hidden>
           <strong>Added to this meal’s grocery list</strong>
           <div data-builder-purchase-items></div>
         </div>
-        <div class="produce-picker protein-picker">
-          <label class="builder-field"><span>Proteins in My Kitchen <em>Choose one or more</em></span><input type="search" data-protein-search placeholder="Search your proteins…"></label>
-          <p class="builder-help">The first selection is the main protein. Additional proteins are treated as supporting, stretching, or flavor accents—not as several full entrées.</p>
-          <div class="produce-options builder-owned-options" data-protein-options></div>
-          <button class="builder-browse-link" type="button" data-browse-catalog="protein">+ Browse proteins to buy</button>
-        </div>
-        <div class="builder-two-column">
-          <div class="builder-field-group"><label class="builder-field"><span>Side <em>Optional</em></span><select data-builder-foundation></select></label><button class="builder-browse-link" type="button" data-browse-catalog="foundation">+ Browse sides</button></div>
-          <label class="builder-field"><span>Cuisine direction</span><select data-builder-cuisine></select></label>
-        </div>
-        <div class="produce-picker">
-          <label class="builder-field"><span>Vegetables &amp; fruit in My Kitchen <em>Choose any number</em></span><input type="search" data-produce-search placeholder="Search your produce…"></label>
-          <div class="produce-options builder-owned-options" data-produce-options></div>
-          <button class="builder-browse-link" type="button" data-browse-catalog="produce">+ Browse vegetables &amp; fruit to buy</button>
-        </div>
-        <div class="produce-picker extras-picker">
-          <label class="builder-field"><span>Pantry &amp; fridge extras on hand <em>Choose any number</em></span><input type="search" data-extra-search placeholder="Search your extras…"></label>
-          <p class="builder-help">Add condiments, sauces, dairy, broth, or canned helpers you want the meal to use.</p>
-          <div class="produce-options builder-owned-options" data-extra-options></div>
-          <button class="builder-browse-link" type="button" data-browse-catalog="extra">+ Browse pantry items &amp; spices</button>
+        <div class="builder-selection-controls" hidden aria-hidden="true">
+          <div data-protein-options></div><div data-produce-options></div><div data-extra-options></div>
+          <select data-builder-foundation></select><select data-builder-cuisine></select>
         </div>
       </section>
 
       <section class="builder-section">
         <div class="builder-section-heading"><span>2</span><div><h2>Choose the cooking environment</h2><p>Choose the broad cooking family. SNS chooses suitable owned equipment after considering the meal structure, effort, liquid, and ingredient behavior.</p></div></div>
         <div class="builder-choice-grid" data-method-options></div>
-        <p class="builder-equipment-note" data-grill-equipment-note hidden>Want to grill it? Add your grill under <a href="my-kitchen.html#equipment">My Kitchen equipment</a>, then return here.</p>
       </section>
 
       <section class="builder-section">
@@ -102,17 +88,22 @@
 <dialog class="ingredient-catalog-dialog" data-ingredient-catalog>
   <form method="dialog" class="ingredient-catalog-form">
     <header>
-      <div><div class="eyebrow">Add to this meal</div><h2>Choose an ingredient to buy</h2></div>
+      <div><div class="eyebrow">Build this meal</div><h2>Choose ingredients</h2></div>
       <button type="submit" value="close" class="catalog-close" aria-label="Close ingredient chooser">×</button>
     </header>
     <label class="builder-field"><span class="sr-only">Search all known ingredients</span><input type="search" data-catalog-search placeholder="Search all known ingredients…" autocomplete="off"></label>
     <div class="catalog-filters" role="group" aria-label="Ingredient type">
       <button type="button" class="active" data-catalog-filter="all">All</button>
       <button type="button" data-catalog-filter="protein">Proteins</button>
-      <button type="button" data-catalog-filter="produce">Produce</button>
+      <button type="button" data-catalog-filter="vegetable">Vegetables</button>
+      <button type="button" data-catalog-filter="fruit">Fruit</button>
       <button type="button" data-catalog-filter="foundation">Sides</button>
-      <button type="button" data-catalog-filter="extra">Pantry &amp; fridge</button>
+      <button type="button" data-catalog-filter="canned">Canned Food</button>
+      <button type="button" data-catalog-filter="spice">Spices</button>
+      <button type="button" data-catalog-filter="pantry">Pantry</button>
     </div>
+    <div class="catalog-subfilters" data-spice-cuisines hidden><strong>Build flavor by cuisine</strong><div data-cuisine-options></div></div>
+    <label class="builder-field catalog-subfilters" data-pantry-groups hidden><span>Pantry group</span><select data-pantry-group><option value="all">All pantry groups</option><option value="sauce">Sauces &amp; condiments</option><option value="grain">Grains &amp; starches</option><option value="dairy">Dairy &amp; cheese</option><option value="broth">Broths &amp; cooking helpers</option><option value="other">Other pantry items</option></select></label>
     <div class="ingredient-catalog-options" data-catalog-options></div>
     <p class="catalog-empty" data-catalog-empty hidden>No known ingredients match that search.</p>
     <footer><button class="btn btn-primary" type="submit" value="done">Done adding ingredients</button></footer>
