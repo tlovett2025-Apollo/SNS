@@ -17,6 +17,12 @@ from culinary_opportunities import discover_opportunities, serialize_opportuniti
 from sauce_profiles import SauceIngredient, get_sauce_profile
 from recipe_validation import validate_recipe
 from meal_components import recognize_meal_components
+from flavor_identity import (
+    flavor_identity,
+    identity_requirements,
+    ingredient_affinity_status,
+    substitution_preserves_identity,
+)
 from math import ceil, floor
 import sqlite3
 
@@ -36,6 +42,17 @@ def _unique(items):
         if item and item not in out:
             out.append(item)
     return out
+
+
+def _conflicting_flavor_extras(cuisine, extras):
+    conflicts = []
+    for name in extras:
+        affinities = _clean(resolve_behavior(
+            name, "ingredient", db_path=DB_PATH
+        ).attributes.get("cuisine_affinity")).split(",")
+        if ingredient_affinity_status(cuisine, affinities) == "conflicting":
+            conflicts.append(name)
+    return conflicts
 
 
 def _join(items):
@@ -74,7 +91,7 @@ def _inventory_has_ko(
     return False
 
 
-def _ingredient_check(item, available, excluded, protein=""):
+def _ingredient_check(item, available, excluded, protein="", cuisine=""):
     """Resolve one requirement before a candidate is allowed into ranking."""
     available_by_key = {_key(name): name for name in available}
     excluded_keys = {_key(name) for name in excluded}
@@ -94,6 +111,17 @@ def _ingredient_check(item, available, excluded, protein=""):
             (item.name,),
         )]
     substitutes = _unique([*item.substitutes, *durable_substitutes])
+    substitutes = [
+        substitute for substitute in substitutes
+        if substitution_preserves_identity(
+            cuisine,
+            item.name,
+            substitute,
+            _clean(resolve_behavior(
+                substitute, "ingredient", db_path=DB_PATH
+            ).attributes.get("cuisine_affinity")).split(","),
+        )
+    ]
 
     if name_key in available_by_key and name_key not in excluded_keys:
         status = "Have"
@@ -402,38 +430,12 @@ def _ko_combination_fit(component_specs):
 
 
 def _sauce_for_cuisine(cuisine):
-    k = _key(cuisine)
-    if "italian" in k:
-        return "Italian tomato sauce"
-    if "mexican" in k:
-        return "Mexican taco sauce"
-    if "comfort" in k or "american" in k:
-        return "simple comfort pan sauce"
-    if "mediterranean" in k:
-        return "Mediterranean lemon herb sauce"
-    if "bbq" in k:
-        return "BBQ Sauce"
-    if "cajun" in k:
-        return "Cajun pan sauce"
-    if "kid" in k:
-        return "mild favorite sauce"
-    if "chinese" in k:
-        return "simple stir-fry sauce"
-    if "indian" in k:
-        return "Indian curry sauce"
-    return "simple sauce"
+    return flavor_identity(cuisine).sauce
 
 
 def _cuisine_requirements(cuisine):
-    """Prototype pantry requirements for optional cuisine intent."""
-    k = _key(cuisine)
-    if "chinese" in k:
-        return ["Soy sauce", "Garlic"]
-    if "italian" in k:
-        return ["Tomato sauce", "Garlic"]
-    if "mexican" in k:
-        return ["Chili powder", "Cumin"]
-    return []
+    """Return the declarative minimum evidence for a named flavor identity."""
+    return identity_requirements(cuisine)
 
 
 def _first_soup_liquid(available):
@@ -695,7 +697,7 @@ def generate_candidates(
             for item in selected_components
         ]
         requirement_checks = [
-            _ingredient_check(item, available, excluded, protein)
+            _ingredient_check(item, available, excluded, protein, cuisine)
             for item in [*method_ingredients, *requested_requirements]
         ]
         consolidated_checks = []
@@ -712,14 +714,24 @@ def generate_candidates(
             consolidated_checks.append(check)
         requirement_checks = consolidated_checks
         ingredient_checks = component_checks + requirement_checks
+        conflicting_extras = _conflicting_flavor_extras(cuisine, extras)
+        conflicting_extra_keys = {_key(item) for item in conflicting_extras}
         for check in ingredient_checks:
             check["planned_purchase"] = _key(check.get("name")) in planned_purchase_keys
             # Selecting an extra in Build My Meal is an explicit request to use
             # it, even when that ingredient is optional in the generic profile.
             if _key(check.get("name")) in {_key(item) for item in extras}:
-                check["required"] = True
-                if check["status"] == "Omit":
-                    check.update(status="Need", omission_consequence=None)
+                if _key(check.get("name")) in conflicting_extra_keys:
+                    check.update(
+                        status="Omit", required=False, resolved_name=None,
+                        omission_consequence=(
+                            "It conflicts with the selected flavor identity and is not used."
+                        ),
+                    )
+                else:
+                    check["required"] = True
+                    if check["status"] == "Omit":
+                        check.update(status="Need", omission_consequence=None)
 
         # A structural ingredient and a supporting seasoning may express the
         # same flavor identity.  KO attributes—not ingredient-name branches—
@@ -860,9 +872,11 @@ def generate_candidates(
             "vegetable": vegetable,
             "foundation": foundation,
             "selected_extras": extras,
+            "coherence_omissions": conflicting_extras,
             "component_forms": component_forms,
             "meal_structure": _clean(meal_structure) or "integrated",
             "cuisine": cuisine,
+            "flavor_identity": flavor_identity(cuisine).to_dict(),
             "servings": servings,
             "active_minutes": active_minutes,
             "passive_minutes": passive_minutes,

@@ -668,3 +668,34 @@ Impact:
   trained verification endpoint.
 - Chicken thighs can roast while macaroni and cheese cooks on the stovetop.
 - Family/environment coverage is enforced by a generated matrix.
+
+
+Decision #0017
+
+Title:
+Round 3 makes flavor identity a pre-ranking contract
+
+Date:
+2026-07-22
+
+Decision:
+A cuisine label must resolve to a declarative flavor identity containing its
+sauce, minimum capability groups, signature seasonings, compatible accents,
+and identity-preserving substitutions. Candidate generation applies ingredient
+affinity before ranking. A selected extra with a conflicting verified affinity
+is retained as an explicit coherence omission but is not required, purchased,
+or cooked into the meal.
+
+Substitutions are no longer accepted solely because two ingredients have a
+general substitution relationship. The replacement must also be explicitly
+trained for the selected identity or carry no conflicting cuisine affinity.
+
+Impact:
+
+- Nine launch flavor systems share one machine-readable contract.
+- Sauce and fallback-seasoning selection no longer use scattered cuisine-name
+  branches.
+- Mexican salsa cannot leak into an Italian meal merely because it is present.
+- Mediterranean lemon-to-lime substitution remains available because that
+  exact cross-acid substitution is trained for the identity.
+- New cuisines extend the identity library and matrix instead of the planner.

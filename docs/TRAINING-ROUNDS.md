@@ -8,8 +8,8 @@ training pipeline without reopening the architecture.
    vocabulary, and the first fifteen common side archetypes.
 2. **Main proteins — complete.** Forms, preparation methods, equipment, doneness,
    resting, holding, and recovery across protein families.
-3. **Flavor identity.** Sauces, seasoning systems, cuisine affinity,
-   compatibility, and controlled substitutions.
+3. **Flavor identity — complete.** Sauces, seasoning systems, cuisine affinity,
+   compatibility, and controlled substitutions across nine launch identities.
 4. **Meal orchestration.** Meal shapes, component coordination, attention,
    parallel work, holding, and service.
 5. **Retail products.** Barcode product identity, packaged and convenience

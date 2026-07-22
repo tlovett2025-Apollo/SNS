@@ -22,6 +22,7 @@ from equipment_profiles import (
 from meal_components import component_by_archetype
 from side_archetypes import side_activity_instruction
 from sauce_profiles import get_sauce_profile
+from flavor_identity import ingredient_affinity_status
 from planner_voice import (
     activity_message,
     completion_message,
@@ -94,8 +95,8 @@ def _extras_instruction(candidate: dict, strategy: str, phase: str = "finish") -
         affinity = _clean(resolve_behavior(
             item, "ingredient", db_path=DB_PATH
         ).attributes.get("cuisine_affinity"))
-        allowed = {_clean(value).lower() for value in affinity.split(",") if _clean(value)}
-        if allowed and cuisine not in {"", "comfort food", "american"} and cuisine not in allowed:
+        allowed = [_clean(value) for value in affinity.split(",") if _clean(value)]
+        if ingredient_affinity_status(cuisine, allowed) == "conflicting":
             incompatible.append(item)
     if incompatible:
         omissions = candidate.setdefault("coherence_omissions", [])
