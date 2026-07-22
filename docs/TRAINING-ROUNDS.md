@@ -16,8 +16,9 @@ training pipeline without reopening the architecture.
    convenience-food kinds, directions, provenance, and household confirmation.
 6. **Household fit and safety — complete.** Allergies, exclusions, dietary
    constraints, preference strength, and person-specific meal scope.
-7. **Coverage and learning operations.** Generated matrices, clustered failure
-   review, enrichment queues, promotion gates, monitoring, and release policy.
+7. **Coverage and learning operations — complete.** Generated matrices,
+   clustered failure review, enrichment queues, promotion gates, monitoring,
+   and release policy.
 
 ## Round definition of done
 

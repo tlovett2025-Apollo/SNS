@@ -791,3 +791,32 @@ Impact:
   explicit launch exclusions.
 - Household favorites influence ordering without injecting random ingredients.
 - Each candidate carries an auditable household-fit result.
+
+
+Decision #0021
+
+Title:
+Round 7 learns from failure clusters rather than individual recipes
+
+Date:
+2026-07-22
+
+Decision:
+Recipe reports route to component identity, behavior execution, meal
+coherence, orchestration, quantity, or human review. Reports with the same
+route, method, and meal family form one learning cluster. Repeated clusters
+enter batch review with their candidate and build provenance intact.
+
+Learning clusters, retail drafts, and unmatched inventory identities share a
+prioritized enrichment queue. Queue presence is not permission to edit the
+CKB. Promotion requires confirmed identity, provenance, safety review,
+complete behavior knowledge, and regression coverage. Release policy combines
+the production matrix with unresolved high-risk clusters.
+
+Impact:
+
+- Ten similar recipe reports create one architecture task, not ten patches.
+- Unknown products and ingredients accumulate evidence without becoming facts.
+- Promotions are auditable and fail closed when required evidence is absent.
+- Repeated coherence or identity failures may hold a release.
+- A machine-readable learning report supports monitoring and future automation.
