@@ -225,6 +225,16 @@ def test_builder_uses_one_catalog_for_owned_and_purchase_ingredients():
     assert "recipe.equipment" in flow
 
 
+def test_builder_offers_known_sides_after_the_main_is_chosen():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+    builder_page = (PUBLIC_FLOW.parent / "build-your-meal.html").read_text(encoding="utf-8")
+
+    assert "Choose a side—or two" in builder_page
+    assert "data-side-suggestion-options" in builder_page
+    assert "/api/GetKnownSideSuggestions" in flow
+    assert "Choose no more than two sides" in flow
+
+
 def test_quantity_and_form_controls_cover_packages_cans_appetites_and_garlic():
     flow = PUBLIC_FLOW.read_text(encoding="utf-8")
     kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
@@ -275,7 +285,7 @@ def test_three_meal_paths_have_distinct_jobs():
     assert "Signature Recipes" in flow
     assert "My Favorite Recipes" in home_page
     assert "Choose the cooking environment" in builder_page
-    assert "meal structure, effort, liquid, and ingredient behavior" in builder_page
+    assert "A chosen side may use its own trained vessel or heat source" in builder_page
     assert "known recipe" in signature_page
 
 

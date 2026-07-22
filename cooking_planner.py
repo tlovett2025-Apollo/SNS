@@ -19,6 +19,7 @@ from equipment_profiles import (
     choose_braise_equipment,
     choose_rice_equipment,
 )
+from meal_components import component_by_archetype
 from sauce_profiles import get_sauce_profile
 from planner_voice import (
     activity_message,
@@ -87,10 +88,14 @@ def _extras_instruction(candidate: dict, strategy: str, phase: str = "finish") -
         and _clean(item).lower() != _clean(candidate.get("soup_liquid")).lower()
     ]
     cuisine = _clean(candidate.get("cuisine")).lower()
-    incompatible = [
-        item for item in extras
-        if item.lower() == "salsa" and any(value in cuisine for value in ("italian", "mediterranean"))
-    ]
+    incompatible = []
+    for item in extras:
+        affinity = _clean(resolve_behavior(
+            item, "ingredient", db_path=DB_PATH
+        ).attributes.get("cuisine_affinity"))
+        allowed = {_clean(value).lower() for value in affinity.split(",") if _clean(value)}
+        if allowed and cuisine not in {"", "comfort food", "american"} and cuisine not in allowed:
+            incompatible.append(item)
     if incompatible:
         omissions = candidate.setdefault("coherence_omissions", [])
         for item in incompatible:
@@ -121,7 +126,6 @@ def _extras_instruction(candidate: dict, strategy: str, phase: str = "finish") -
     table = [
         item for item in extras
         if family_codes[item] & table_families
-        or item.lower() in {"salsa", "hot sauce", "ketchup", "mustard"}
     ]
     cooking = [
         item for item in extras
@@ -2097,6 +2101,7 @@ def apply_meal_coherence_gate(
     foundation_codes = set(
         get_ingredient_profile(foundation, "foundation").behavior_family_codes
     ) if foundation else set()
+    bread_side = component_by_archetype(candidate, "warmed_bread_side")
 
     for activity in activities:
         if is_hash and activity.activity_type in {"prep", "launch prep"}:
@@ -2126,13 +2131,12 @@ def apply_meal_coherence_gate(
                 "with the pan sauce spooned over the hash rather than the bread."
             )
         if (
-            foundation
-            and foundation.lower() == "biscuits"
+            bread_side
             and activity.component == foundation
             and activity.activity_type in {"cook", "warm", "reheat"}
         ):
             activity.instruction = (
-                "Place Biscuits on a small sheet pan and warm them in a 350°F oven until heated through, "
+                f"Place {foundation} on a small sheet pan and warm it in a 350°F oven until heated through, "
                 "then cover loosely with a clean towel until serving."
             )
             activity.equipment = "oven"
@@ -2145,6 +2149,75 @@ def apply_meal_coherence_gate(
                     activity.instruction,
                 )
     return activities
+
+
+def apply_component_plan_activities(
+    activities: List[KitchenActivity], candidate: dict,
+) -> List[KitchenActivity]:
+    """Compile recognized component archetypes into executable activities."""
+    component = component_by_archetype(candidate, "macaroni_and_cheese")
+    if not component:
+        return activities
+    uses = {item.get("job"): item for item in component.get("ingredients") or []}
+    pasta = _clean((uses.get("pasta") or {}).get("name"))
+    cheese = _clean((uses.get("cheese") or {}).get("name"))
+    milk = _clean((uses.get("sauce_liquid") or {}).get("name"))
+    butter = _clean((uses.get("sauce_fat") or {}).get("name"))
+    pasta_cook = next((
+        activity for activity in activities
+        if activity.component == pasta and activity.activity_type in {"cook", "reheat", "warm"}
+    ), None)
+    if not pasta_cook or not cheese:
+        return activities
+
+    pasta_cook.instruction = (
+        f"Boil {pasta} in a large pot of salted water, stirring early. "
+        "Before draining, reserve 1/2 cup pasta water. Drain when tender with no hard center."
+    )
+    pasta_cook.equipment = "burner"
+    pasta_cook_id = _activity_id(pasta_cook)
+    if milk:
+        sauce_instruction = (
+            f"Return the drained {pasta} to its pot over low heat. Add {butter + ' and ' if butter else ''}{milk}; "
+            f"stir until warm, then remove the pot from direct heat and add {cheese} gradually. "
+            "Stir until smooth, adding reserved pasta water a tablespoon at a time if the sauce is too thick. "
+            "Stop before the sauce boils or the cheese becomes grainy."
+        )
+    else:
+        sauce_instruction = (
+            f"Return the drained {pasta} to its pot over low heat and melt {butter}. "
+            f"Remove the pot from direct heat, add {cheese} gradually, and stir in reserved pasta water "
+            "a tablespoon at a time until the pasta is smoothly coated."
+        )
+    finish = _planner_activity(
+        "finish side",
+        sauce_instruction,
+        minutes=5,
+        human_busy=True,
+        stage="finish",
+        depends_on=[pasta_cook_id],
+        equipment="burner",
+    )
+    finish.component = component.get("name") or "Macaroni and cheese"
+    finish.activity_id = "finish side:macaroni_and_cheese"
+
+    for activity in activities:
+        if activity is finish:
+            continue
+        activity.depends_on = list(dict.fromkeys(
+            finish.activity_id if dependency == pasta_cook_id else dependency
+            for dependency in activity.depends_on
+        ))
+        if activity.activity_type == "finish and serve":
+            activity.instruction = (
+                f"Plate the finished main component and serve {component.get('name')} alongside it. "
+                "Keep any protein sauce with the protein rather than stirring it into the macaroni and cheese."
+            )
+            if finish.activity_id not in activity.depends_on:
+                activity.depends_on.append(finish.activity_id)
+    # The side itself must depend on the pasta cook, not on its own replacement.
+    finish.depends_on = [pasta_cook_id]
+    return [*activities, finish]
 
 
 def apply_vegetable_relationship_intelligence(
@@ -2579,6 +2652,7 @@ def build_activity_graph(candidate: dict) -> Dict[str, KitchenActivity]:
     activities = clarify_composed_skillet_transfers(activities, candidate)
     activities = consolidate_skillet_vegetables(activities, candidate)
     activities = consolidate_integrated_skillet_reheating(activities, candidate)
+    activities = apply_component_plan_activities(activities, candidate)
     activities = constrain_single_skillet_environment(activities, candidate)
     activities = consolidate_final_service(activities)
     activities = apply_meal_coherence_gate(activities, candidate)
@@ -3324,6 +3398,10 @@ def generate_equipment_list(candidate: dict) -> List[str]:
     def add(item: str):
         if item and item not in equipment:
             equipment.append(item)
+
+    for component in (candidate.get("component_plan") or {}).get("components") or []:
+        for item in component.get("equipment") or []:
+            add(_clean(item))
 
     rice_device = _clean(candidate.get("selected_rice_equipment"))
     if rice_device == "pressure cooker":

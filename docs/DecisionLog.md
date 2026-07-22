@@ -544,3 +544,64 @@ Impact:
 - Allergy exclusions run before scoring and recipe planning.
 - Explicitly selected blocked ingredients fail the request instead of appearing
   in a recipe.
+
+
+Decision #0013
+
+Title:
+Meals compile from reusable component plans
+
+Date:
+2026-07-22
+
+Decision:
+SNS represents independently prepared parts of a meal as component plans before
+building the activity graph. Ingredient KOs supply capabilities; component
+recognizers combine those capabilities into culinary results; activity compilers
+turn each result into equipment-specific work. Meal structure controls service,
+not the cooking environment of every component.
+
+Planner branches may use KO families, component archetypes, declared methods,
+and meal structures. Ingredient-name checks do not belong in the planner. Seed
+knowledge is available immediately, while verified CKB attributes overlay it.
+
+The first component slice recognizes macaroni and cheese from pasta, meltable
+cheese, and milk/cream or cooking fat. It finishes the side in the pasta pot and
+keeps its cheese out of the protein sauce.
+
+Impact:
+
+- A baked main and stovetop side can coexist in one composed meal.
+- Pantry helpers have explicit component jobs instead of becoming generic extras.
+- Recognition works for capable ingredients, not only macaroni and cheddar.
+- Boxed sides and future side archetypes share the same component contract.
+- Recipe knowledge grows through KOs and compilers rather than scattered fixes.
+
+
+Decision #0014
+
+Title:
+Build My Meal offers known sides before recipe compilation
+
+Date:
+2026-07-22
+
+Decision:
+After the cook selects a main protein, SNS offers up to five trained side
+components that the current kitchen can produce. The cook may select up to two.
+Each suggestion carries exact builder selections for its foundation, produce,
+and pantry helpers; it is not a generated recipe title that must be interpreted
+again later.
+
+Only one selected suggestion may occupy the foundation slot. A second side may
+be a vegetable component. Suggestions respect expanded household exclusions and
+may return fewer than five results rather than invent an untrained side.
+
+Impact:
+
+- Meal preference is decided by the cook before recipe generation.
+- The recipe planner coordinates chosen known components instead of discovering
+  every component simultaneously.
+- Side cards and manual ingredient choices use the same downstream contracts.
+- New side archetypes expand the chooser without adding meal-specific planner
+  branches.

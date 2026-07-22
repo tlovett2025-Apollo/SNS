@@ -8,6 +8,7 @@ const SNS = (() => {
     resolveBarcode: endpoint("/api/ResolveBarcode"),
     recognizePantryPhoto: endpoint("/api/RecognizePantryPhoto"),
     getMealBuilderOptions: endpoint("/api/GetMealBuilderOptions"),
+    getKnownSideSuggestions: endpoint("/api/GetKnownSideSuggestions"),
     getRecipeList: endpoint("/api/GetRecipeList"),
     getRecipe: endpoint("/api/GetRecipe"),
     reportRecipe: endpoint("/api/ReportRecipe"),
@@ -1660,6 +1661,10 @@ const SNS = (() => {
     }
 
     const proteinHolder = form.querySelector("[data-protein-options]");
+    const sideSuggestionHolder = form.querySelector("[data-side-suggestion-options]");
+    const sideSuggestionStatus = form.querySelector("[data-side-suggestion-status]");
+    let sideSuggestionRequest = 0;
+    let appliedSideSelections = { foundation: "", produce: new Set(), extras: new Set() };
     const inferProteinState = item => {
       return item.default_state || "Fresh Raw";
     };
@@ -1704,6 +1709,7 @@ const SNS = (() => {
       syncProteinRoles();
       form.dataset.thawReadinessConfirmed = "false";
       if (event.target.matches('input[name="protein"], [data-protein-state]')) showThawReadiness();
+      if (event.target.matches('input[name="protein"]')) refreshKnownSides();
     });
     thawDialog?.querySelector("[data-confirm-thaw-readiness]")?.addEventListener("click", () => {
       form.dataset.thawReadinessConfirmed = "true";
@@ -1838,6 +1844,106 @@ const SNS = (() => {
       const selector = kind === "protein" ? 'input[name="protein"]' : kind === "produce" ? 'input[name="produce"]' : 'input[name="extras"]';
       return [...form.querySelectorAll(selector)].find(input => input.value === name);
     };
+
+    const clearAppliedSideSelections = () => {
+      if (appliedSideSelections.foundation && foundation.value === appliedSideSelections.foundation) {
+        foundation.value = "";
+      }
+      appliedSideSelections.produce.forEach(name => {
+        const input = selectedInput("produce", name);
+        if (input) input.checked = false;
+      });
+      appliedSideSelections.extras.forEach(name => {
+        const input = selectedInput("extra", name);
+        if (input) input.checked = false;
+      });
+      appliedSideSelections = { foundation: "", produce: new Set(), extras: new Set() };
+    };
+
+    const applyKnownSideSelections = () => {
+      clearAppliedSideSelections();
+      const selectedCards = [...sideSuggestionHolder.querySelectorAll('input[name="known-side"]:checked')];
+      const usedFoundation = selectedCards.find(input => input.dataset.foundation)?.dataset.foundation || "";
+      if (usedFoundation) {
+        const option = [...foundation.options].find(item => item.value === usedFoundation);
+        if (option) option.hidden = false;
+        foundation.value = usedFoundation;
+        appliedSideSelections.foundation = usedFoundation;
+      }
+      selectedCards.forEach(input => {
+        JSON.parse(input.dataset.produce || "[]").forEach(name => {
+          const target = selectedInput("produce", name);
+          if (target) {
+            target.checked = true;
+            target.closest(".produce-choice").hidden = false;
+            appliedSideSelections.produce.add(name);
+          }
+        });
+        JSON.parse(input.dataset.extras || "[]").forEach(name => {
+          const target = selectedInput("extra", name);
+          if (target) {
+            target.checked = true;
+            target.closest(".produce-choice").hidden = false;
+            appliedSideSelections.extras.add(name);
+          }
+        });
+      });
+      syncPurchaseUI();
+      syncStructureGuidance();
+    };
+
+    const refreshKnownSides = async () => {
+      const main = proteinHolder.querySelector('input[name="protein"]:checked')?.value || "";
+      const requestNumber = ++sideSuggestionRequest;
+      clearAppliedSideSelections();
+      if (!main) {
+        sideSuggestionHolder.innerHTML = "";
+        sideSuggestionStatus.textContent = "Choose a main protein to see matching sides.";
+        syncPurchaseUI();
+        return;
+      }
+      sideSuggestionStatus.textContent = `Finding known sides for ${main}…`;
+      try {
+        const response = await postJson(API.getKnownSideSuggestions, {
+          kitchen,
+          selections: { proteins: [{ name: main, role: "main" }] }
+        });
+        if (requestNumber !== sideSuggestionRequest) return;
+        const suggestions = response.suggestions || [];
+        sideSuggestionStatus.textContent = suggestions.length
+          ? "These use ingredients already in My Kitchen. Choose up to two."
+          : "No fully trained sides match the current kitchen yet. You can still choose ingredients manually.";
+        sideSuggestionHolder.innerHTML = suggestions.map(item => {
+          const selection = item.selection || {};
+          return `<label class="builder-choice-card known-side-card">
+            <input type="checkbox" name="known-side" value="${escapeHtml(item.side_id)}"
+              data-foundation="${escapeHtml(selection.foundation || "")}"
+              data-produce="${escapeHtml(JSON.stringify(selection.produce || []))}"
+              data-extras="${escapeHtml(JSON.stringify(selection.extras || []))}">
+            <span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.description)}</small><em>${escapeHtml((item.ingredients || []).join(" · "))}</em></span>
+          </label>`;
+        }).join("");
+      } catch (error) {
+        if (requestNumber !== sideSuggestionRequest) return;
+        sideSuggestionHolder.innerHTML = "";
+        sideSuggestionStatus.textContent = error.message || "Side suggestions are unavailable right now.";
+      }
+    };
+    sideSuggestionHolder?.addEventListener("change", event => {
+      if (!event.target.matches('input[name="known-side"]')) return;
+      const checked = [...sideSuggestionHolder.querySelectorAll('input[name="known-side"]:checked')];
+      if (checked.length > 2) {
+        event.target.checked = false;
+        sideSuggestionStatus.textContent = "Choose no more than two sides.";
+        return;
+      }
+      if (event.target.checked && event.target.dataset.foundation) {
+        checked.filter(input => input !== event.target && input.dataset.foundation).forEach(input => {
+          input.checked = false;
+        });
+      }
+      applyKnownSideSelections();
+    });
 
     const syncPurchaseUI = () => {
       const purchases = selectedPurchaseNames();

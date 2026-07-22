@@ -19,6 +19,7 @@ from build_provenance import DEPLOYED_BUILD_PROVENANCE, public_build_provenance
 from household_inventory import replace_household_inventory, submit_pending_items
 from inventory_contract import InventoryContractError, normalize_inventory_lot
 from ko_behavior import default_form_for, resolve_behavior
+from meal_components import suggest_known_sides
 from recipe_engine import build_recipe_from_candidate, generate_candidates
 
 
@@ -414,6 +415,45 @@ def get_meal_builder_options(payload: dict | None = None, db_path: str | Path = 
     }
 
 
+def get_known_side_suggestions(payload: dict, db_path: str | Path = DB_PATH) -> dict:
+    """Suggest executable side archetypes after the user chooses a main."""
+    if not isinstance(payload, dict):
+        raise APIContractError("A kitchen and selected protein are required.")
+    kitchen = payload.get("kitchen") if isinstance(payload.get("kitchen"), dict) else payload
+    selections = payload.get("selections") if isinstance(payload.get("selections"), dict) else {}
+    proteins = selections.get("proteins") or []
+    first = proteins[0] if proteins else selections.get("protein")
+    protein = _clean(first.get("name")) if isinstance(first, dict) else _clean(first)
+    if not protein:
+        return {"api_version": CONTRACT_VERSION, "for_protein": "", "suggestions": []}
+
+    _snapshot, _resolved, _pending, engine_request = _engine_request(kitchen, db_path)
+    excluded = {_key(item) for item in engine_request.get("excluded_items") or []}
+    if _key(protein) in excluded:
+        raise APIContractError(f"{protein} is blocked by the household food-safety settings.")
+    options = get_meal_builder_options(kitchen, db_path)
+    foundation_names = [
+        item["name"] for item in options["foundations"] if _key(item["name"]) not in excluded
+    ]
+    produce_names = [
+        item["name"] for item in options["produce"]
+        if item.get("kind") == "vegetable" and _key(item["name"]) not in excluded
+    ]
+    inventory_names = [
+        item for item in engine_request.get("available_items") or [] if _key(item) not in excluded
+    ]
+    suggestions = suggest_known_sides(
+        inventory_names, foundation_names, produce_names,
+        protein=protein,
+        equipment_names=engine_request.get("available_equipment") or [],
+    )
+    return {
+        "api_version": CONTRACT_VERSION,
+        "for_protein": protein,
+        "suggestions": suggestions,
+    }
+
+
 def save_my_kitchen(
     payload: dict,
     *,
@@ -769,9 +809,14 @@ def _selection_title(candidate: dict) -> str:
         if isinstance(item, dict)
     ]
     ingredients = [*(proteins or [candidate.get("protein")]), *str(candidate.get("vegetable") or "").split(" & ")]
+    planned_side = next((
+        component.get("name") for component in
+        (candidate.get("component_plan") or {}).get("components") or []
+        if component.get("role") == "side"
+    ), None)
     structure = _clean(candidate.get("meal_structure")) or "integrated"
     if structure in {"composed_plate", "layered_bowl"}:
-        ingredients.append(candidate.get("foundation"))
+        ingredients.append(planned_side or candidate.get("foundation"))
     ingredients = [_clean(item) for item in ingredients if _clean(item)]
     if len(ingredients) > 1:
         components = f"{', '.join(ingredients[:-1])} & {ingredients[-1]}"
@@ -780,7 +825,7 @@ def _selection_title(candidate: dict) -> str:
     cuisine = _clean(candidate.get("cuisine"))
     prefix = "" if cuisine in {"", "Comfort Food", "American"} else f"{cuisine} "
     family = _FAMILY_LABELS.get(candidate.get("dish_family"), _clean(candidate.get("label")) or "Meal")
-    foundation = _clean(candidate.get("foundation"))
+    foundation = _clean(planned_side or candidate.get("foundation"))
     with_foundation = (
         f" with {foundation}"
         if foundation and structure == "integrated" and family not in {"Casserole", "Bean Soup", "Rustic Soup"}
@@ -812,7 +857,7 @@ _GENERATOR_REQUEST_FIELDS = {
     "available_equipment", "excluded_items", "planned_purchase_items",
     "requested_method", "selected_extras", "component_forms", "meal_structure",
     "inventory_lots", "eater_profiles", "use_all_cans", "cooking_for_kids",
-    "kid_theme",
+    "kid_theme", "component_methods",
 }
 
 
@@ -1158,6 +1203,7 @@ def _candidate_view(candidate: dict) -> dict:
         "title": candidate.get("title") or candidate.get("label") or "Stock & Stir meal",
         "meal_shape": meal_shape,
         "meal_structure": meal_structure,
+        "component_methods": dict(candidate.get("component_methods") or {}),
         "production_strategy": production_strategy,
         "production_label": _PRODUCTION_LABELS[production_strategy],
         "heat_source": _heat_source(candidate),
@@ -1357,6 +1403,7 @@ def _builder_candidates(payload: dict, db_path: str | Path):
         "planned_purchase_items": planned_purchases,
         "selected_extras": extras,
         "component_forms": component_forms,
+        "component_methods": dict(selections.get("component_methods") or {}),
         "meal_structure": meal_structure,
     })
     engine_request["available_items"] = list(dict.fromkeys([
@@ -1542,6 +1589,7 @@ def get_recipe(payload: dict, db_path: str | Path = DB_PATH) -> dict:
         "steps": list(recipe.get("action_steps") or []),
         "instructions": list(recipe.get("instructions") or []),
         "plan_items": list(recipe.get("plan_items") or []),
+        "component_plan": dict(recipe.get("component_plan") or {}),
         "total_minutes": classification["total_minutes"],
         "active_minutes": classification["active_minutes"],
         "passive_minutes": classification["passive_minutes"],

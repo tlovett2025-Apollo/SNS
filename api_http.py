@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api_service import (
     APIContractError,
+    get_known_side_suggestions,
     get_meal_builder_options,
     get_recipe,
     get_recipe_list,
@@ -273,6 +274,19 @@ def meal_builder_options_endpoint(
 ) -> dict:
     try:
         return get_meal_builder_options(_durable_payload(payload, authorization), db_path=DB_PATH)
+    except Exception as exc:
+        raise _domain_error(exc) from exc
+
+
+@app.post("/api/GetKnownSideSuggestions")
+def known_side_suggestions_endpoint(
+    payload: dict,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    try:
+        return get_known_side_suggestions(
+            _durable_payload(payload, authorization), db_path=DB_PATH
+        )
     except Exception as exc:
         raise _domain_error(exc) from exc
 

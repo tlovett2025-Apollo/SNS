@@ -9,6 +9,7 @@ from datetime import date
 from api_service import (
     APIContractError,
     _candidate_view,
+    get_known_side_suggestions,
     get_meal_builder_options,
     get_recipe,
     get_recipe_list,
@@ -104,6 +105,30 @@ def cooked_bean_soup_payload(energy="Low", equipment=None):
 
 
 class APIServiceTests(unittest.TestCase):
+    def test_known_side_suggestions_use_only_current_kitchen_and_explicit_selections(self):
+        kitchen = {
+            "inventory": [
+                {"name": "Chicken breast", "form": "Fresh Raw", "amount": "plenty"},
+                {"name": "Macaroni", "form": "Dry", "amount": "plenty"},
+                {"name": "Cheddar cheese", "form": "Refrigerated", "amount": "plenty"},
+                {"name": "Butter", "form": "Refrigerated", "amount": "plenty"},
+                {"name": "Broccoli", "form": "Fresh", "amount": "plenty"},
+            ],
+            "equipment": [{"name": "Stovetop"}],
+        }
+        response = get_known_side_suggestions({
+            "kitchen": kitchen,
+            "selections": {"proteins": [{"name": "Chicken breast", "role": "main"}]},
+        })
+
+        assert response["for_protein"] == "Chicken breast"
+        macaroni = next(
+            item for item in response["suggestions"]
+            if item["archetype"] == "macaroni_and_cheese"
+        )
+        assert macaroni["selection"]["foundation"] == "Macaroni"
+        assert macaroni["uses_only_kitchen_items"] is True
+
     def test_builder_braise_treats_kielbasa_as_a_supporting_protein(self):
         request = {
             "mode": "build_your_meal",

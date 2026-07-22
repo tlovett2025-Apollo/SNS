@@ -16,6 +16,7 @@ from cooking_planner import (
 from culinary_opportunities import discover_opportunities, serialize_opportunities
 from sauce_profiles import SauceIngredient, get_sauce_profile
 from recipe_validation import validate_recipe
+from meal_components import recognize_meal_components
 from math import ceil, floor
 import sqlite3
 
@@ -239,8 +240,6 @@ def _quantity_plan(
         elif basis == "pieces":
             pieces = max(1, ceil(effective * amount))
             label = quantity_label or "piece"
-            if key == "biscuits":
-                label = "biscuit"
             plan[key] = {
                 "display": f"{pieces} {label}{'' if pieces == 1 else 's'}",
                 "planned": pieces, "available": available,
@@ -264,8 +263,6 @@ def _quantity_plan(
         elif basis == "whole_count":
             pieces = max(1, ceil(effective * amount))
             label = quantity_label or "piece"
-            if key == "biscuits":
-                label = "biscuit"
             plan[key] = {
                 "display": f"{pieces} {label}{'' if pieces == 1 else 's'}",
                 "planned": pieces, "available": available,
@@ -561,6 +558,7 @@ def generate_candidates(
     protein_names=None,
     protein_states=None,
     protein_roles=None,
+    component_methods=None,
 ):
     proteins = _unique(list(protein_names or []) or [_clean(protein_name)])
     protein = proteins[0] if proteins else ""
@@ -863,7 +861,24 @@ def generate_candidates(
             "inventory_need": needed,
             "inventory_requirements": ingredient_checks,
             "available_equipment": equipment,
+            "component_methods": dict(component_methods or {}),
         })
+        component_plan = recognize_meal_components(c)
+        c["component_plan"] = component_plan.to_dict()
+        known_checks = {_key(item.get("name")) for item in ingredient_checks}
+        for component in component_plan.components:
+            for use in component.ingredients:
+                if use.source != "pantry_helper" or _key(use.name) in known_checks:
+                    continue
+                helper_check = _component_check(use.name, available, excluded)
+                helper_check.update(
+                    quantity=use.quantity,
+                    component_id=component.component_id,
+                    component_job=use.job,
+                    pantry_helper=True,
+                )
+                ingredient_checks.append(helper_check)
+                known_checks.add(_key(use.name))
         if is_soup:
             liquid_requirement = next((
                 item for item in requirement_checks
@@ -933,6 +948,7 @@ def build_recipe_from_candidate(candidate):
         "experience_overlays": list(candidate.get("experience_overlays") or []),
         "quantity_note": candidate.get("quantity_note") or "",
         "coherence_omissions": list(candidate.get("coherence_omissions") or []),
+        "component_plan": dict(candidate.get("component_plan") or {}),
         "validation": validation,
         "summary": f"{candidate.get('label')} · {candidate.get('energy')} energy · {candidate.get('budget')} · {candidate.get('minutes')} min · serves {candidate.get('servings', 4)}",
     }

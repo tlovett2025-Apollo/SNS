@@ -178,6 +178,38 @@ class APIHTTPTests(unittest.TestCase):
             {"integrated", "composed_plate", "layered_bowl"},
         )
 
+    def test_known_side_suggestions_endpoint_waits_for_a_selected_main(self):
+        response = self.client.post(
+            "/api/GetKnownSideSuggestions",
+            json={"kitchen": kitchen_payload(), "selections": {}},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["suggestions"], [])
+
+    def test_known_side_suggestions_endpoint_returns_trained_selection_contracts(self):
+        kitchen = {
+            "inventory": [
+                {"name": "Chicken breast", "form": "Fresh Raw", "amount": "plenty"},
+                {"name": "Macaroni", "form": "Dry", "amount": "plenty"},
+                {"name": "Cheddar cheese", "form": "Refrigerated", "amount": "plenty"},
+                {"name": "Butter", "form": "Refrigerated", "amount": "plenty"},
+            ],
+            "equipment": [{"name": "Stovetop"}],
+        }
+        response = self.client.post(
+            "/api/GetKnownSideSuggestions",
+            json={
+                "kitchen": kitchen,
+                "selections": {"proteins": [{"name": "Chicken breast", "role": "main"}]},
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        macaroni = next(
+            item for item in response.json()["suggestions"]
+            if item["archetype"] == "macaroni_and_cheese"
+        )
+        self.assertEqual(macaroni["selection"]["foundation"], "Macaroni")
+
     def test_recipe_round_trip_over_http(self):
         kitchen = kitchen_payload()
         choices = self.client.post("/api/GetRecipeList", json=kitchen).json()

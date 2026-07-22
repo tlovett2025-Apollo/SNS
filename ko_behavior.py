@@ -1621,7 +1621,7 @@ ASSIGNMENTS.update({
     "acid_condiment": {"apple cider vinegar", "balsamic vinegar", "white vinegar"},
     "prepared_condiment": {
         "bbq sauce", "hot sauce", "ketchup", "mayonnaise", "mustard", "soy sauce",
-        "worcestershire sauce", "peanut butter", "vanilla extract",
+        "worcestershire sauce", "peanut butter", "salsa", "vanilla extract",
     },
     "tomato_product": {"crushed tomatoes", "diced tomatoes", "rotel", "tomato paste", "tomato sauce"},
     "thickener": {"cornstarch"},
@@ -1746,10 +1746,22 @@ def _apply_db_exceptions(rule, name, form_name, db_path):
     return replace(rule, **updates) if updates else rule
 
 
+# Newly shipped facts must work before a deployed database is reseeded. Verified
+# CKB rows overlay these bootstrap values and remain the training authority.
+SEED_INGREDIENT_ATTRIBUTES = {
+    "biscuits": {
+        "quantity_basis": "pieces", "quantity_per_standard": "2",
+        "quantity_label": "biscuit",
+    },
+    "salsa": {"cuisine_affinity": "Mexican"},
+}
+
+
 def ingredient_attributes(name, form_name="", db_path=None) -> dict[str, str]:
-    """Return verified KO facts without teaching planner code ingredient names."""
+    """Return seed facts plus verified CKB overrides for an ingredient."""
+    attributes = dict(SEED_INGREDIENT_ATTRIBUTES.get(_key(name), {}))
     if not db_path:
-        return {}
+        return attributes
     try:
         with closing(sqlite3.connect(db_path)) as con:
             rows = con.execute(
@@ -1761,9 +1773,10 @@ def ingredient_attributes(name, form_name="", db_path=None) -> dict[str, str]:
                     ORDER BY CASE WHEN a.form_name='' THEN 0 ELSE 1 END""",
                 (name, form_name or ""),
             ).fetchall()
-        return {str(key): str(value) for key, value, _ in rows}
+        attributes.update({str(key): str(value) for key, value, _ in rows})
+        return attributes
     except sqlite3.Error:
-        return {}
+        return attributes
 
 
 def _resolve_behavior_uncached(name, role, form_name="", strategy="", db_path=None) -> ResolvedBehavior:
@@ -2094,6 +2107,10 @@ def seed_behavior_memberships(con):
             "cuisine_affinity": "Mexican,Mediterranean", "quantity_basis": "whole_count",
             "quantity_per_standard": "0.25", "quantity_label": "lime",
         },
+        "biscuits": {
+            "quantity_basis": "pieces", "quantity_per_standard": "2",
+            "quantity_label": "biscuit",
+        },
         "scallions": {
             "quantity_basis": "prepared_cups", "quantity_per_standard": "0.125",
             "quantity_label": "cup",
@@ -2129,7 +2146,10 @@ def seed_behavior_memberships(con):
         "olive oil": {"cuisine_affinity": "Mediterranean"},
         "greek yogurt": {"cuisine_affinity": "Mediterranean"},
         "bbq sauce": {"cuisine_affinity": "BBQ"},
+        "salsa": {"cuisine_affinity": "Mexican"},
     }
+    for ingredient_name, attributes in SEED_INGREDIENT_ATTRIBUTES.items():
+        attribute_rows.setdefault(ingredient_name, {}).update(attributes)
     for name, attributes in attribute_rows.items():
         ingredient_id = ingredient_ids.get(_key(name))
         if ingredient_id is None:
