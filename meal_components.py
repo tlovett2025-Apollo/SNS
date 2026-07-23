@@ -106,7 +106,16 @@ def recognize_meal_components(candidate: dict) -> MealComponentPlan:
     consumed = {
         _key(name)
         for side in selected_sides if isinstance(side, dict)
-        for name in side.get("ingredients") or []
+        for name in (
+            side.get("ingredients")
+            or [
+                *([((side.get("selection") or {}).get("foundation"))]
+                  if (side.get("selection") or {}).get("foundation") else []),
+                *((side.get("selection") or {}).get("produce") or []),
+                *((side.get("selection") or {}).get("extras") or []),
+            ]
+        )
+        if _clean(name)
     }
     components = []
 
@@ -209,7 +218,10 @@ def recognize_meal_components(candidate: dict) -> MealComponentPlan:
                 foundation_name,
                 "pasta" if archetype_code == "macaroni_and_cheese" else "side_base",
             ))
-        uses.extend(ComponentIngredient(name, "vegetable") for name in produce_names)
+        uses.extend(
+            ComponentIngredient(name, ingredient_job(name, "vegetable"))
+            for name in produce_names
+        )
         uses.extend(ComponentIngredient(
             name, ingredient_job(name), "pantry_helper"
         ) for name in extra_names)
@@ -315,9 +327,9 @@ def suggest_known_sides(
     if onions and peppers:
         chosen = [onions, *peppers]
         add(
-            "known-pepper-onion-medley", "pepper_onion_medley", "Pepper and onion medley",
+            "known-pepper-onion-medley", "pepper_onion_medley", f"{' and '.join(chosen)} medley",
             chosen, {"produce": chosen}, "saute", ["stovetop", "12-inch skillet"],
-            "Sauté compatible onions and peppers together until sweet and lightly browned.",
+            "Sauté compatible aromatic vegetables and peppers together until sweet and lightly browned.",
         )
 
     bean = next((
@@ -325,10 +337,16 @@ def suggest_known_sides(
         if _has_family(item, "legume", "foundation")
         or _has_family(item, "prepared_legume", "foundation")
     ), "")
-    if bean:
+    bean_seasoning = next((
+        item for item in inventory
+        if ingredient_job(item) == "seasoning"
+    ), "")
+    if bean and bean_seasoning:
         add(
-            "known-seasoned-beans", "seasoned_beans", f"Seasoned {bean}", [bean],
-            {"foundation": bean}, "simmer", ["stovetop", "1- to 2-quart saucepan"],
+            "known-seasoned-beans", "seasoned_beans", f"Seasoned {bean}",
+            [bean, bean_seasoning],
+            {"foundation": bean, "extras": [bean_seasoning]},
+            "simmer", ["stovetop", "1- to 2-quart saucepan"],
             "Warm the beans separately with compatible seasoning until creamy-tender.",
         )
 

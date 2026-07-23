@@ -319,3 +319,21 @@ def test_meal_navigation_opens_destinations_before_waiting_for_api():
     assert 'href="build-your-meal.html"' in home_page
     assert 'Finding genuinely different ideas from My Kitchen' in flow
     assert 'if (currentPage() !== "choose-recipe.html") return' in flow
+
+
+def test_every_page_can_read_the_server_owned_inventory_shape():
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+
+    assert "saved.foods || saved.inventory || saved.inventory_lots || []" in flow
+
+
+def test_app_pages_cache_bust_shared_assets_as_one_release():
+    pages = [
+        "home.html", "my-kitchen.html", "build-your-meal.html", "choose-recipe.html",
+        "recipe.html", "favorite-recipes.html", "signature-recipes.html",
+        "household-preferences.html", "kitchen-training.html", "pantry-101.html",
+    ]
+    for name in pages:
+        page = (PUBLIC_FLOW.parent / name).read_text(encoding="utf-8")
+        assert "sns-flow.css?v=20260722c1" in page
+        assert "sns-flow.js?v=20260722c1" in page

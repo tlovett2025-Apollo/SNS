@@ -683,16 +683,23 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         prep_activities = [activity for activity in ko_activities if activity.activity_type == "prep"]
         finish_components = []
         early_vegetables = []
-        late_vegetables = []
+        staged_vegetables = []
         for name in vegetables:
             profile = get_ingredient_profile(name, "vegetable")
             traits = set(profile.behavior_traits) | set(profile.physical_traits)
             if "finish-only-default" in traits or profile.add_stage == "finish":
                 finish_components.append(name)
-            elif profile.add_stage == "early" or "early-entry" in traits:
+            elif "flavor-builder" in set(profile.culinary_functions):
                 early_vegetables.append(name)
             else:
-                late_vegetables.append(name)
+                behavior = resolve_behavior(
+                    name, "vegetable", component_forms.get(name.lower(), "Fresh"),
+                    strategy, DB_PATH,
+                )
+                cook_minutes = max(5, min(45, int(
+                    getattr(behavior.method, "cook_minutes", 15) or 15
+                )))
+                staged_vegetables.append((name, cook_minutes))
 
         supporting = protein_specs[1:]
         raw_supporting = [
@@ -796,27 +803,38 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
         ))
 
         main_profile = get_ingredient_profile(protein, "protein")
-        final_window = (
-            30 if braise_device == "slow cooker" and raw_supporting
-            else 15 if raw_supporting or ready_supporting or late_vegetables or foundation else 0
-        )
         if braise_device == "pressure cooker":
-            first_window = 60
+            total_braise = 60
             main_instruction = (
                 f"Cook {protein} at high pressure for 45 minutes, then allow a 15-minute natural release. "
                 "Release any remaining pressure carefully before opening the lid away from your face."
             )
         elif braise_device == "slow cooker":
             total_braise = 360
-            first_window = max(1, total_braise - final_window)
+            main_instruction = ""
+        else:
+            total_braise = max(60, int(main_profile.cook_minutes or 120))
+            main_instruction = ""
+
+        stage_groups = {}
+        if braise_device != "pressure cooker":
+            for name, cook_minutes in staged_vegetables:
+                stage_groups.setdefault(cook_minutes, []).append(name)
+        support_window = (
+            30 if braise_device == "slow cooker" and raw_supporting
+            else 15 if raw_supporting or ready_supporting or foundation else 0
+        )
+        if support_window:
+            stage_groups.setdefault(support_window, []).extend([
+                *raw_supporting, *ready_supporting, *([foundation] if foundation else []),
+            ])
+        longest_stage = max(stage_groups, default=0)
+        first_window = max(1, total_braise - longest_stage)
+        if braise_device == "slow cooker":
             main_instruction = (
                 f"Cook {protein} covered on LOW for about {first_window} minutes. "
                 "Keep the lid closed; add liquid only if the cooker is becoming dry."
             )
-        else:
-            total_braise = max(60, int(main_profile.cook_minutes or 120))
-            first_window = max(1, total_braise - final_window)
-            main_instruction = ""
         activities.append(_planner_activity(
             "covered braise",
             main_instruction or (
@@ -827,34 +845,55 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             depends_on=["build braise:meal"], equipment=heat_equipment,
         ))
         finish_dependency = "covered braise:meal"
-        if final_window:
-            additions = [*raw_supporting, *ready_supporting, *late_vegetables]
-            if foundation:
-                additions.append(foundation)
-            raw_instruction = (
-                (
-                    "Set the pressure cooker to Sauté, then "
-                    if braise_device == "pressure cooker" else ""
-                )
-                + f"nestle {_join(raw_supporting)} into the simmering liquid and cook until safely done "
-                "(165°F for poultry sausage; 160°F for pork or beef sausage). "
-                if raw_supporting else ""
+        ordered_windows = sorted(stage_groups, reverse=True)
+        for index, window in enumerate(ordered_windows):
+            names = list(dict.fromkeys(stage_groups[window]))
+            raw_in_group = [name for name in names if name in raw_supporting]
+            safety_text = (
+                " Verify the center: 165°F for poultry sausage; 160°F for pork or beef sausage."
+                if raw_in_group else ""
             )
-            ready_instruction = (
-                f"Add {_join([*ready_supporting, *late_vegetables, foundation])} only for the final heating window so they hold their texture. "
-                if any([*ready_supporting, *late_vegetables, foundation]) else ""
-            )
-            activities.append(_planner_activity(
-                "finish braise together",
-                (
-                    raw_instruction + ready_instruction
-                    + f"Continue the covered braise for about {final_window} minutes. "
-                    + f"Check {protein}: a fork should enter easily and the meat should yield without springing back."
-                ),
-                minutes=final_window, human_busy=False, stage="late",
+            add_activity = _planner_activity(
+                "add braise component",
+                f"Add {_join(names)} to the braise, cover again, and return it to gentle heat.{safety_text}",
+                minutes=2, human_busy=True, stage="late",
                 depends_on=[finish_dependency], equipment=heat_equipment,
-            ))
-            finish_dependency = "finish braise together:meal"
+            )
+            add_activity.component = _join(names)
+            add_activity.activity_id = f"add braise component:{'-'.join(_clean(name).lower().replace(' ', '-') for name in names)}"
+            activities.append(add_activity)
+            next_window = ordered_windows[index + 1] if index + 1 < len(ordered_windows) else 0
+            segment = max(1, window - next_window)
+            cook_activity = _planner_activity(
+                "continue braise",
+                (
+                    f"Continue the covered braise for about {segment} minutes. "
+                    f"Keep the liquid below a hard boil and check that {_join(names)} is progressing toward tenderness."
+                ),
+                minutes=segment, human_busy=False, stage="late",
+                depends_on=[add_activity.activity_id], equipment=heat_equipment,
+            )
+            cook_activity.component = _join(names)
+            cook_activity.activity_id = f"continue braise:{'-'.join(_clean(name).lower().replace(' ', '-') for name in names)}"
+            activities.append(cook_activity)
+            finish_dependency = cook_activity.activity_id
+
+        if braise_device == "pressure cooker" and staged_vegetables:
+            names = [name for name, _minutes in staged_vegetables]
+            longest = max(minutes for _name, minutes in staged_vegetables)
+            pressure_finish = _planner_activity(
+                "finish vegetables after pressure",
+                (
+                    f"With the pressure released and the lid removed, add {_join(names)}. "
+                    f"Use Sauté on low and simmer gently for about {longest} minutes, removing individual vegetables when tender."
+                ),
+                minutes=longest, human_busy=True, stage="late",
+                depends_on=[finish_dependency], equipment="pressure cooker",
+            )
+            pressure_finish.component = _join(names)
+            pressure_finish.activity_id = "finish vegetables after pressure:meal"
+            activities.append(pressure_finish)
+            finish_dependency = pressure_finish.activity_id
 
         finish_opening = (
             "With the pressure-cooker lid safely removed, check the sauce."
@@ -2177,6 +2216,11 @@ def apply_component_plan_activities(
         ):
             continue
         names = [_clean(item.get("name")) for item in component_plan.get("ingredients") or [] if _clean(item.get("name"))]
+        component_uses = {
+            _clean(item.get("name")): item
+            for item in component_plan.get("ingredients") or []
+            if _clean(item.get("name"))
+        }
         related = [
             activity for activity in activities
             if activity.component in names
@@ -2191,10 +2235,40 @@ def apply_component_plan_activities(
         dependencies = list(dict.fromkeys(
             dependency for activity in related for dependency in activity.depends_on
         ))
+        prep_lines = []
+        prep_minutes = 0
+        for name in names:
+            use = component_uses.get(name) or {}
+            job = _clean(use.get("job"))
+            if job in {"seasoning", "acid", "fat", "sauce_fat", "sauce_liquid", "cheese"}:
+                continue
+            role = "foundation" if job in {"side_base", "pasta", "bread_side"} else "vegetable"
+            form = _clean((candidate.get("component_forms") or {}).get(name))
+            behavior = resolve_behavior(
+                name, role, form, component_plan.get("method"), DB_PATH
+            )
+            if behavior.method and behavior.method.handling_template:
+                prep_lines.append(behavior.method.handling_template.format(name=name))
+                prep_minutes += int(behavior.method.prep_minutes or 0)
+            elif "canned" in form.lower():
+                prep_lines.append(f"Drain and rinse {name}.")
+                prep_minutes += 1
+        prep_id = ""
+        if prep_lines:
+            prep_activity = _planner_activity(
+                "prep side",
+                "Prepare the side ingredients:\n\n- " + "\n\n- ".join(prep_lines),
+                minutes=max(1, prep_minutes), human_busy=True, stage="early",
+                depends_on=["gather:meal"], equipment="counter",
+            )
+            prep_activity.component = component_plan.get("name") or "Side"
+            prep_activity.activity_id = f"prep side:{component_plan.get('archetype')}"
+            activities.append(prep_activity)
+            prep_id = prep_activity.activity_id
         side_activity = _planner_activity(
             "prepare side", instruction, minutes=minutes,
             human_busy=component_plan.get("method") not in {"bake", "roast", "absorption_or_appliance"},
-            stage="middle", depends_on=dependencies or (["prep:meal"] if any(
+            stage="middle", depends_on=([prep_id] if prep_id else dependencies) or (["prep:meal"] if any(
                 _activity_id(item) == "prep:meal" for item in activities
             ) else []),
             equipment="oven" if component_plan.get("method") in {"bake", "roast", "package_method"} else "burner",
@@ -3457,7 +3531,11 @@ def generate_equipment_list(candidate: dict) -> List[str]:
     equipment: List[str] = []
 
     def add(item: str):
-        if item and _clean(item).lower() not in {_clean(existing).lower() for existing in equipment}:
+        normalized = _clean(item).lower()
+        existing = {_clean(value).lower() for value in equipment}
+        if normalized == "wooden spoon or heat-safe spatula" and existing & {"wooden spoon", "heat-safe spatula"}:
+            return
+        if item and normalized not in existing:
             equipment.append(item)
 
     for component in (candidate.get("component_plan") or {}).get("components") or []:
@@ -3484,11 +3562,10 @@ def generate_equipment_list(candidate: dict) -> List[str]:
         add("Wooden spoon or heat-safe spatula")
     if "small saucepan" in instructions:
         add("1- to 2-quart saucepan")
-        add("Whisk")
+        if "whisk" in instructions:
+            add("Whisk")
     if any((item.activity.equipment or "").lower() == "oven" for item in schedule):
         add("Oven")
-        if not any("sheet pan" in item.lower() or "baking dish" in item.lower() for item in equipment):
-            add("Small sheet pan")
     if any(
         _clean(item.get("state")).lower().replace("-", " ") in {"fresh raw", "frozen raw"}
         for item in candidate.get("proteins") or [] if isinstance(item, dict)

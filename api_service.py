@@ -557,7 +557,7 @@ def _engine_request(payload: dict, db_path: str | Path):
         "budget_level": "Moderate",
         "time_minutes": preferences.get("maximum_active_minutes") or payload.get("time_minutes") or 45,
         "servings": payload.get("servings") or 4,
-        "max_results": payload.get("max_results") or 10,
+        "max_results": payload.get("max_results") or 12,
         "vegetable_names": [item.name for item in vegetables],
         "protein_state": _protein_state(protein),
         "available_items": names,
@@ -1539,7 +1539,7 @@ def _raw_candidates(payload: dict, db_path: str | Path):
     )):
         return snapshot, resolved, pending, [], engine_request
     pool = []
-    max_results = min(6, max(1, int(engine_request.get("max_results") or 6)))
+    max_results = min(12, max(1, int(engine_request.get("max_results") or 12)))
     for index, (concept_request, protein) in enumerate(
         _concept_requests(engine_request, resolved)
     ):

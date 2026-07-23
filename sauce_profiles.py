@@ -98,6 +98,35 @@ SIMPLE_COMFORT_PAN_SAUCE = SauceProfile(
 )
 
 
+SIMPLE_SAVORY_BRAISING_LIQUID = SauceProfile(
+    name="simple savory braising liquid",
+    ingredients=[
+        SauceIngredient(
+            "Cooking oil or butter", "1 tablespoon",
+            substitutes=("Cooking oil", "Butter", "Olive oil", "Vegetable oil", "Canola oil"),
+        ),
+        SauceIngredient(
+            "Broth or water", "1 1/2 cups",
+            substitutes=("Chicken broth", "Beef broth", "Vegetable broth", "Water", "Bouillon"),
+        ),
+        SauceIngredient("Garlic powder", "1/2 teaspoon", pantry_optional=True),
+        SauceIngredient("Onion powder", "1/2 teaspoon", pantry_optional=True),
+        SauceIngredient("Black pepper", "1/4 teaspoon", pantry_optional=True),
+        SauceIngredient("Salt", "only after tasting, if needed", pantry_optional=True),
+    ],
+    prep_instruction=(
+        "Measure the braising liquid, garlic powder, onion powder, and black pepper. "
+        "Keep the salt for the final taste."
+    ),
+    cook_instruction=(
+        "Pour in enough braising liquid to come one-third to halfway up the meat. "
+        "Scrape the browned bits from the vessel, stir in the measured seasonings, and bring the liquid to a gentle simmer."
+    ),
+    prep_minutes=2,
+    finish_minutes=3,
+)
+
+
 BBQ_BRAISING_SAUCE = SauceProfile(
     name="BBQ Sauce",
     ingredients=[
@@ -243,6 +272,8 @@ def get_sauce_profile(name: str):
         return SIMPLE_STIR_FRY_SAUCE
     if key == "simple comfort pan sauce" or "gravy or cream" in key:
         return SIMPLE_COMFORT_PAN_SAUCE
+    if key == "simple savory braising liquid":
+        return SIMPLE_SAVORY_BRAISING_LIQUID
     if key == "bbq sauce" or "barbecue" in key:
         return BBQ_BRAISING_SAUCE
     if "italian" in key or "tomato sauce or cream" in key:

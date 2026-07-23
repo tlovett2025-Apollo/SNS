@@ -4,6 +4,7 @@ from math import ceil
 import re
 
 from ingredient_profiles import get_ingredient_profile
+from side_archetypes import side_archetype
 
 
 def _clean(value):
@@ -28,6 +29,45 @@ def validate_recipe(candidate: dict, plan_items: list[dict]) -> dict:
     lowered = all_text.lower()
     errors = []
     warnings = []
+
+    # Component ownership is authoritative.  No ingredient may be compiled
+    # into two components unless a future contract explicitly declares split
+    # quantities.  Selected side archetypes must also satisfy every culinary
+    # job promised by their trained contract before scheduling begins.
+    owners = {}
+    for component in (candidate.get("component_plan") or {}).get("components") or []:
+        component_id = _clean(component.get("component_id")) or _clean(component.get("name"))
+        jobs = {_key(item.get("job")) for item in component.get("ingredients") or []}
+        for ingredient in component.get("ingredients") or []:
+            name = _clean(ingredient.get("name"))
+            if name:
+                owners.setdefault(_key(name), []).append(component_id)
+        if component.get("role") != "side":
+            continue
+        trained = side_archetype(_clean(component.get("archetype")))
+        if not trained:
+            continue
+        job_equivalents = {
+            "side_base": {"side_base", "pasta", "bread_side"},
+            "sauce_liquid_or_fat": {"sauce_liquid", "fat", "sauce_fat"},
+            "fat_or_dairy": {"fat", "sauce_fat", "sauce_liquid", "cheese"},
+            "aromatic_or_heat": {"aromatic", "heat"},
+        }
+        for requirement in trained.required_jobs:
+            alternatives = job_equivalents.get(
+                requirement,
+                {_key(item) for item in requirement.split("_or_")},
+            )
+            if not jobs.intersection(alternatives):
+                errors.append(
+                    f"Side component {component_id} is missing its required {requirement} ingredient job."
+                )
+    for name, component_ids in owners.items():
+        unique_owners = list(dict.fromkeys(component_ids))
+        if len(unique_owners) > 1:
+            errors.append(
+                f"Ingredient {name} is assigned to multiple components: {', '.join(unique_owners)}."
+            )
 
     if re.search(r"\bKO(?:-approved)?\b|knowledge object", all_text, re.IGNORECASE):
         errors.append("Internal KO terminology reached the customer recipe.")

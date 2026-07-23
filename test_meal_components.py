@@ -125,3 +125,58 @@ class MealComponentTests(unittest.TestCase):
             assert trained.outcome.endswith(".")
             assert trained.holdability in {"poor", "fair", "good", "excellent"}
             assert "{" in template and "}" in template
+
+
+ def test_selected_sides_own_their_ingredients_before_a_braise_is_compiled(self):
+    sides = [
+        {
+            "side_id": "known-pepper-onion-medley",
+            "archetype": "pepper_onion_medley",
+            "name": "Celery and Poblanos medley",
+            "ingredients": ["Celery", "Poblanos"],
+            "selection": {"produce": ["Celery", "Poblanos"]},
+            "method": "saute",
+        },
+        {
+            "side_id": "known-seasoned-beans",
+            "archetype": "seasoned_beans",
+            "name": "Seasoned Black beans",
+            "ingredients": ["Black beans", "Garlic powder"],
+            "selection": {
+                "foundation": "Black beans", "extras": ["Garlic powder"],
+            },
+            "method": "simmer",
+        },
+    ]
+    candidate = generate_candidates(
+        "Beef brisket", "", "", "Comfort Food", "High", "Moderate", 240, 4, 1,
+        vegetable_names=[
+            "Acorn squash", "Artichokes", "Cabbage", "Celery", "Poblanos",
+        ],
+        protein_state="Frozen Raw",
+        available_items=[
+            "Beef brisket", "Acorn squash", "Artichokes", "Cabbage", "Celery",
+            "Poblanos", "Black beans", "Garlic powder", "Onion powder",
+            "Black pepper", "Chicken broth", "Butter", "Milk", "All-purpose flour",
+        ],
+        available_equipment=["Oven", "Stovetop"], requested_method="oven_braise",
+        component_forms={
+            "Acorn squash": "Fresh", "Artichokes": "Fresh", "Cabbage": "Fresh",
+            "Celery": "Fresh", "Poblanos": "Fresh", "Black beans": "Canned",
+        },
+        selected_side_components=sides,
+    )[0]
+    recipe = build_recipe_from_candidate(candidate)
+    plan = " ".join(recipe["instructions"])
+
+    assert candidate["vegetable"] == "Acorn squash & Artichokes & Cabbage"
+    assert candidate["foundation"] == ""
+    assert "Add Celery & Poblanos around the meat" not in plan
+    assert "Add Black beans" not in plan
+    assert plan.count("Sauté Celery & Poblanos") == 1
+    assert plan.count("Put Black beans in a small saucepan") == 1
+    assert "Milk" not in plan
+    assert "All-purpose flour" not in plan
+    assert plan.index("Add Artichokes to the braise") < plan.index("Add Acorn squash to the braise")
+    assert plan.index("Add Acorn squash to the braise") < plan.index("Add Cabbage to the braise")
+    assert recipe["validation"]["production_ready"] is True

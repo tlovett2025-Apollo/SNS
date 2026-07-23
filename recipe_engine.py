@@ -572,12 +572,12 @@ def generate_candidates(
     protein_roles = dict(protein_roles or {})
     protein_state = _clean(protein_states.get(protein) or protein_state) or "Fresh Raw"
 
-    if vegetable_names:
-        vegetable = _join(vegetable_names)
-    else:
-        vegetable = _clean(vegetable_name)
-
-    foundation = _clean(foundation_name)
+    all_vegetables = _unique(
+        list(vegetable_names or [])
+        if vegetable_names
+        else [item for item in _clean(vegetable_name).split(" & ") if _clean(item)]
+    )
+    selected_foundation = _clean(foundation_name)
     cuisine = _clean(cuisine_name) or "Comfort Food"
     sauce = _sauce_for_cuisine(cuisine)
     selected_side_components = [
@@ -589,23 +589,41 @@ def generate_candidates(
         for name in component.get("ingredients") or []
         if _clean(name)
     ]
+    side_ingredient_keys = {_key(name) for name in side_ingredient_names}
+    # Component ownership is assigned before method eligibility, sauce
+    # selection, or activity publication.  A selected side ingredient must
+    # never also enter the main vessel unless a future contract explicitly
+    # allocates a split quantity.
+    main_vegetables = [
+        name for name in all_vegetables if _key(name) not in side_ingredient_keys
+    ]
+    vegetable = _join(main_vegetables)
+    foundation = (
+        "" if _key(selected_foundation) in side_ingredient_keys
+        else selected_foundation
+    )
     selected_components = _unique([
-        *proteins, *_clean(vegetable).split(" & "), foundation, *side_ingredient_names,
+        *proteins, *main_vegetables, foundation, *side_ingredient_names,
     ])
-    extras = _unique(list(selected_extras or []))
+    extras = [
+        item for item in _unique(list(selected_extras or []))
+        if _key(item) not in side_ingredient_keys
+    ]
     component_forms = dict(component_forms or {})
-    for name in _clean(vegetable).split(" & "):
+    for name in all_vegetables:
         if _clean(name) and not _clean(component_forms.get(name)):
             component_forms[name] = default_form_for(name, "vegetable", DB_PATH)
-    if foundation and not _clean(component_forms.get(foundation)):
-        component_forms[foundation] = default_form_for(foundation, "foundation", DB_PATH)
+    if selected_foundation and not _clean(component_forms.get(selected_foundation)):
+        component_forms[selected_foundation] = default_form_for(selected_foundation, "foundation", DB_PATH)
     planned_purchase_keys = {_key(item) for item in (planned_purchase_items or [])}
     available = _unique(list(available_items or []) + [
         item for item in selected_components if _key(item) not in planned_purchase_keys
     ])
     # Eligibility is about whether the finished meal has the component, while
     # ingredient status is about whether the household owns it today.
-    method_resources = _unique(available + selected_components + extras)
+    method_resources = _unique([
+        item for item in available if _key(item) not in side_ingredient_keys
+    ] + [*proteins, *main_vegetables, foundation] + extras)
     equipment = _unique(list(available_equipment or []))
     excluded = _unique(list(excluded_items or []))
     try:
@@ -669,6 +687,7 @@ def generate_candidates(
         is_grill = method["cooking_method"] == "grill"
         method_sauce = (
             "rustic broth soup" if is_soup
+            else "simple savory braising liquid" if is_braise and sauce == "simple comfort pan sauce"
             else "simple sauce" if is_grill
             else "handheld spread or sauce" if method["cooking_method"] == "handheld"
             else sauce

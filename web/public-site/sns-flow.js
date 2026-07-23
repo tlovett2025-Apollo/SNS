@@ -307,7 +307,8 @@ const SNS = (() => {
       name: row.querySelector("[data-member-name]")?.value.trim() || "Household member",
       appetite: row.querySelector("[data-member-appetite]")?.value || "standard"
     }));
-    const inventory = foodRows.length ? items : (saved.foods || []).filter(item => Number(item.quantity || 0) > 0);
+    const savedInventory = saved.foods || saved.inventory || saved.inventory_lots || [];
+    const inventory = foodRows.length ? items : savedInventory.filter(item => Number(item.quantity || 0) > 0);
     const members = memberRows.length ? householdMembers : (saved.household_members || []);
     const equipmentButtons = [...document.querySelectorAll("[data-equipment]")];
     const equipment = equipmentButtons.length
@@ -528,7 +529,7 @@ const SNS = (() => {
         package_weight_oz: Number(row.querySelector("[data-package-weight]")?.value || 0) || null,
         expiration_date: row.querySelector("[data-expiration-date]")?.value || null,
         custom: row.dataset.custom === "true"
-      })) : (saved.foods || []),
+      })) : (saved.foods || saved.inventory || saved.inventory_lots || []),
       equipment: equipmentButtons.length ? equipmentButtons.map(button => ({
         name: button.dataset.equipment,
         active: button.classList.contains("active"),

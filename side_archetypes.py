@@ -49,9 +49,9 @@ SIDE_ARCHETYPES = {
 
 SIDE_ACTIVITY_TEMPLATES = {
     "macaroni_and_cheese": "Boil and drain {base}, then finish it gently with the cheese and sauce ingredients until smoothly coated.",
-    "seasoned_beans": "Put {ingredients} in a small saucepan with a splash of water or broth. Simmer gently, stirring occasionally, until steaming hot and creamy-tender.",
+    "seasoned_beans": "Put {base} in a small saucepan with a splash of water or broth. Add 1/4 teaspoon of the selected seasoning, simmer gently until steaming hot and creamy-tender, then taste before adding more.",
     "steamed_vegetables": "Steam {ingredients} together in a covered pot until bright and crisp-tender; remove individual pieces early if they finish first.",
-    "pepper_onion_medley": "Sauté {ingredients} together in a wide skillet until the onions are sweet and the peppers bend easily with lightly browned edges.",
+    "pepper_onion_medley": "Sauté {ingredients} together in a wide skillet until the aromatic vegetables are sweet and the peppers bend easily with lightly browned edges.",
     "mashed_potatoes": "Boil {base} until completely tender, drain well, then mash with the selected fat or dairy to the desired texture.",
     "boxed_scalloped_potatoes": "Prepare {base} according to its package method, using the package's stated liquid, vessel, temperature, and doneness cues.",
     "rice_side": "Cook {base} by its verified absorption or appliance method; rest covered, then fluff before serving.",

@@ -724,7 +724,7 @@ FAMILY_LIBRARY.update({
         (method(
             "simmer", ("fresh",), "covered steam or simmer",
             "steamy tenderizing environment", 8, 35, 5, .15, "burner", "early",
-            "Trim the stem and sharp leaf tips from {name}; rinse between the leaves and rub cut surfaces with lemon.",
+            "Trim the stem and sharp leaf tips from {name}; rinse between the leaves and keep cut surfaces in cool water while you finish prep.",
             "Steam or gently simmer {name} covered until a leaf pulls free easily and the heart is tender.",
             "Tender edible leaf bases and heart.", "An inner leaf pulls out easily and a knife enters the heart without resistance.",
             "A short skillet cook leaves fresh artichoke fibrous and inedible.",
