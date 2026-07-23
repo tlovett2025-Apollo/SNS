@@ -508,6 +508,24 @@ class APIServiceTests(unittest.TestCase):
         self.assertIn("fruit", {item["kind"] for item in options["produce"]})
         self.assertFalse(next(item for item in options["serving_temperatures"] if item["id"] == "cold")["available"])
 
+    def test_builder_catalog_uses_owned_form_for_canned_placement(self):
+        kitchen = {
+            "inventory": [
+                {"name": "Carrots", "form": "Fresh", "quantity": 2, "unit": "piece"},
+                {"name": "Potatoes", "form": "Fresh", "quantity": 3, "unit": "piece"},
+            ]
+        }
+
+        options = get_meal_builder_options(kitchen)
+        produce = {item["name"]: item for item in options["produce"]}
+
+        self.assertTrue(produce["Carrots"]["owned"])
+        self.assertFalse(produce["Carrots"]["canned"])
+        self.assertTrue(produce["Carrots"]["has_canned_form"])
+        self.assertTrue(produce["Potatoes"]["owned"])
+        self.assertFalse(produce["Potatoes"]["canned"])
+        self.assertTrue(produce["Potatoes"]["has_canned_form"])
+
     def test_builder_canonicalizes_common_inventory_names_before_matching(self):
         kitchen = {
             "inventory": [

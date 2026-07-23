@@ -355,10 +355,15 @@ def get_meal_builder_options(payload: dict | None = None, db_path: str | Path = 
             "owned": _key(name) in owned,
             "form": inventory_item.form_name if inventory_item else None,
             "category": metadata.get("category", ""),
+            # Catalog placement describes the form that is actually in this
+            # kitchen.  The mere existence of a canned form in the CKB must
+            # not move fresh carrots, potatoes, or other produce into the
+            # Canned Food filter.
             "canned": bool(
-                metadata.get("canned")
-                or "canned" in _key(inventory_item.form_name if inventory_item else "")
+                inventory_item
+                and "canned" in _key(inventory_item.form_name)
             ),
+            "has_canned_form": bool(metadata.get("canned")),
             **extra,
         }
 
