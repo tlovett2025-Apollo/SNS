@@ -335,5 +335,5 @@ def test_app_pages_cache_bust_shared_assets_as_one_release():
     ]
     for name in pages:
         page = (PUBLIC_FLOW.parent / name).read_text(encoding="utf-8")
-        assert "sns-flow.css?v=20260722c1" in page
-        assert "sns-flow.js?v=20260722c1" in page
+        assert "sns-flow.css?v=20260723c1" in page
+        assert "sns-flow.js?v=20260723c1" in page

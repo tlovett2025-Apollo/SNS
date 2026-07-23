@@ -23,6 +23,15 @@ def _key(value) -> str:
     return " ".join(_clean(value).lower().replace("-", " ").split())
 
 
+def _is_macaroni_cheese_base(name: str) -> bool:
+    """Only recognized macaroni shapes trigger the known cheese-side recipe."""
+    value = _key(name)
+    return any(token in value for token in (
+        "macaroni", "elbow pasta", "elbow noodles", "small shells",
+        "shell pasta", "cavatappi",
+    ))
+
+
 @dataclass(frozen=True)
 class ComponentIngredient:
     name: str
@@ -170,7 +179,7 @@ def recognize_meal_components(candidate: dict) -> MealComponentPlan:
             _has_family(foundation, "bread_wrap", "foundation")
             and _clean(candidate.get("cooking_method")) != "handheld"
         )
-        if is_pasta and cheese and (milk or butter):
+        if is_pasta and _is_macaroni_cheese_base(foundation) and cheese and (milk or butter):
             helpers = [
                 ComponentIngredient(foundation, "pasta"),
                 ComponentIngredient(cheese, "cheese", "pantry_helper", "1 cup shredded"),
@@ -287,7 +296,10 @@ def suggest_known_sides(
     cheese = _first_with_family(inventory, "melting_cheese")
     milk = _first_with_family(inventory, "milk_cream")
     fat = _first_with_family(inventory, "cooking_fat")
-    pasta = next((item for item in foundations if _has_family(item, "pasta", "foundation")), "")
+    pasta = next((
+        item for item in foundations
+        if _has_family(item, "pasta", "foundation") and _is_macaroni_cheese_base(item)
+    ), "")
     if pasta and cheese and (milk or fat):
         helpers = [cheese, *([milk] if milk else []), *([fat] if fat else [])]
         add(

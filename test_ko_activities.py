@@ -119,6 +119,18 @@ def test_fresh_raw_chicken_publishes_cook_rest_and_slice():
     assert kinds == ["prep", "cook", "verify", "rest"]
 
 
+def test_half_inch_chicken_breast_slices_use_the_short_predictable_route():
+    activities = build_cooking_activities(state_candidate("Thin-sliced Raw"))
+    cook = next(
+        item for item in activities
+        if item.component == "Chicken breast" and item.activity_type == "cook"
+    )
+    assert cook.minutes == 8
+    assert "1/2-inch" in cook.instruction
+    assert "3–4 minutes" in cook.instruction
+    assert "165°F" in cook.instruction
+
+
 def test_fresh_grill_proteins_never_publish_conditional_thaw_chatter():
     for name in ("Italian sausage", "Turkey sausage", "Kielbasa", "Shrimp"):
         activities = get_ingredient_profile(name, "protein").publish_activities(

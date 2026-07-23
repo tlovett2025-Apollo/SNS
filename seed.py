@@ -34,6 +34,11 @@ def seed():
         ("Instant Pot", "small appliance"),
         ("Microwave", "small appliance"),
         ("Accessory", "accessory"),
+        ("Steamer Basket", "accessory"),
+        ("Immersion Blender", "blender"),
+        ("Food Processor", "small appliance"),
+        ("Electric Griddle", "small appliance"),
+        ("Roasting Pan", "pan"),
     ]
     for eq, eq_type in equipment_rows:
         if not exists("equipment", "name", eq):

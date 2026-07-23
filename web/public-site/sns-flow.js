@@ -1679,7 +1679,8 @@ const SNS = (() => {
     let sideSuggestionRequest = 0;
     let appliedSideSelections = { foundation: "", produce: new Set(), extras: new Set() };
     const inferProteinState = item => {
-      return item.default_state || "Fresh Raw";
+      const form = String(item.form || "");
+      return /thin[ -]?slic|cutlet/i.test(form) ? form : (item.default_state || "Fresh Raw");
     };
     proteinHolder.innerHTML = (options.proteins || []).map(item => {
       const isOwned = item.owned ?? owned.has(String(item.name).toLowerCase());
@@ -1689,6 +1690,7 @@ const SNS = (() => {
         <span>${escapeHtml(item.name)}</span>
         <small data-protein-role>${isOwned ? `In My Kitchen${item.form ? ` · ${escapeHtml(item.form)}` : ""}` : "Added to grocery list"}</small>
         <select data-protein-state aria-label="${escapeHtml(item.name)} form"${isOwned ? " disabled" : ""}>
+          ${/thin[ -]?slic|cutlet/i.test(state) ? `<option selected>${escapeHtml(state)}</option>` : ""}
           <option${state === "Fresh Raw" ? " selected" : ""}>Fresh Raw</option>
           <option${state === "Frozen Raw" ? " selected" : ""}>Frozen Raw</option>
           <option${state === "Cooked" ? " selected" : ""}>Cooked</option>
@@ -1847,7 +1849,7 @@ const SNS = (() => {
 
     if (catalogHolder) {
       catalogHolder.innerHTML = catalogItems.map(item => `
-        <button type="button" data-catalog-item data-catalog-kind="${item.catalogKind}" data-selection-kind="${item.selectionKind || item.catalogKind}" data-pantry-group="${item.pantryGroup || ""}" data-catalog-name="${escapeHtml(item.name)}" data-search-name="${escapeHtml(item.name.toLowerCase())}" aria-pressed="false">
+        <button type="button" data-catalog-item data-catalog-kind="${item.catalogKind}" data-selection-kind="${item.selectionKind || item.catalogKind}" data-pantry-group="${item.pantryGroup || ""}" data-owned="${item.owned ?? owned.has(String(item.name).toLowerCase())}" data-catalog-name="${escapeHtml(item.name)}" data-search-name="${escapeHtml(item.name.toLowerCase())}" aria-pressed="false">
           <span><strong>${escapeHtml(item.name)}</strong><small>${item.owned ?? owned.has(String(item.name).toLowerCase()) ? "In My Kitchen · " : "Grocery item · "}${escapeHtml(item.catalogLabel)}</small></span>
           <b data-catalog-action>Add</b>
         </button>`).join("");
@@ -2047,6 +2049,7 @@ const SNS = (() => {
       let matches = 0;
       catalogHolder?.querySelectorAll("[data-catalog-item]").forEach(button => {
         const inFilter = filter === "all"
+          || (filter === "owned" && button.dataset.owned === "true")
           || button.dataset.catalogKind === filter
           || (filter === "pantry" && button.dataset.catalogKind === "foundation" && Boolean(button.dataset.pantryGroup));
         const visible = inFilter

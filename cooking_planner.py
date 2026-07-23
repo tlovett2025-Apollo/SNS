@@ -571,7 +571,27 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
     for item in protein_specs:
         name = _clean(item.get("name"))
         state = _clean(item.get("state")) or (protein_state if name == protein else "Fresh Raw")
-        activities.extend(get_ingredient_profile(name, "protein").publish_activities(strategy, state))
+        published = get_ingredient_profile(name, "protein").publish_activities(strategy, state)
+        if (
+            name.lower() == "chicken breast"
+            and ("thin" in state.lower() or "cutlet" in state.lower())
+        ):
+            for activity in published:
+                if activity.activity_type == "cook" and strategy == "skillet":
+                    activity.minutes = 8
+                    activity.active_minutes = min(int(activity.active_minutes or 0), 5)
+                    activity.instruction = (
+                        "Cook the 1/2-inch chicken breast slices in a single layer for "
+                        "about 3–4 minutes on the first side and 2–4 minutes after turning. "
+                        "Stop when the thickest slice reaches 165°F; remove finished slices "
+                        "individually rather than overcooking the whole batch."
+                    )
+                elif activity.activity_type == "prep":
+                    activity.instruction = (
+                        "Do not rinse the thin-sliced chicken breast. Pat it dry and "
+                        "season both sides; no pounding or thickness-evening is needed."
+                    )
+        activities.extend(published)
     for vegetable in vegetables:
         activities.extend(
             get_ingredient_profile(vegetable, "vegetable").publish_activities(

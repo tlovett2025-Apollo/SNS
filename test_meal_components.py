@@ -29,7 +29,7 @@ class MealComponentTests(unittest.TestCase):
 
  def test_pasta_cheese_and_milk_capabilities_recognize_mac_and_cheese(self):
     plan = recognize_meal_components(component_candidate(
-        "Pasta", ["Pasta", "Mozzarella cheese", "Milk"],
+        "Macaroni", ["Macaroni", "Mozzarella cheese", "Milk"],
     )).to_dict()
     side = next(item for item in plan["components"] if item["role"] == "side")
 
@@ -38,6 +38,13 @@ class MealComponentTests(unittest.TestCase):
     assert {item["job"] for item in side["ingredients"]} == {
         "pasta", "cheese", "sauce_liquid",
     }
+
+ def test_egg_noodles_do_not_turn_into_macaroni_and_cheese(self):
+    plan = recognize_meal_components(component_candidate(
+        "Egg noodles", ["Egg noodles", "Cheddar cheese", "Milk", "Butter"],
+    )).to_dict()
+    side = next(item for item in plan["components"] if item["role"] == "side")
+    assert side["archetype"] == "prepared_side"
 
 
  def test_pasta_without_cheese_remains_a_plain_prepared_side(self):

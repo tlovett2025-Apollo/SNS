@@ -21,7 +21,7 @@ class PlannerVoiceTests(unittest.TestCase):
         self.assertIn("30 minutes", result)
         self.assertIn("low energy", result)
 
-    def test_passive_window_reassures_without_chatter(self):
+    def test_passive_window_does_not_add_attention_commentary(self):
         activity = SimpleNamespace(
             activity_type="rest",
             component="Chicken breast",
@@ -30,10 +30,10 @@ class PlannerVoiceTests(unittest.TestCase):
             stage="late",
         )
         result = activity_message(activity, duration=5, attention_minutes=0)
-        self.assertIn("Nothing needs your full attention", result)
+        self.assertNotIn("attention", result.lower())
         self.assertNotIn("Awesome", result)
 
-    def test_partial_attention_is_explained(self):
+    def test_partial_attention_stays_internal(self):
         activity = SimpleNamespace(
             activity_type="cook",
             component="Mushrooms",
@@ -42,7 +42,7 @@ class PlannerVoiceTests(unittest.TestCase):
             stage="middle",
         )
         result = activity_message(activity, duration=6, attention_minutes=2)
-        self.assertIn("2 minutes of attention", result)
+        self.assertNotIn("attention", result.lower())
 
     def test_launch_prep_uses_kitchen_language_not_engine_jargon(self):
         activity = SimpleNamespace(
