@@ -49,6 +49,15 @@ FORM_LABELS = {
     "dry": "Dry",
     "dried": "Dry",
     "shelf stable": "Shelf-stable",
+    "thin sliced raw": "Thin-sliced Raw",
+}
+
+# Inventory forms can be more precise than a cooking method's broad eligibility
+# form. Preserve the precise form in the saved lot while validating it through
+# the compatible method form. This lets planners distinguish a half-inch
+# chicken-breast slice from a whole breast without duplicating the ingredient.
+FORM_METHOD_EQUIVALENTS = {
+    "thin sliced raw": ("fresh raw",),
 }
 
 FAMILY_UNIT_RULES = {
@@ -177,6 +186,11 @@ def _canonical_inventory_form(selected_form: str, forms: tuple[str, ...], family
     by_key = {_key(value): value for value in forms}
     if not method_keys:
         return by_key.get(selected_key) or _clean(selected_form)
+    if selected_key in by_key and any(
+        method_key in method_keys
+        for method_key in FORM_METHOD_EQUIVALENTS.get(selected_key, (selected_key,))
+    ):
+        return by_key[selected_key]
     aliases = {
         "pantry": ("shelf stable", "dry", "dried", "ready to eat", "cooked"),
         "shelf stable": ("shelf stable", "dry", "dried", "ready to eat", "cooked"),

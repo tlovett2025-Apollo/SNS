@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#355f49">
   <title>Help Me Build My Meal · Stock &amp; Stir</title>
-  <link rel="stylesheet" href="sns-flow.css?v=20260723c1">
+  <link rel="stylesheet" href="sns-flow.css?v=20260723c2">
 </head>
 <body data-app-shell>
 <header class="site-header">
@@ -100,8 +100,11 @@
       <button type="submit" value="close" class="catalog-close" aria-label="Close ingredient chooser">×</button>
     </header>
     <label class="builder-field"><span class="sr-only">Search all known ingredients</span><input type="search" data-catalog-search placeholder="Search all known ingredients…" autocomplete="off"></label>
+    <div class="catalog-filters catalog-scope" role="group" aria-label="Ingredient availability">
+      <button type="button" class="active" data-catalog-scope="owned">On hand only</button>
+      <button type="button" data-catalog-scope="all">Include grocery items</button>
+    </div>
     <div class="catalog-filters" role="group" aria-label="Ingredient type">
-      <button type="button" data-catalog-filter="owned">My Kitchen</button>
       <button type="button" class="active" data-catalog-filter="all">All</button>
       <button type="button" data-catalog-filter="protein">Proteins</button>
       <button type="button" data-catalog-filter="vegetable">Vegetables</button>
@@ -136,6 +139,6 @@
     </footer>
   </form>
 </dialog>
-<script src="sns-config.js?v=20260723c1"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script><script src="sns-auth.js?v=20260723c1"></script><script src="sns-flow.js?v=20260723c1"></script>
+<script src="sns-config.js?v=20260723c2"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.7/dist/umd/supabase.min.js"></script><script src="sns-auth.js?v=20260723c2"></script><script src="sns-flow.js?v=20260723c2"></script>
 </body>
 </html>

@@ -26,6 +26,7 @@ from flavor_identity import (
 )
 from math import ceil, floor
 import sqlite3
+from dataclasses import replace
 
 
 def _clean(value):
@@ -34,6 +35,29 @@ def _clean(value):
 
 def _key(value):
     return _clean(value).lower().replace("-", " ")
+
+
+def _adapt_sauce_ingredients(
+    sauce_name: str,
+    ingredients: list[SauceIngredient] | tuple[SauceIngredient, ...],
+    selected_components: list[str],
+) -> list[SauceIngredient]:
+    """Use a selected ingredient's useful properties before pantry shopping."""
+    if (
+        "stir fry" not in _key(sauce_name)
+        or "pineapple" not in {_key(item) for item in selected_components}
+    ):
+        return list(ingredients)
+    adapted = []
+    for ingredient in ingredients:
+        key = _key(ingredient.name)
+        if key == "sugar or preferred sweetener":
+            continue
+        if key == "water or broth":
+            adapted.append(replace(ingredient, quantity="6 tablespoons"))
+            continue
+        adapted.append(ingredient)
+    return adapted
 
 
 def _unique(items):
@@ -701,6 +725,9 @@ def generate_candidates(
                 else (_soup_ingredients(method_resources) if is_braise else [])
             )
         )
+        method_ingredients = _adapt_sauce_ingredients(
+            method_sauce, method_ingredients, selected_components
+        )
         fallback_requirements = (
             [] if method["cooking_method"] == "handheld"
             else _cuisine_requirements(cuisine) if not method_ingredients else []
@@ -912,6 +939,10 @@ def generate_candidates(
             "available_equipment": equipment,
             "component_methods": dict(component_methods or {}),
             "selected_side_components": selected_side_components,
+            "pineapple_juice_sauce": (
+                "stir fry" in _key(method_sauce)
+                and "pineapple" in {_key(item) for item in selected_components}
+            ),
         })
         component_plan = recognize_meal_components(c)
         c["component_plan"] = component_plan.to_dict()

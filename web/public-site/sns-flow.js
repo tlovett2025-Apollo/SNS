@@ -2041,6 +2041,7 @@ const SNS = (() => {
     const applyCatalogFilter = () => {
       const query = catalogDialog?.querySelector("[data-catalog-search]")?.value.trim().toLowerCase() || "";
       const filter = catalogDialog?.querySelector("[data-catalog-filter].active")?.dataset.catalogFilter || "all";
+      const scope = catalogDialog?.querySelector("[data-catalog-scope].active")?.dataset.catalogScope || "owned";
       const pantryFilter = catalogDialog?.querySelector("[data-pantry-group]")?.value || "all";
       const spiceCuisines = catalogDialog?.querySelector("[data-spice-cuisines]");
       const pantryGroups = catalogDialog?.querySelector("[data-pantry-groups]");
@@ -2049,10 +2050,10 @@ const SNS = (() => {
       let matches = 0;
       catalogHolder?.querySelectorAll("[data-catalog-item]").forEach(button => {
         const inFilter = filter === "all"
-          || (filter === "owned" && button.dataset.owned === "true")
           || button.dataset.catalogKind === filter
           || (filter === "pantry" && button.dataset.catalogKind === "foundation" && Boolean(button.dataset.pantryGroup));
-        const visible = inFilter
+        const inScope = scope === "all" || button.dataset.owned === "true";
+        const visible = inScope && inFilter
           && (filter !== "pantry" || pantryFilter === "all" || button.dataset.pantryGroup === pantryFilter)
           && (!query || button.dataset.searchName.includes(query));
         button.hidden = !visible;
@@ -2075,6 +2076,10 @@ const SNS = (() => {
     }
     catalogDialog?.querySelectorAll("[data-catalog-filter]").forEach(button => button.addEventListener("click", () => {
       catalogDialog.querySelectorAll("[data-catalog-filter]").forEach(item => item.classList.toggle("active", item === button));
+      applyCatalogFilter();
+    }));
+    catalogDialog?.querySelectorAll("[data-catalog-scope]").forEach(button => button.addEventListener("click", () => {
+      catalogDialog.querySelectorAll("[data-catalog-scope]").forEach(item => item.classList.toggle("active", item === button));
       applyCatalogFilter();
     }));
     syncPurchaseUI();

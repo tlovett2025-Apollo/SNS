@@ -191,6 +191,10 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     assert "data-catalog-filter=\"fruit\"" in builder_page
     assert "data-catalog-filter=\"canned\"" in builder_page
     assert "data-catalog-filter=\"spice\"" in builder_page
+    assert "data-catalog-scope=\"owned\"" in builder_page
+    assert "data-catalog-scope=\"all\"" in builder_page
+    assert 'scope === "all" || button.dataset.owned === "true"' in flow
+    assert 'data-catalog-filter="owned"' not in builder_page
     assert "options.meal_structures" in flow
     assert "options.methods" in flow
     assert "data-protein-search" not in builder_page
@@ -204,6 +208,14 @@ def test_build_your_meal_is_a_direct_shared_engine_path():
     assert 'label="Planning ahead"' in builder_page
     assert '<option value="240">4 hours</option>' in builder_page
     assert "body.detail || body.message" in flow
+
+
+def test_my_kitchen_keeps_whole_and_thin_sliced_chicken_distinct():
+    kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
+
+    assert 'data-food="Chicken breast" data-form="Fresh Raw"' in kitchen_page
+    assert 'data-food="Chicken breast" data-form="Thin-sliced Raw"' in kitchen_page
+    assert "Chicken breast slices" in kitchen_page
 
 
 def test_builder_uses_one_catalog_for_owned_and_purchase_ingredients():
@@ -335,5 +347,5 @@ def test_app_pages_cache_bust_shared_assets_as_one_release():
     ]
     for name in pages:
         page = (PUBLIC_FLOW.parent / name).read_text(encoding="utf-8")
-        assert "sns-flow.css?v=20260723c1" in page
-        assert "sns-flow.js?v=20260723c1" in page
+        assert "sns-flow.css?v=20260723c2" in page
+        assert "sns-flow.js?v=20260723c2" in page

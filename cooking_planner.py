@@ -254,7 +254,17 @@ def _resolved_sauce_prep(candidate: dict, sauce_profile) -> str:
     if not sauce_profile:
         return ""
     measurements = []
+    if candidate.get("pineapple_juice_sauce"):
+        measurements.append(
+            "Reserve 2 tablespoons juice from the pineapple for the sauce."
+        )
     for ingredient in sauce_profile.ingredients:
+        ingredient_key = _clean(ingredient.name).lower().replace("-", " ")
+        if (
+            candidate.get("pineapple_juice_sauce")
+            and ingredient_key == "sugar or preferred sweetener"
+        ):
+            continue
         requirement = _requirement(candidate, ingredient.name)
         if requirement and requirement.get("status") == "Omit":
             continue
@@ -264,6 +274,11 @@ def _resolved_sauce_prep(candidate: dict, sauce_profile) -> str:
             else requirement.get("name")
         ) if requirement else ingredient.name
         quantity = _clean(requirement.get("quantity")) if requirement else ingredient.quantity
+        if (
+            candidate.get("pineapple_juice_sauce")
+            and ingredient_key == "water or broth"
+        ):
+            quantity = "6 tablespoons"
         if "lime" in name.lower() and "lemon" in quantity.lower():
             quantity = re.sub(r"\blemons?\b", "lime", quantity, flags=re.IGNORECASE)
         elif "lemon" in name.lower() and "lime" in quantity.lower():
@@ -281,6 +296,15 @@ def _resolved_sauce_prep(candidate: dict, sauce_profile) -> str:
 
 def _resolved_sauce_finish(candidate: dict, sauce_profile) -> str:
     instruction = sauce_profile.cook_instruction if sauce_profile else ""
+    if candidate.get("pineapple_juice_sauce"):
+        instruction = (
+            "Whisk the reserved pineapple juice with the soy sauce, "
+            "6 tablespoons water or broth, and garlic. Add it to the hot pan "
+            "and bring it to a simmer. Stir the cornstarch slurry again, add "
+            "it gradually, and cook while stirring until the sauce is glossy "
+            "and coats a spoon. Fold in the pineapple for the final minute so "
+            "it warms without turning mushy. Taste before adding any extra sweetness."
+        )
     for ingredient in sauce_profile.ingredients if sauce_profile else []:
         requirement = _requirement(candidate, ingredient.name)
         if not requirement or requirement.get("status") != "Substitute":
@@ -593,11 +617,21 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
                     )
         activities.extend(published)
     for vegetable in vegetables:
-        activities.extend(
-            get_ingredient_profile(vegetable, "vegetable").publish_activities(
-                strategy, component_forms.get(vegetable.lower(), "")
-            )
+        published = get_ingredient_profile(vegetable, "vegetable").publish_activities(
+            strategy, component_forms.get(vegetable.lower(), "")
         )
+        if vegetable.lower() == "pineapple" and candidate.get("pineapple_juice_sauce"):
+            for activity in published:
+                if activity.activity_type in {"prep", "assemble"}:
+                    activity.minutes = 12
+                    activity.active_minutes = 12
+                    activity.instruction = (
+                        "Trim the top and bottom from the pineapple, stand it upright, "
+                        "slice away the peel and eyes, then quarter it and remove the "
+                        "tough core. Cut the amount needed into bite-size pieces. "
+                        "Collect or press out 2 tablespoons juice for the stir-fry sauce."
+                    )
+        activities.extend(published)
 
     selected_keys = {_clean(item).lower() for item in components}
     for lot in candidate.get("inventory_lots") or []:

@@ -92,6 +92,22 @@ class InventoryContractTests(unittest.TestCase):
                 strict=True,
             )
 
+    def test_thin_sliced_chicken_preserves_its_precise_inventory_form(self):
+        lot, profile = normalize_inventory_lot(
+            {
+                "name": "Chicken breast",
+                "form": "Thin-sliced Raw",
+                "quantity": 4,
+                "unit": "pieces",
+                "storage_location": "Fridge",
+            },
+            "Chicken breast",
+            db_path=DB_PATH,
+            strict=True,
+        )
+        self.assertEqual(lot["form"], "Thin-sliced Raw")
+        self.assertEqual(profile.default_form, "Thin-sliced Raw")
+
 
 if __name__ == "__main__":
     unittest.main()

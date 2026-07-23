@@ -9,6 +9,7 @@ from flavor_identity import (
     substitution_preserves_identity,
 )
 from recipe_engine import _sauce_for_cuisine, generate_candidates
+from cooking_planner import generate_human_instructions
 from sauce_profiles import get_sauce_profile
 
 
@@ -71,6 +72,33 @@ class FlavorIdentityTests(unittest.TestCase):
         self.assertEqual("mexican", flavor_identity("Tex-Mex").code)
         self.assertEqual("comfort_food", flavor_identity("American").code)
         self.assertEqual("mild_favorite", flavor_identity("Kid-Friendly").code)
+
+    def test_pineapple_juice_replaces_stir_fry_sugar_and_equal_liquid(self):
+        candidate = generate_candidates(
+            "Chicken breast", "Pineapple & Broccoli", "Jasmine rice",
+            "Chinese", "Medium", "Budget", 60, 4, 1,
+            vegetable_names=["Pineapple", "Broccoli"],
+            protein_state="Fresh Raw",
+            available_items=[
+                "Chicken breast", "Pineapple", "Broccoli", "Jasmine rice",
+                "Soy sauce", "Water", "Garlic", "Cornstarch",
+            ],
+            available_equipment=["Stovetop"],
+            requested_method="skillet",
+            component_forms={
+                "Pineapple": "Fresh", "Broccoli": "Fresh", "Jasmine rice": "Dry",
+            },
+        )[0]
+        requirements = {
+            item["name"]: item for item in candidate["inventory_requirements"]
+        }
+        plan = generate_human_instructions(candidate)
+
+        self.assertNotIn("Sugar or preferred sweetener", requirements)
+        self.assertEqual("6 tablespoons", requirements["Water or broth"]["quantity"])
+        self.assertIn("2 tablespoons juice", plan)
+        self.assertIn("Fold in the pineapple for the final minute", plan)
+        self.assertNotIn("Measure 1 teaspoon Sugar", plan)
 
 
 if __name__ == "__main__":
