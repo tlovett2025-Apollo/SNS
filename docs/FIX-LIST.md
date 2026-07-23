@@ -54,6 +54,15 @@ storage-location label in the food-type view.
 Priority: UX slice after the inventory form and Build My Meal scope contracts
 are stable.
 
+### [ ] Capture thickness and dimensions for whole cuts of meat
+
+Weight determines portions, but thickness and shape often determine cooking
+time. Add optional thickness and cut dimensions to inventory lots for roasts,
+steaks, chops, and other whole cuts. Dry oven roasting and grilling should use
+thickness as a primary timing input; covered braises should also consider
+whether the meat is whole or cut into smaller pieces. Persist these dimensions
+as structured inventory data rather than free-text recipe notes.
+
 ## Flavor Bank and plan-ahead cooking
 
 ### [ ] Preserve useful extras and deliberately prepare future components

@@ -41,11 +41,12 @@ def _adapt_sauce_ingredients(
     sauce_name: str,
     ingredients: list[SauceIngredient] | tuple[SauceIngredient, ...],
     selected_components: list[str],
+    component_forms: dict | None = None,
 ) -> list[SauceIngredient]:
     """Use a selected ingredient's useful properties before pantry shopping."""
     if (
         "stir fry" not in _key(sauce_name)
-        or "pineapple" not in {_key(item) for item in selected_components}
+        or not _pineapple_supplies_juice(selected_components, component_forms)
     ):
         return list(ingredients)
     adapted = []
@@ -58,6 +59,18 @@ def _adapt_sauce_ingredients(
             continue
         adapted.append(ingredient)
     return adapted
+
+
+def _pineapple_supplies_juice(
+    selected_components: list[str], component_forms: dict | None = None
+) -> bool:
+    if "pineapple" not in {_key(item) for item in selected_components}:
+        return False
+    forms = {
+        _key(name): _key(form)
+        for name, form in (component_forms or {}).items()
+    }
+    return forms.get("pineapple", "fresh") not in {"dry", "dried"}
 
 
 def _unique(items):
@@ -726,7 +739,7 @@ def generate_candidates(
             )
         )
         method_ingredients = _adapt_sauce_ingredients(
-            method_sauce, method_ingredients, selected_components
+            method_sauce, method_ingredients, selected_components, component_forms
         )
         fallback_requirements = (
             [] if method["cooking_method"] == "handheld"
@@ -791,6 +804,8 @@ def generate_candidates(
         }
         selected_identities.discard(None)
         for check in requirement_checks:
+            if _key(check.get("name")) in {_key(item) for item in selected_components}:
+                continue
             requirement_identity = resolve_behavior(
                 check.get("name"), "ingredient", db_path=DB_PATH
             ).attributes.get("flavor_identity")
@@ -941,7 +956,7 @@ def generate_candidates(
             "selected_side_components": selected_side_components,
             "pineapple_juice_sauce": (
                 "stir fry" in _key(method_sauce)
-                and "pineapple" in {_key(item) for item in selected_components}
+                and _pineapple_supplies_juice(selected_components, component_forms)
             ),
         })
         component_plan = recognize_meal_components(c)

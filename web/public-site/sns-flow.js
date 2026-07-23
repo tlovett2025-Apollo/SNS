@@ -55,6 +55,8 @@ const SNS = (() => {
     "breakfast sausage": { unit: "lb", step: 0.25 },
     "bacon": { unit: "package", step: 1 }
   };
+  const formQuantityProfiles = {};
+  const formUnitRules = {};
   const unitRules = {
     "canned chicken": ["can"], "white beans": ["can"], "cream of chicken soup": ["can"],
     "lasagna noodles": ["piece", "box", "package"], "spaghetti": ["box", "package", "lb"],
@@ -199,8 +201,14 @@ const SNS = (() => {
     catch { return {}; }
   }
 
-  function quantityProfile(name) {
-    return quantityProfiles[String(name || "").toLowerCase()] || { unit: "item", step: 1 };
+  function inventoryFormKey(name, form = "") {
+    return `${String(name || "").trim().toLowerCase()}::${normalizedFoodName(form)}`;
+  }
+
+  function quantityProfile(name, form = "") {
+    return formQuantityProfiles[inventoryFormKey(name, form)]
+      || quantityProfiles[String(name || "").toLowerCase()]
+      || { unit: "item", step: 1 };
   }
 
   function installInventoryContracts(contracts) {
@@ -219,6 +227,27 @@ const SNS = (() => {
         step: Number(contract.quantity_step) || quantityStepForUnit(unit)
       };
       unitRules[key] = allowed;
+      if (contract.default_form) {
+        formQuantityProfiles[inventoryFormKey(contract.name, contract.default_form)] = {
+          unit,
+          step: Number(contract.quantity_step) || quantityStepForUnit(unit)
+        };
+        formUnitRules[inventoryFormKey(contract.name, contract.default_form)] = allowed;
+      }
+      (contract.form_profiles || []).forEach(profile => {
+        const profileAllowed = Array.isArray(profile.allowed_units)
+          ? profile.allowed_units.filter(Boolean)
+          : [];
+        if (!profile.default_form || !profileAllowed.length) return;
+        const profileUnit = profileAllowed.includes(profile.default_unit)
+          ? profile.default_unit
+          : profileAllowed[0];
+        formQuantityProfiles[inventoryFormKey(profile.name, profile.default_form)] = {
+          unit: profileUnit,
+          step: Number(profile.quantity_step) || quantityStepForUnit(profileUnit)
+        };
+        formUnitRules[inventoryFormKey(profile.name, profile.default_form)] = profileAllowed;
+      });
     });
   }
 
@@ -232,17 +261,19 @@ const SNS = (() => {
     return 0;
   }
 
-  function allowedUnits(name) {
+  function allowedUnits(name, form = "") {
     const key = String(name || "").trim().toLowerCase();
+    const formRules = formUnitRules[inventoryFormKey(name, form)];
+    if (formRules) return formRules;
     if (unitRules[key]) return unitRules[key];
     if (key.startsWith("canned ")) return ["can"];
     if (/powder|seasoning|spice|salt|pepper|granule/.test(key)) return ["jar", "bottle", "package"];
-    return [quantityProfile(name).unit, "package"].filter((value, index, list) => list.indexOf(value) === index);
+    return [quantityProfile(name, form).unit, "package"].filter((value, index, list) => list.indexOf(value) === index);
   }
 
-  function unitOptions(selected, name) {
+  function unitOptions(selected, name, form = "") {
     const allowed = [...new Set([
-      ...allowedUnits(name),
+      ...allowedUnits(name, form),
       ...(inventoryUnits.some(([value]) => value === selected) ? [selected] : [])
     ])];
     const safeSelected = allowed.includes(selected) ? selected : allowed[0];
@@ -295,7 +326,7 @@ const SNS = (() => {
         storage: row.dataset.storage,
         form: row.dataset.form || "On hand",
         quantity,
-        unit: row.querySelector("[data-unit]")?.value || quantityProfile(row.dataset.food).unit,
+        unit: row.querySelector("[data-unit]")?.value || quantityProfile(row.dataset.food, row.dataset.form).unit,
         opened_at: row.querySelector("[data-opened-at]")?.value || null,
         refrigerated_after_opening: row.querySelector("[data-refrigerated-after-opening]")?.checked ?? null,
         package_weight_oz: Number(row.querySelector("[data-package-weight]")?.value || 0) || null,
@@ -523,7 +554,7 @@ const SNS = (() => {
         storage: row.dataset.storage,
         form: row.dataset.form || "On hand",
         quantity: Number(row.querySelector("[data-quantity]")?.value || 0),
-        unit: row.querySelector("[data-unit]")?.value || quantityProfile(row.dataset.food).unit,
+        unit: row.querySelector("[data-unit]")?.value || quantityProfile(row.dataset.food, row.dataset.form).unit,
         opened_at: row.querySelector("[data-opened-at]")?.value || null,
         refrigerated_after_opening: row.querySelector("[data-refrigerated-after-opening]")?.checked ?? null,
         package_weight_oz: Number(row.querySelector("[data-package-weight]")?.value || 0) || null,
@@ -572,8 +603,8 @@ const SNS = (() => {
     localStorage.setItem(mealHistoryKey, JSON.stringify(history.slice(0, 8)));
   }
 
-  function quantityEditor(name, quantity = 1, unit = "", openedAt = "", refrigerated = false, packageWeightOz = "", expirationDate = "") {
-    const profile = quantityProfile(name);
+  function quantityEditor(name, quantity = 1, unit = "", openedAt = "", refrigerated = false, packageWeightOz = "", expirationDate = "", form = "") {
+    const profile = quantityProfile(name, form);
     const selectedUnit = unit || profile.unit;
     return `
       <label class="quantity-value">
@@ -582,7 +613,7 @@ const SNS = (() => {
       </label>
       <label class="quantity-unit">
         <span class="sr-only">${escapeHtml(name)} unit</span>
-        <select data-unit>${unitOptions(selectedUnit, name)}</select>
+        <select data-unit>${unitOptions(selectedUnit, name, form)}</select>
       </label>
       <details class="inventory-detail" data-inventory-detail>
         <summary>More details</summary>
@@ -605,7 +636,7 @@ const SNS = (() => {
     const startingQuantity = quantity ?? legacyQuantity(level);
     row.innerHTML = `
       <div><div class="food-name">${escapeHtml(name)}</div><div class="food-note">${escapeHtml(row.dataset.form)}</div></div>
-      <div class="amount quantity-editor" aria-label="${escapeHtml(name)} quantity">${quantityEditor(name, startingQuantity, unit, opened_at, refrigerated_after_opening, package_weight_oz, expiration_date)}</div>`;
+      <div class="amount quantity-editor" aria-label="${escapeHtml(name)} quantity">${quantityEditor(name, startingQuantity, unit, opened_at, refrigerated_after_opening, package_weight_oz, expiration_date, row.dataset.form)}</div>`;
     return row;
   }
 
@@ -696,10 +727,11 @@ const SNS = (() => {
     document.querySelectorAll("[data-section]").forEach(organizeInventorySection);
   }
 
-  function findFoodRow(name, storage) {
+  function findFoodRow(name, storage, form = "") {
     return [...document.querySelectorAll("[data-food]")].find(row =>
       row.dataset.food.toLowerCase() === name.toLowerCase()
       && row.dataset.storage === storage
+      && (!form || normalizedFoodName(row.dataset.form) === normalizedFoodName(form))
     );
   }
 
@@ -727,7 +759,7 @@ const SNS = (() => {
     }
     items.forEach(item => {
       const storage = normalizeStorageLocation(item.storage_location, item.form);
-      let row = findFoodRow(item.name, storage);
+      let row = findFoodRow(item.name, storage, item.form);
       if (!row) {
         row = createFoodRow({
           name: item.name, storage, form: item.form, quantity: item.quantity,
@@ -1131,10 +1163,10 @@ const SNS = (() => {
       const holder = row.querySelector(".amount");
       if (!holder || holder.querySelector("[data-quantity]")) return;
       const level = holder.querySelector("button.active")?.dataset.level || "none";
-      const profile = quantityProfile(row.dataset.food);
+      const profile = quantityProfile(row.dataset.food, row.dataset.form);
       holder.classList.add("quantity-editor");
       holder.setAttribute("aria-label", `${row.dataset.food} quantity`);
-      holder.innerHTML = quantityEditor(row.dataset.food, legacyQuantity(level), profile.unit);
+      holder.innerHTML = quantityEditor(row.dataset.food, legacyQuantity(level), profile.unit, "", false, "", "", row.dataset.form);
     });
   }
 
@@ -1148,7 +1180,7 @@ const SNS = (() => {
 
     (state.foods || []).forEach(originalFood => {
       const food = { ...originalFood, name: canonicalFoodName(originalFood.name) };
-      let row = findFoodRow(food.name, food.storage);
+      let row = findFoodRow(food.name, food.storage, food.form);
       if (!row && food.custom) {
         const list = document.querySelector(`[data-section="${food.storage}"] .item-list`);
         row = createFoodRow(food);
@@ -1156,7 +1188,7 @@ const SNS = (() => {
       }
       if (row) {
         const quantity = food.quantity ?? legacyQuantity(food.level);
-        setRowQuantity(row, quantity, food.unit || quantityProfile(food.name).unit, food);
+        setRowQuantity(row, quantity, food.unit || quantityProfile(food.name, food.form).unit, food);
       }
     });
 
@@ -1354,8 +1386,8 @@ const SNS = (() => {
     let addSection = "";
 
     function updateDialogUnit() {
-      const profile = quantityProfile(addName.value);
-      addUnit.innerHTML = unitOptions(profile.unit, addName.value);
+      const profile = quantityProfile(addName.value, addForm.value);
+      addUnit.innerHTML = unitOptions(profile.unit, addName.value, addForm.value);
       addQuantity.step = quantityStepForUnit(profile.unit);
       const garlic = addName.value.trim().toLowerCase() === "garlic";
       const note = document.querySelector("[data-dialog-form-note]");
@@ -1389,6 +1421,7 @@ const SNS = (() => {
     }
 
     addName?.addEventListener("input", () => { updateDialogUnit(); showNameSuggestions(); });
+    addForm?.addEventListener("input", updateDialogUnit);
     suggestions?.addEventListener("click", event => {
       const button = event.target.closest("[data-canonical-name]");
       if (!button) return;
@@ -1447,7 +1480,7 @@ const SNS = (() => {
           button.setAttribute("aria-pressed", "true");
         }
       } else {
-        let row = findFoodRow(name, addSection);
+        let row = findFoodRow(name, addSection, addForm.value.trim());
         if (!row) {
           row = createFoodRow({
             name, storage: addSection, form: addForm.value.trim(),

@@ -108,6 +108,21 @@ class InventoryContractTests(unittest.TestCase):
         self.assertEqual(lot["form"], "Thin-sliced Raw")
         self.assertEqual(profile.default_form, "Thin-sliced Raw")
 
+    def test_ground_beef_defaults_to_weight_not_ambiguous_packages(self):
+        profile = inventory_profile("Ground beef", "Fresh Raw", db_path=DB_PATH)
+
+        self.assertEqual(profile.default_unit, "lb")
+        self.assertEqual(profile.allowed_units, ("lb", "oz", "package"))
+
+    def test_pineapple_has_distinct_canned_and_dried_pantry_contracts(self):
+        canned = inventory_profile("Pineapple", "Canned", db_path=DB_PATH)
+        dried = inventory_profile("Pineapple", "Dried", db_path=DB_PATH)
+
+        self.assertEqual(canned.default_storage, "Pantry")
+        self.assertEqual(canned.default_unit, "can")
+        self.assertEqual(dried.default_storage, "Pantry")
+        self.assertEqual(dried.default_unit, "bag")
+
 
 if __name__ == "__main__":
     unittest.main()

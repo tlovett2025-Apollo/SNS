@@ -100,6 +100,55 @@ class FlavorIdentityTests(unittest.TestCase):
         self.assertIn("Fold in the pineapple for the final minute", plan)
         self.assertNotIn("Measure 1 teaspoon Sugar", plan)
 
+    def test_selected_fresh_garlic_fulfills_the_sauce_instead_of_killing_the_meal(self):
+        candidates = generate_candidates(
+            "Chicken breast", "Pineapple & Broccoli & Garlic & Onions",
+            "White rice", "Chinese", "Medium", "Budget", 90, 4, 1,
+            vegetable_names=["Pineapple", "Broccoli", "Garlic", "Onions"],
+            protein_state="Fresh Raw",
+            available_items=[
+                "Chicken breast", "Pineapple", "Broccoli", "Garlic", "Onions",
+                "White rice", "Vegetable oil", "Soy sauce", "Water", "Cornstarch",
+            ],
+            available_equipment=["Stovetop", "Electric pressure cooker"],
+            requested_method="skillet",
+            selected_extras=["Vegetable oil"],
+            component_forms={
+                "Pineapple": "Fresh", "Broccoli": "Fresh", "Garlic": "Fresh",
+                "Onions": "Fresh", "White rice": "Dry",
+            },
+        )
+
+        self.assertEqual(len(candidates), 1)
+        garlic_checks = [
+            item for item in candidates[0]["inventory_requirements"]
+            if item["name"] == "Garlic"
+        ]
+        self.assertTrue(garlic_checks)
+        self.assertNotIn("Omit", {item["status"] for item in garlic_checks})
+
+    def test_canned_pineapple_uses_its_juice_without_whole_fruit_prep(self):
+        candidate = generate_candidates(
+            "Chicken breast", "Pineapple & Broccoli", "White rice",
+            "Chinese", "Medium", "Budget", 60, 4, 1,
+            vegetable_names=["Pineapple", "Broccoli"],
+            protein_state="Fresh Raw",
+            available_items=[
+                "Chicken breast", "Pineapple", "Broccoli", "White rice",
+                "Soy sauce", "Water", "Garlic", "Cornstarch",
+            ],
+            available_equipment=["Stovetop"],
+            requested_method="skillet",
+            component_forms={
+                "Pineapple": "Canned", "Broccoli": "Fresh", "White rice": "Dry",
+            },
+        )[0]
+        plan = generate_human_instructions(candidate)
+
+        self.assertIn("Drain the canned pineapple", plan)
+        self.assertIn("reserving 2 tablespoons", plan)
+        self.assertNotIn("Trim the top and bottom from the pineapple", plan)
+
 
 if __name__ == "__main__":
     unittest.main()

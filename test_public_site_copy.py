@@ -218,6 +218,16 @@ def test_my_kitchen_keeps_whole_and_thin_sliced_chicken_distinct():
     assert "Chicken breast slices" in kitchen_page
 
 
+def test_my_kitchen_keeps_canned_and_dried_pineapple_as_distinct_lots():
+    kitchen_page = (PUBLIC_FLOW.parent / "my-kitchen.html").read_text(encoding="utf-8")
+    flow = PUBLIC_FLOW.read_text(encoding="utf-8")
+
+    assert 'data-food="Pineapple" data-form="Canned"' in kitchen_page
+    assert 'data-food="Pineapple" data-form="Dried"' in kitchen_page
+    assert "findFoodRow(name, storage, form" in flow
+    assert "formQuantityProfiles" in flow
+
+
 def test_builder_uses_one_catalog_for_owned_and_purchase_ingredients():
     flow = PUBLIC_FLOW.read_text(encoding="utf-8")
     builder_page = (PUBLIC_FLOW.parent / "build-your-meal.html").read_text(encoding="utf-8")
@@ -347,5 +357,5 @@ def test_app_pages_cache_bust_shared_assets_as_one_release():
     ]
     for name in pages:
         page = (PUBLIC_FLOW.parent / name).read_text(encoding="utf-8")
-        assert "sns-flow.css?v=20260723c2" in page
-        assert "sns-flow.js?v=20260723c2" in page
+        assert "sns-flow.css?v=20260723c3" in page
+        assert "sns-flow.js?v=20260723c3" in page

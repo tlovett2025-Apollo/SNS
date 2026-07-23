@@ -61,6 +61,9 @@ FORM_METHOD_EQUIVALENTS = {
 }
 
 FAMILY_UNIT_RULES = {
+    "ground_meat": ("lb", "oz", "package"),
+    "tough_meat": ("lb", "oz", "package"),
+    "stew_cut": ("lb", "oz", "package"),
     "egg": ("egg", "dozen", "carton"),
     "ready_protein": ("can", "package", "cup", "oz"),
     "prepared_legume": ("can", "jar", "cup", "package"),
@@ -121,7 +124,7 @@ def _storage_for_form(form: str, default_storage: str = "") -> str:
     key = _key(form)
     if "frozen" in key:
         return "Freezer"
-    if key in {"canned", "dry", "shelf stable"}:
+    if key in {"canned", "dry", "dried", "shelf stable"}:
         return "Pantry"
     if key in {"refrigerated", "cooked", "ready to eat"}:
         return "Fridge"
@@ -208,7 +211,12 @@ def _canonical_inventory_form(selected_form: str, forms: tuple[str, ...], family
 
 
 def _units_for(family_code: str, role: str, form: str, category: str) -> tuple[str, ...]:
-    if family_code in FAMILY_UNIT_RULES:
+    form_key = _key(form)
+    if family_code == "raw_fruit" and form_key == "canned":
+        units = ["can", "jar", "cup", "package"]
+    elif family_code == "raw_fruit" and form_key in {"dry", "dried", "shelf stable"}:
+        units = ["bag", "package", "cup", "oz"]
+    elif family_code in FAMILY_UNIT_RULES:
         units = list(FAMILY_UNIT_RULES[family_code])
     elif role == "protein":
         units = ["piece", "lb", "oz", "package"]
@@ -220,7 +228,7 @@ def _units_for(family_code: str, role: str, form: str, category: str) -> tuple[s
         units = ["jar", "bottle", "package", "oz"]
     else:
         units = ["package", "jar", "bottle", "box", "bag", "lb", "oz", "cup"]
-    if _key(form) == "canned":
+    if form_key == "canned":
         units.insert(0, "can")
     return tuple(dict.fromkeys(unit for unit in units if unit in KNOWN_UNITS))
 
@@ -386,10 +394,31 @@ def _inventory_catalog(path: str, _mtime_ns: int) -> tuple[dict, ...]:
         names = [row[0] for row in con.execute(
             "SELECT name FROM ingredients WHERE active=1 ORDER BY display_order,name"
         )]
+        forms_by_name = {
+            name: [row[0] for row in con.execute(
+                """SELECT f.form_name
+                     FROM ingredient_forms f
+                     JOIN ingredients i USING(ingredient_id)
+                    WHERE lower(i.name)=lower(?)
+                    ORDER BY f.form_id""",
+                (name,),
+            )]
+            for name in names
+        }
     profiles = []
     for name in names:
         try:
-            profiles.append(inventory_profile(name, db_path=path).as_dict())
+            profile = inventory_profile(name, db_path=path).as_dict()
+            form_profiles = []
+            for form in forms_by_name[name]:
+                try:
+                    form_profiles.append(
+                        inventory_profile(name, form, db_path=path).as_dict()
+                    )
+                except InventoryContractError:
+                    continue
+            profile["form_profiles"] = form_profiles
+            profiles.append(profile)
         except InventoryContractError:
             # Untrained identities stay out of the editable inventory catalog.
             continue

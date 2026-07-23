@@ -621,16 +621,26 @@ def build_cooking_activities(candidate: dict) -> List[KitchenActivity]:
             strategy, component_forms.get(vegetable.lower(), "")
         )
         if vegetable.lower() == "pineapple" and candidate.get("pineapple_juice_sauce"):
+            pineapple_form = _clean(component_forms.get("pineapple", "")).lower()
             for activity in published:
                 if activity.activity_type in {"prep", "assemble"}:
-                    activity.minutes = 12
-                    activity.active_minutes = 12
-                    activity.instruction = (
-                        "Trim the top and bottom from the pineapple, stand it upright, "
-                        "slice away the peel and eyes, then quarter it and remove the "
-                        "tough core. Cut the amount needed into bite-size pieces. "
-                        "Collect or press out 2 tablespoons juice for the stir-fry sauce."
-                    )
+                    if "canned" in pineapple_form:
+                        activity.minutes = 2
+                        activity.active_minutes = 2
+                        activity.instruction = (
+                            "Drain the canned pineapple, reserving 2 tablespoons "
+                            "of its juice for the stir-fry sauce. Cut large pieces "
+                            "into bite-size chunks if needed."
+                        )
+                    else:
+                        activity.minutes = 12
+                        activity.active_minutes = 12
+                        activity.instruction = (
+                            "Trim the top and bottom from the pineapple, stand it upright, "
+                            "slice away the peel and eyes, then quarter it and remove the "
+                            "tough core. Cut the amount needed into bite-size pieces. "
+                            "Collect or press out 2 tablespoons juice for the stir-fry sauce."
+                        )
         activities.extend(published)
 
     selected_keys = {_clean(item).lower() for item in components}
